@@ -1,0 +1,106 @@
+materials:
+- name: bunny_white
+  albedo: [ 0.95, 0.93, 0.88 ]
+  roughness: 0.4
+  metallic: 0.0
+
+- name: bunny_accent
+  albedo: [ 0.8, 0.6, 0.9 ]
+  roughness: 0.3
+  metallic: 0.1
+
+- name: ground
+  albedo: [ 0.3, 0.3, 0.35 ]
+  roughness: 0.9
+  metallic: 0.0
+
+- name: environment
+  albedo: [ 0.2, 0.2, 0.25 ]
+  roughness: 0.95
+  metallic: 0.0
+  emission_color: [ 0.15, 0.15, 0.18 ]
+  emission_power: 0.3
+
+entities:
+- name: scene_root
+  type: empty
+  transform:
+    position: [ 0, 0, 0 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  children:
+  # Ground plane
+  - name: ground_plane
+    type: mesh
+    mesh_path: ../resources/obj/ground.obj
+    material: 2
+    transform:
+      position: [ 0, -1.5, 0 ]
+      rotation: [ 0, 0, 0, 1 ]
+      scale: [ 10, 0.5, 10 ]
+
+  # Main bunny model - centered and scaled nicely
+  - name: bunny_main
+    type: mesh
+    mesh_path: ../resources/obj/bunny.obj
+    material: 0
+    transform:
+      position: [ 0, 0, 0 ]
+      rotation: [ 0, 0, 0, 1 ]
+      scale: [ 2.5, 2.5, 2.5 ]
+
+  # Lighting setup
+  - name: lighting_rig
+    type: empty
+    transform:
+      position: [ 0, 0, 0 ]
+      rotation: [ 0, 0, 0, 1 ]
+      scale: [ 1, 1, 1 ]
+    children:
+    # Key light - strong directional light from upper left
+    - name: key_light
+      type: light
+      light_color: [ 1.0, 0.98, 0.95 ]
+      light_intensity: 1.8
+      light_type: 0
+      light_radius: 50.0
+      transform:
+        position: [ 5, 8, 5 ]
+        rotation: [ -0.3827, 0, 0, 0.9239 ]
+        scale: [ 1, 1, 1 ]
+
+    # Fill light - softer light from the right
+    - name: fill_light
+      type: light
+      transform:
+        position: [ -4, 5, -3 ]
+        rotation: [ 0, 0, 0, 1 ]
+        scale: [ 1, 1, 1 ]
+      light_color: [ 0.7, 0.75, 0.85 ]
+      light_intensity: 1.2
+      light_type: 1
+      light_radius: 30.0
+
+    # Rim light - accent light from behind
+    - name: rim_light
+      type: light
+      transform:
+        position: [ 3, 3, -6 ]
+        rotation: [ 0, 0, 0, 1 ]
+        scale: [ 1, 1, 1 ]
+      light_color: [ 0.8, 0.6, 1.0 ]
+      light_intensity: 0.9
+      light_type: 1
+      light_radius: 25.0
+
+    # Ambient fill from above
+    - name: ambient_light
+      type: light
+      transform:
+        position: [ 0, 10, 0 ]
+        rotation: [ 0, 0, 0, 1 ]
+        scale: [ 1, 1, 1 ]
+      light_color: [ 0.8, 0.8, 0.9 ]
+      light_intensity: 0.6
+      light_type: 1
+      light_radius: 40.0

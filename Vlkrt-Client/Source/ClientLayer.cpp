@@ -8,6 +8,8 @@
 #include "Walnut/Serialization/BufferStream.h"
 #include "ServerPacket.h"
 
+#include "SceneLoader.h"
+
 #include <glm/gtc/type_ptr.hpp>
 
 #include <GLFW/glfw3.h>
@@ -29,58 +31,8 @@ namespace Vlkrt
 
         m_Client.SetDataReceivedCallback([this](const Walnut::Buffer& buffer) { OnDataReceived(buffer); });
 
-        // Setup raytracing scene materials
-        // Material for current player (green)
-        Material& playerMat = m_Scene.Materials.emplace_back();
-        playerMat.Albedo    = { 0.2f, 1.0f, 0.2f };
-        playerMat.Roughness = 0.3f;
-
-        // Material for other players (red)
-        Material& otherPlayerMat = m_Scene.Materials.emplace_back();
-        otherPlayerMat.Albedo    = { 1.0f, 0.2f, 0.2f };
-        otherPlayerMat.Roughness = 0.3f;
-
-        // Material for ground
-        Material& groundMat = m_Scene.Materials.emplace_back();
-        groundMat.Albedo    = { 0.3f, 0.3f, 0.4f };
-        groundMat.Roughness = 0.8f;
-
-        // Material for bunny (white)
-        Material& bunnyMat = m_Scene.Materials.emplace_back();
-        bunnyMat.Albedo    = { 1.0f, 1.0f, 1.0f };
-        bunnyMat.Roughness = 0.5f;
-
-        // Add ground plane as a large quad
-        Mesh groundPlane          = MeshLoader::GenerateQuad(20.0f);
-        groundPlane.MaterialIndex = 2;  // ground material
-        groundPlane.Transform     = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.0f));
-        m_Scene.StaticMeshes.push_back(groundPlane);
-
-        // Load bunny OBJ as a static object
-        Mesh bunnyMesh          = MeshLoader::LoadOBJ("../resources/obj/bunny.obj");
-        bunnyMesh.MaterialIndex = 3;  // bunny material (white)
-        // Scale and position the bunny - bunny is very small so needs large scaling
-        bunnyMesh.Transform = glm::translate(glm::mat4(1.0f), glm::vec3(3.0f, 0.0f, 0.0f))
-                              * glm::scale(glm::mat4(1.0f), glm::vec3(5.0f));
-        m_Scene.StaticMeshes.push_back(bunnyMesh);
-
-        // Setup lights
-        // Directional light
-        Light dirLight;
-        dirLight.Type      = 0.0f;  // Directional
-        dirLight.Direction = glm::normalize(glm::vec3(1.0f, -1.0f, 1.0f));
-        dirLight.Color     = glm::vec3(1.0f, 1.0f, 0.95f);  // Slight warming
-        dirLight.Intensity = 0.8f;
-        m_Scene.Lights.push_back(dirLight);
-
-        // Point light
-        Light pointLight;
-        pointLight.Type      = 1.0f;  // Point
-        pointLight.Position  = glm::vec3(5.0f, 5.0f, 5.0f);
-        pointLight.Color     = glm::vec3(0.5f, 0.7f, 1.0f);  // Cool blue
-        pointLight.Intensity = 1.0f;
-        pointLight.Radius    = 20.0f;
-        m_Scene.Lights.push_back(pointLight);
+        // Load default scene from YAML file
+        LoadScene("default");
     }
 
     void ClientLayer::OnDetach()
@@ -185,6 +137,29 @@ namespace Vlkrt
                         ImVec2(1, 0));
             }
 
+            // Scene selector panel
+            ImGui::Begin("Scene");
+            ImGui::Text("Current Scene: %s", m_CurrentScene.c_str());
+
+            if (ImGui::BeginCombo("##SceneSelector", m_SelectedScene.c_str())) {
+                if (ImGui::Selectable("default", m_SelectedScene == "default")) {
+                    m_SelectedScene = "default";
+                    LoadScene("default");
+                }
+                if (ImGui::Selectable("bunny", m_SelectedScene == "bunny")) {
+                    m_SelectedScene = "bunny";
+                    LoadScene("bunny");
+                }
+                ImGui::EndCombo();
+            }
+
+            ImGui::Separator();
+            if (ImGui::Button("Save Scene", ImVec2(-1, 0))) {
+                SaveScene();
+            }
+
+            ImGui::End();
+
             // Stats panel overlay
             ImGui::Begin("Stats");
             ImGui::Text("Last render: %.3fms", m_LastRenderTime);
@@ -194,26 +169,44 @@ namespace Vlkrt
 
             // Lighting controls panel
             ImGui::Begin("Lighting");
-            ImGui::Text("Directional Light");
+            ImGui::Text("Scene Lights: %zu", m_Scene.Lights.size());
             ImGui::Separator();
-            ImGui::SliderFloat("Dir Intensity##dir", &m_Scene.Lights[0].Intensity, 0.0f, 2.0f);
-            ImGui::ColorEdit3("Dir Color##dir", &m_Scene.Lights[0].Color[0]);
-            ImGui::SliderFloat("Dir X##x", &m_Scene.Lights[0].Direction.x, -1.0f, 1.0f);
-            ImGui::SliderFloat("Dir Y##y", &m_Scene.Lights[0].Direction.y, -1.0f, 1.0f);
-            ImGui::SliderFloat("Dir Z##z", &m_Scene.Lights[0].Direction.z, -1.0f, 1.0f);
-            // Normalize direction
-            if (glm::length(m_Scene.Lights[0].Direction) > 0.0f) {
-                m_Scene.Lights[0].Direction = glm::normalize(m_Scene.Lights[0].Direction);
+
+            for (size_t i = 0; i < m_Scene.Lights.size(); ++i) {
+                auto&       light = m_Scene.Lights[i];
+                std::string label = (light.Type > 0.5f) ? "Point Light " : "Directional Light ";
+                label += std::to_string(i);
+
+                if (ImGui::TreeNodeEx(label.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
+                    if (light.Type < 0.5f) {
+                        // Directional light
+                        ImGui::SliderFloat(
+                                ("Intensity##dir" + std::to_string(i)).c_str(), &light.Intensity, 0.0f, 2.0f);
+                        ImGui::ColorEdit3(("Color##dir" + std::to_string(i)).c_str(), &light.Color[0]);
+                        ImGui::SliderFloat(("Dir X##x" + std::to_string(i)).c_str(), &light.Direction.x, -1.0f, 1.0f);
+                        ImGui::SliderFloat(("Dir Y##y" + std::to_string(i)).c_str(), &light.Direction.y, -1.0f, 1.0f);
+                        ImGui::SliderFloat(("Dir Z##z" + std::to_string(i)).c_str(), &light.Direction.z, -1.0f, 1.0f);
+                        if (glm::length(light.Direction) > 0.0f) {
+                            light.Direction = glm::normalize(light.Direction);
+                        }
+                    }
+                    else {
+                        // Point light
+                        ImGui::SliderFloat(
+                                ("Intensity##point" + std::to_string(i)).c_str(), &light.Intensity, 0.0f, 2.0f);
+                        ImGui::ColorEdit3(("Color##point" + std::to_string(i)).c_str(), &light.Color[0]);
+                        ImGui::SliderFloat(("Pos X##px" + std::to_string(i)).c_str(), &light.Position.x, -10.0f, 10.0f);
+                        ImGui::SliderFloat(("Pos Y##py" + std::to_string(i)).c_str(), &light.Position.y, 0.0f, 15.0f);
+                        ImGui::SliderFloat(("Pos Z##pz" + std::to_string(i)).c_str(), &light.Position.z, -10.0f, 10.0f);
+                        ImGui::SliderFloat(("Radius##radius" + std::to_string(i)).c_str(), &light.Radius, 1.0f, 50.0f);
+                    }
+                    ImGui::TreePop();
+                }
             }
 
-            ImGui::Text("Point Light");
-            ImGui::Separator();
-            ImGui::SliderFloat("Point Intensity##point", &m_Scene.Lights[1].Intensity, 0.0f, 2.0f);
-            ImGui::ColorEdit3("Point Color##point", &m_Scene.Lights[1].Color[0]);
-            ImGui::SliderFloat("Point X##px", &m_Scene.Lights[1].Position.x, -10.0f, 10.0f);
-            ImGui::SliderFloat("Point Y##py", &m_Scene.Lights[1].Position.y, 0.0f, 15.0f);
-            ImGui::SliderFloat("Point Z##pz", &m_Scene.Lights[1].Position.z, -10.0f, 10.0f);
-            ImGui::SliderFloat("Point Radius##radius", &m_Scene.Lights[1].Radius, 1.0f, 50.0f);
+            if (m_Scene.Lights.empty()) {
+                ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "No lights loaded!");
+            }
             ImGui::End();
         }
         else {
@@ -270,6 +263,14 @@ namespace Vlkrt
         m_PlayerDataMutex.unlock();
     }
 
+    void ClientLayer::LoadScene(const std::string& sceneName)
+    {
+        std::string scenePath = "../scenes/" + sceneName + ".yaml";
+        m_Scene               = SceneLoader::LoadFromYAML(scenePath);
+        m_CurrentScene        = sceneName;
+        m_SelectedScene       = sceneName;
+    }
+
     void ClientLayer::OnDataReceived(const Walnut::Buffer& data)
     {
         Walnut::BufferStreamReader stream(data);
@@ -292,5 +293,12 @@ namespace Vlkrt
                 WL_WARN_TAG("Client", "Received unknown packet type: {}", (int) type);
                 break;
         }
+    }
+
+    void ClientLayer::SaveScene()
+    {
+        std::string scenePath = "../scenes/" + m_CurrentScene + ".yaml";
+        SceneLoader::SaveToYAML(scenePath, m_Scene);
+        WL_INFO_TAG("Client", "Scene saved to: {}", scenePath);
     }
 };  // namespace Vlkrt

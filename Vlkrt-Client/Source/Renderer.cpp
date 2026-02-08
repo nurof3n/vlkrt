@@ -608,14 +608,18 @@ namespace Vlkrt
 
         // Upload vertex data to GPU
         void* data;
-        vkMapMemory(m_Device, m_VertexMemory, 0, m_VertexBufferSize, 0, &data);
-        memcpy(data, gpuVertices.data(), m_VertexBufferSize);
-        vkUnmapMemory(m_Device, m_VertexMemory);
+        if (m_VertexBufferSize > 0) {
+            vkMapMemory(m_Device, m_VertexMemory, 0, m_VertexBufferSize, 0, &data);
+            memcpy(data, gpuVertices.data(), m_VertexBufferSize);
+            vkUnmapMemory(m_Device, m_VertexMemory);
+        }
 
         // Upload index data to GPU
-        vkMapMemory(m_Device, m_IndexMemory, 0, m_IndexBufferSize, 0, &data);
-        memcpy(data, gpuIndices.data(), m_IndexBufferSize);
-        vkUnmapMemory(m_Device, m_IndexMemory);
+        if (m_IndexBufferSize > 0) {
+            vkMapMemory(m_Device, m_IndexMemory, 0, m_IndexBufferSize, 0, &data);
+            memcpy(data, gpuIndices.data(), m_IndexBufferSize);
+            vkUnmapMemory(m_Device, m_IndexMemory);
+        }
 
         // Upload material data
         std::vector<GPUMaterial> gpuMaterials(scene.Materials.size());
@@ -628,14 +632,18 @@ namespace Vlkrt
             gpuMaterials[i].emissionPower = scene.Materials[i].EmissionPower;
         }
 
-        vkMapMemory(m_Device, m_MaterialMemory, 0, m_MaterialBufferSize, 0, &data);
-        memcpy(data, gpuMaterials.data(), m_MaterialBufferSize);
-        vkUnmapMemory(m_Device, m_MaterialMemory);
+        if (m_MaterialBufferSize > 0) {
+            vkMapMemory(m_Device, m_MaterialMemory, 0, m_MaterialBufferSize, 0, &data);
+            memcpy(data, gpuMaterials.data(), m_MaterialBufferSize);
+            vkUnmapMemory(m_Device, m_MaterialMemory);
+        }
 
         // Upload material index data (one per triangle)
-        vkMapMemory(m_Device, m_MaterialIndexMemory, 0, m_MaterialIndexBufferSize, 0, &data);
-        memcpy(data, materialIndices.data(), m_MaterialIndexBufferSize);
-        vkUnmapMemory(m_Device, m_MaterialIndexMemory);
+        if (m_MaterialIndexBufferSize > 0) {
+            vkMapMemory(m_Device, m_MaterialIndexMemory, 0, m_MaterialIndexBufferSize, 0, &data);
+            memcpy(data, materialIndices.data(), m_MaterialIndexBufferSize);
+            vkUnmapMemory(m_Device, m_MaterialIndexMemory);
+        }
 
         // Upload light data
         std::vector<GPULight> gpuLights(scene.Lights.size());
@@ -649,9 +657,11 @@ namespace Vlkrt
             gpuLights[i].radius = scene.Lights[i].Radius;
         }
 
-        vkMapMemory(m_Device, m_LightMemory, 0, m_LightBufferSize, 0, &data);
-        memcpy(data, gpuLights.data(), m_LightBufferSize);
-        vkUnmapMemory(m_Device, m_LightMemory);
+        if (m_LightBufferSize > 0) {
+            vkMapMemory(m_Device, m_LightMemory, 0, m_LightBufferSize, 0, &data);
+            memcpy(data, gpuLights.data(), m_LightBufferSize);
+            vkUnmapMemory(m_Device, m_LightMemory);
+        }
 
         // Rebuild acceleration structure with all meshes (static + dynamic)
         std::vector<Mesh> allMeshes;

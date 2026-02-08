@@ -1,0 +1,59 @@
+materials:
+- name: stone
+  albedo: [ 0.5, 0.5, 0.5 ]
+  roughness: 0.8
+- name: metal
+  albedo: [ 0.8, 0.8, 0.8 ]
+  roughness: 0.2
+  metallic: 1.0
+
+entities:
+- name: scene_root
+  type: empty
+  transform:
+    position: [ 0, 0, 0 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  children:
+  - name: ground
+    type: mesh
+    mesh_path: ../resources/obj/ground.obj
+    material: 0
+    transform:
+      position: [ 0, -1, 0 ]
+      rotation: [ 0, 0, 0, 1 ]
+      scale: [ 10, 1, 10 ]
+
+  - name: cube
+    type: mesh
+    mesh_path: ../resources/obj/cube.obj
+    material: 1
+    transform:
+      position: [ 2, 1, 0 ]
+      rotation: [ 0, 0.7071, 0, 0.7071 ]
+      scale: [ 1, 1, 1 ]
+
+  - name: lighting_group
+    type: empty
+    transform:
+      position: [ 5, 5, 5 ]
+      rotation: [ 0, 0, 0, 1 ]
+      scale: [ 1, 1, 1 ]
+    children:
+    - name: sun
+      type: light
+      light_color: [ 1, 1, 1 ]
+      light_intensity: 1.5
+      light_type: 0
+      light_radius: 10.0
+
+    - name: point_light
+      type: light
+      transform:
+        position: [ 0, 0, 0 ]
+        rotation: [ 0, 0, 0, 1 ]
+        scale: [ 1, 1, 1 ]
+      light_color: [ 1, 0.8, 0.6 ]
+      light_intensity: 1.0
+      light_type: 1
+      light_radius: 20.0

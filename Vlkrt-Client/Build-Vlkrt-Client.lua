@@ -16,6 +16,7 @@ project "Vlkrt-Client"
       "../Walnut/vendor/glm",
       "../Walnut/vendor/spdlog/include",
       "../Walnut/vendor/tinyobjloader",
+      "../Walnut/vendor/yaml-cpp/include",
 
       "../Walnut/Walnut/Source",
       "../Walnut/Walnut/Platform/GUI",
@@ -27,9 +28,15 @@ project "Vlkrt-Client"
       "../Walnut/Walnut-Modules/Walnut-Networking/vendor/GameNetworkingSockets/include",
    }
 
+   defines
+   {
+      "YAML_CPP_STATIC_DEFINE"
+   }
+
    links
    {
-      "Vlkrt-Common"
+      "Vlkrt-Common",
+      "yaml-cpp"
    }
 
    targetdir ("../bin/" .. outputdir .. "/%{prj.name}")
@@ -49,6 +56,7 @@ project "Vlkrt-Client"
       {
          '{COPY} "../%{WalnutNetworkingBinDir}GameNetworkingSockets.dll" "%{cfg.targetdir}"',
          '{COPY} "../%{WalnutNetworkingBinDir}libcrypto-3-x64.dll" "%{cfg.targetdir}"',
+         '{COPYDIR} "../../scenes" "%{cfg.targetdir}/scenes"',
       }
 
    filter { "system:windows", "configurations:Debug" }
@@ -70,6 +78,11 @@ project "Vlkrt-Client"
       prebuildcommands
       {
          'cd "Source/Shaders" && bash compile_shaders.sh && cd ../..'
+      }
+
+      postbuildcommands
+      {
+         '{COPYDIR} "../../scenes" "%{cfg.targetdir}/scenes"',
       }
 
    filter "configurations:Debug"

@@ -36,6 +36,8 @@ namespace Vlkrt
     private:
         void OnDataReceived(const Walnut::Buffer& buffer);
         void UpdateScene();
+        void LoadScene(const std::string& scenePath);
+        void SaveScene();
 
     private:
         // Client player data
@@ -59,6 +61,10 @@ namespace Vlkrt
         uint32_t m_ViewportWidth{};
         uint32_t m_ViewportHeight{};
         float    m_LastRenderTime{};
+
+        // Scene management
+        std::string m_CurrentScene = "default";
+        std::string m_SelectedScene = "default";
 
         // Scene change tracking
         glm::vec2 m_LastPlayerPosition{};
