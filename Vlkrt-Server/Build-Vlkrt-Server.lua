@@ -55,8 +55,12 @@ project "Vlkrt-Server"
       }
 
    filter "system:linux"
-      libdirs { "../Walnut/Walnut-Networking/vendor/GameNetworkingSockets/bin/Linux" }
+      libdirs { "../Walnut/Walnut-Modules/Walnut-Networking/vendor/GameNetworkingSockets/bin/Linux" }
       links { "GameNetworkingSockets" }
+      linkoptions {
+         "-Wl,-rpath-link,../Walnut/Walnut-Modules/Walnut-Networking/vendor/GameNetworkingSockets/bin/Linux",
+         "../Walnut/Walnut-Modules/Walnut-Networking/vendor/GameNetworkingSockets/bin/Linux/libprotobuf.so.23"
+      }
 
       defines { "WL_HEADLESS" }
 

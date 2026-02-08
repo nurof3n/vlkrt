@@ -1,0 +1,8 @@
+# Ignore everything by default
+**
+
+# Allow only server build inputs
+!Build-Server.lua
+!Vlkrt-Server/**
+!Vlkrt-Common/**
+!Walnut/**
