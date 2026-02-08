@@ -33,7 +33,19 @@ namespace Vlkrt
     }
 
     void ServerLayer::OnUpdate(float ts)
-    {}
+    {
+        Walnut::BufferStreamWriter stream(s_ScratchBuffer);
+        stream.WriteRaw(PacketType::ClientUpdate);
+
+        m_PlayerDataMutex.lock();
+        stream.WriteMap(m_PlayerData);
+        m_PlayerDataMutex.unlock();
+
+        m_Server.SendBufferToAllClients(stream.GetBuffer());
+
+        // throttle updates to 20 times per second
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
 
     void ServerLayer::OnRender()
     {}
@@ -73,14 +85,12 @@ namespace Vlkrt
         stream.ReadRaw(type);
 
         switch (type) {
-            case PacketType::ClientUpdate: {
-                glm::vec2 pos, vel;
-                stream.ReadRaw<glm::vec2>(pos);
-                stream.ReadRaw<glm::vec2>(vel);
-
-                WL_INFO_TAG("Server", "Received ClientUpdate from {}: Pos({}, {}), Vel({}, {})", clientInfo.ID, pos.x,
-                        pos.y, vel.x, vel.y);
-            }
+            case PacketType::ClientUpdate:
+                m_PlayerDataMutex.lock();
+                auto& playerData = m_PlayerData[clientInfo.ID];
+                stream.ReadRaw<glm::vec2>(playerData.Position);
+                stream.ReadRaw<glm::vec2>(playerData.Velocity);
+                m_PlayerDataMutex.unlock();
         }
     }
 }  // namespace Vlkrt

@@ -5,10 +5,19 @@
 
 #include "HeadlessConsole.h"
 
+#include <glm/glm.hpp>
+
 namespace Vlkrt
 {
     class ServerLayer : public Walnut::Layer
     {
+    public:
+        struct PlayerData
+        {
+            glm::vec2 Position;
+            glm::vec2 Velocity;
+        };
+
     public:
         void OnAttach() override;
         void OnDetach() override;
@@ -27,5 +36,8 @@ namespace Vlkrt
     private:
         HeadlessConsole m_Console;
         Walnut::Server  m_Server{ 1337 };
+
+        std::mutex                     m_PlayerDataMutex;
+        std::map<uint32_t, PlayerData> m_PlayerData;
     };
 };  // namespace Vlkrt

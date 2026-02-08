@@ -71,7 +71,15 @@ namespace Vlkrt
     {
         auto connectionStatus = m_Client.GetConnectionStatus();
         if (connectionStatus == Walnut::Client::ConnectionStatus::Connected) {
+            // Draw current player
             DrawRect(m_PlayerPosition, glm::vec2{ 50.0f, 50.0f }, IM_COL32(255, 0, 0, 255));
+
+            // Draw other players
+            for (const auto& [playerID, playerData] : m_PlayerData) {
+                if (playerID == m_PlayerID)
+                    continue;
+                DrawRect(playerData.Position, glm::vec2{ 50.0f, 50.0f }, IM_COL32(0, 255, 0, 255));
+            }
         }
         else {
             auto readOnly = (connectionStatus == Walnut::Client::ConnectionStatus::Connecting);
@@ -107,9 +115,9 @@ namespace Vlkrt
                 WL_INFO_TAG("Client", "Connected to server with Player ID: {}", m_PlayerID);
                 break;
             case PacketType::ClientUpdate:
-                glm::vec2 pos, vel;
-                stream.ReadRaw<glm::vec2>(pos);
-                stream.ReadRaw<glm::vec2>(vel);
+                m_PlayerDataMutex.lock();
+                stream.ReadMap(m_PlayerData);
+                m_PlayerDataMutex.unlock();
                 break;
         }
     }

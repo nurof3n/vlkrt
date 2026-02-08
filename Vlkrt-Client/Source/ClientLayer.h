@@ -3,12 +3,20 @@
 #include "Walnut/Layer.h"
 #include "Walnut/Networking/Client.h"
 
+#include <mutex>
 #include <glm/glm.hpp>
 
 namespace Vlkrt
 {
     class ClientLayer : public Walnut::Layer
     {
+    public:
+        struct PlayerData
+        {
+            glm::vec2 Position;
+            glm::vec2 Velocity;
+        };
+
     public:
         void OnAttach() override;
         void OnDetach() override;
@@ -30,5 +38,8 @@ namespace Vlkrt
 
         Walnut::Client m_Client;
         uint32_t       m_PlayerID{};
+
+        std::mutex                     m_PlayerDataMutex;
+        std::map<uint32_t, PlayerData> m_PlayerData;
     };
 }  // namespace Vlkrt
