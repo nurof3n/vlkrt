@@ -3,6 +3,10 @@
 #include "Walnut/Layer.h"
 #include "Walnut/Networking/Client.h"
 
+#include "Renderer.h"
+#include "Camera.h"
+#include "Scene.h"
+
 #include <mutex>
 #include <glm/glm.hpp>
 
@@ -11,6 +15,7 @@ namespace Vlkrt
     class ClientLayer : public Walnut::Layer
     {
     public:
+        // Struct to hold player data received from the server
         struct PlayerData
         {
             glm::vec2 Position;
@@ -18,6 +23,8 @@ namespace Vlkrt
         };
 
     public:
+        ClientLayer();
+
         void OnAttach() override;
         void OnDetach() override;
 
@@ -27,19 +34,29 @@ namespace Vlkrt
 
     private:
         void OnDataReceived(const Walnut::Buffer& buffer);
+        void UpdateScene();
 
     private:
+        // Client player data
         const float m_Speed{ 100.0f };
+        glm::vec2   m_PlayerPosition{ 50.0f, 50.0f };
+        glm::vec2   m_PlayerVelocity{};
 
-        glm::vec2 m_PlayerPosition{ 50.0f, 50.0f };
-        glm::vec2 m_PlayerVelocity{};
+        // Server player data
+        std::mutex                     m_PlayerDataMutex;
+        std::map<uint32_t, PlayerData> m_PlayerData;
 
-        std::string m_ServerAddress;
-
+        // Networking
+        std::string    m_ServerAddress;
         Walnut::Client m_Client;
         uint32_t       m_PlayerID{};
 
-        std::mutex                     m_PlayerDataMutex;
-        std::map<uint32_t, PlayerData> m_PlayerData;
+        // Rendering
+        Renderer m_Renderer;
+        Camera   m_Camera;
+        Scene    m_Scene;
+        uint32_t m_ViewportWidth{};
+        uint32_t m_ViewportHeight{};
+        float    m_LastRenderTime{};
     };
 }  // namespace Vlkrt
