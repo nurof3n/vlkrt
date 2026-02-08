@@ -25,6 +25,17 @@ namespace Vlkrt
         glm::vec2 _pad3;
     };
 
+    // GPU-aligned light structure (must match shader layout)
+    struct GPULight
+    {
+        glm::vec3 position;
+        float     intensity;
+        glm::vec3 color;
+        float     type;  // 0=Directional, 1=Point
+        glm::vec3 direction;
+        float     radius;
+    };
+
     class Renderer
     {
     public:
@@ -96,6 +107,11 @@ namespace Vlkrt
         VkBuffer m_MaterialIndexBuffer = VK_NULL_HANDLE;
         VkDeviceMemory m_MaterialIndexMemory = VK_NULL_HANDLE;
         VkDeviceSize m_MaterialIndexBufferSize = 0;
+
+        // Light buffer
+        VkBuffer m_LightBuffer = VK_NULL_HANDLE;
+        VkDeviceMemory m_LightMemory = VK_NULL_HANDLE;
+        VkDeviceSize m_LightBufferSize = 0;
 
         // Acceleration structure
         std::unique_ptr<AccelerationStructure> m_AccelerationStructure;

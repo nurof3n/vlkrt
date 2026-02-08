@@ -21,6 +21,16 @@ struct Material {
     float emissionPower;
 };
 
+struct Light {
+    vec3 position;
+    float intensity;
+    vec3 color;
+    float type;  // 0 = Directional, 1 = Point
+    vec3 direction;
+    float radius;
+};
+
+layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
 layout(binding = 2, set = 0) buffer Vertices {
     Vertex vertices[];
 };
@@ -34,11 +44,17 @@ layout(binding = 4, set = 0) buffer Materials {
 };
 
 layout(binding = 5, set = 0) buffer MaterialIndices {
-    uint materialIndices[];  // Maps triangle ID to material index
+    uint materialIndices[];
 };
 
+layout(binding = 6, set = 0) buffer Lights {
+    Light lights[];
+};
+
+// Primary ray payload only
 layout(location = 0) rayPayloadInEXT vec3 hitValue;
-hitAttributeEXT vec2 attribs;  // Barycentric coordinates (automatically provided by Vulkan)
+
+hitAttributeEXT vec2 attribs;
 
 void main()
 {
@@ -51,21 +67,62 @@ void main()
     Vertex v1 = vertices[idx1];
     Vertex v2 = vertices[idx2];
 
-    // Barycentric interpolation of normal
+    // Barycentric interpolation
     vec3 barycentrics = vec3(1.0 - attribs.x - attribs.y, attribs.x, attribs.y);
+
     vec3 normal = normalize(
         v0.normal * barycentrics.x +
         v1.normal * barycentrics.y +
         v2.normal * barycentrics.z
     );
 
-    // Get material index for this triangle and fetch material
+    vec3 worldPos =
+        v0.position * barycentrics.x +
+        v1.position * barycentrics.y +
+        v2.position * barycentrics.z;
+
+    // Get material
     uint matIndex = materialIndices[gl_PrimitiveID];
     Material mat = materials[matIndex];
 
-    // Simple directional lighting
-    vec3 lightDir = normalize(vec3(-1, -1, -1));
-    float light = max(dot(normal, -lightDir), 0.0) * 0.8 + 0.2;
+    vec3 result = mat.albedo * 0.2;  // Ambient
 
-    hitValue = mat.albedo * light;
+    // Process all lights
+    if (lights.length() > 0)
+    {
+        for (uint i = 0; i < min(uint(lights.length()), 2u); i++)
+        {
+            Light light = lights[i];
+            vec3 lightDir;
+            float attenuation = 1.0;
+
+            // Determine light direction and attenuation
+            if (light.type > 0.5)  // Point light
+            {
+                lightDir = light.position - worldPos;
+                float dist = length(lightDir);
+                lightDir = normalize(lightDir);
+                attenuation = 1.0 / (1.0 + (dist / light.radius) * (dist / light.radius));
+            }
+            else  // Directional light
+            {
+                lightDir = -light.direction;
+                attenuation = 1.0;
+            }
+
+            // Diffuse
+            float diffuse = max(0.0, dot(normal, lightDir));
+            vec3 diffuseContrib = mat.albedo * diffuse * light.color * light.intensity * attenuation;
+
+            // Specular (Blinn-Phong)
+            vec3 viewDir = normalize(-gl_WorldRayDirectionEXT);
+            vec3 halfDir = normalize(lightDir + viewDir);
+            float specular = pow(max(0.0, dot(normal, halfDir)), 32.0);
+            vec3 specularContrib = specular * 0.3 * light.color * light.intensity * attenuation;
+
+            result += diffuseContrib + specularContrib;
+        }
+    }
+
+    hitValue = result;
 }

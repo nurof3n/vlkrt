@@ -63,6 +63,24 @@ namespace Vlkrt
         bunnyMesh.Transform = glm::translate(glm::mat4(1.0f), glm::vec3(3.0f, 0.0f, 0.0f))
                               * glm::scale(glm::mat4(1.0f), glm::vec3(5.0f));
         m_Scene.StaticMeshes.push_back(bunnyMesh);
+
+        // Setup lights
+        // Directional light
+        Light dirLight;
+        dirLight.Type      = 0.0f;  // Directional
+        dirLight.Direction = glm::normalize(glm::vec3(1.0f, -1.0f, 1.0f));
+        dirLight.Color     = glm::vec3(1.0f, 1.0f, 0.95f);  // Slight warming
+        dirLight.Intensity = 0.8f;
+        m_Scene.Lights.push_back(dirLight);
+
+        // Point light
+        Light pointLight;
+        pointLight.Type      = 1.0f;  // Point
+        pointLight.Position  = glm::vec3(5.0f, 5.0f, 5.0f);
+        pointLight.Color     = glm::vec3(0.5f, 0.7f, 1.0f);  // Cool blue
+        pointLight.Intensity = 1.0f;
+        pointLight.Radius    = 20.0f;
+        m_Scene.Lights.push_back(pointLight);
     }
 
     void ClientLayer::OnDetach()
@@ -172,6 +190,30 @@ namespace Vlkrt
             ImGui::Text("Last render: %.3fms", m_LastRenderTime);
             ImGui::Text("Player ID: %u", m_PlayerID);
             ImGui::Text("Players: %zu", m_PlayerData.size());
+            ImGui::End();
+
+            // Lighting controls panel
+            ImGui::Begin("Lighting");
+            ImGui::Text("Directional Light");
+            ImGui::Separator();
+            ImGui::SliderFloat("Dir Intensity##dir", &m_Scene.Lights[0].Intensity, 0.0f, 2.0f);
+            ImGui::ColorEdit3("Dir Color##dir", &m_Scene.Lights[0].Color[0]);
+            ImGui::SliderFloat("Dir X##x", &m_Scene.Lights[0].Direction.x, -1.0f, 1.0f);
+            ImGui::SliderFloat("Dir Y##y", &m_Scene.Lights[0].Direction.y, -1.0f, 1.0f);
+            ImGui::SliderFloat("Dir Z##z", &m_Scene.Lights[0].Direction.z, -1.0f, 1.0f);
+            // Normalize direction
+            if (glm::length(m_Scene.Lights[0].Direction) > 0.0f) {
+                m_Scene.Lights[0].Direction = glm::normalize(m_Scene.Lights[0].Direction);
+            }
+
+            ImGui::Text("Point Light");
+            ImGui::Separator();
+            ImGui::SliderFloat("Point Intensity##point", &m_Scene.Lights[1].Intensity, 0.0f, 2.0f);
+            ImGui::ColorEdit3("Point Color##point", &m_Scene.Lights[1].Color[0]);
+            ImGui::SliderFloat("Point X##px", &m_Scene.Lights[1].Position.x, -10.0f, 10.0f);
+            ImGui::SliderFloat("Point Y##py", &m_Scene.Lights[1].Position.y, 0.0f, 15.0f);
+            ImGui::SliderFloat("Point Z##pz", &m_Scene.Lights[1].Position.z, -10.0f, 10.0f);
+            ImGui::SliderFloat("Point Radius##radius", &m_Scene.Lights[1].Radius, 1.0f, 50.0f);
             ImGui::End();
         }
         else {

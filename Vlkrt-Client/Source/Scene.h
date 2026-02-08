@@ -41,10 +41,21 @@ namespace Vlkrt
         glm::vec3 AABBMax;
     };
 
+    struct Light
+    {
+        glm::vec3 Position = glm::vec3(0.0f);     // World position
+        float     Intensity = 1.0f;               // Brightness 0-2
+        glm::vec3 Color = glm::vec3(1.0f);        // RGB color
+        float     Type = 0.0f;                    // 0=Directional, 1=Point
+        glm::vec3 Direction = glm::vec3(0.0f);   // For directional lights (normalized)
+        float     Radius = 10.0f;                 // Falloff radius for point lights
+    };
+
     struct Scene
     {
         std::vector<Mesh>     StaticMeshes;   // Meshes that don't change (ground, objects, etc)
         std::vector<Mesh>     DynamicMeshes;  // Meshes that change each frame (players)
         std::vector<Material> Materials;
+        std::vector<Light>    Lights;         // Light sources for shading
     };
 }  // namespace Vlkrt

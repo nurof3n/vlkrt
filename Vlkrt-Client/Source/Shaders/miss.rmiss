@@ -5,6 +5,6 @@ layout(location = 0) rayPayloadInEXT vec3 hitValue;
 
 void main()
 {
-    // Sky color (matching CPU version)
+    // Sky color
     hitValue = vec3(0.6, 0.7, 0.9);
 }

@@ -40,6 +40,11 @@ project "Vlkrt-Client"
       defines { "WL_PLATFORM_WINDOWS" }
       buildoptions { "/utf-8" }
 
+      prebuildcommands
+      {
+         'cd "Source\\Shaders" && call compile_shaders.bat && cd ..\\..'
+      }
+
       postbuildcommands
       {
          '{COPY} "../%{WalnutNetworkingBinDir}GameNetworkingSockets.dll" "%{cfg.targetdir}"',
@@ -61,6 +66,11 @@ project "Vlkrt-Client"
    filter "system:linux"
       libdirs { "../Walnut/Walnut-Networking/vendor/GameNetworkingSockets/bin/Linux" }
       links { "GameNetworkingSockets" }
+
+      prebuildcommands
+      {
+         'cd "Source/Shaders" && bash compile_shaders.sh && cd ../..'
+      }
 
    filter "configurations:Debug"
       defines { "WL_DEBUG" }

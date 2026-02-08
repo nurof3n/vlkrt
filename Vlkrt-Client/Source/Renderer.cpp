@@ -254,7 +254,7 @@ namespace Vlkrt
 
     void Renderer::CreateRayTracingPipeline()
     {
-        // Load shaders (no intersection shader for triangle geometry)
+        // Load shaders
         auto raygenCode = ShaderLoader::LoadShaderSPIRV("Source/Shaders/raygen.rgen.spv");
         auto missCode = ShaderLoader::LoadShaderSPIRV("Source/Shaders/miss.rmiss.spv");
         auto closestHitCode = ShaderLoader::LoadShaderSPIRV("Source/Shaders/closesthit.rchit.spv");
@@ -303,7 +303,7 @@ namespace Vlkrt
         groups[1].anyHitShader = VK_SHADER_UNUSED_KHR;
         groups[1].intersectionShader = VK_SHADER_UNUSED_KHR;
 
-        // Hit group (triangles: only closest hit, no intersection shader)
+        // Hit group (triangles: closest hit only)
         groups[2].sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
         groups[2].type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
         groups[2].generalShader = VK_SHADER_UNUSED_KHR;
@@ -329,7 +329,7 @@ namespace Vlkrt
         // Create ray tracing pipeline
         VkRayTracingPipelineCreateInfoKHR pipelineInfo = {};
         pipelineInfo.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
-        pipelineInfo.stageCount = 3;
+        pipelineInfo.stageCount = 3;  // raygen + miss + closesthit
         pipelineInfo.pStages = stages;
         pipelineInfo.groupCount = 3;
         pipelineInfo.pGroups = groups;
@@ -397,7 +397,7 @@ namespace Vlkrt
     void Renderer::CreateDescriptorSets()
     {
         // Create descriptor set layout
-        VkDescriptorSetLayoutBinding bindings[6] = {};
+        VkDescriptorSetLayoutBinding bindings[7] = {};
 
         // Binding 0: Acceleration structure
         bindings[0].binding = 0;
@@ -435,9 +435,15 @@ namespace Vlkrt
         bindings[5].descriptorCount = 1;
         bindings[5].stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
 
+        // Binding 6: Light buffer
+        bindings[6].binding = 6;
+        bindings[6].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        bindings[6].descriptorCount = 1;
+        bindings[6].stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+
         VkDescriptorSetLayoutCreateInfo layoutInfo = {};
         layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        layoutInfo.bindingCount = 6;
+        layoutInfo.bindingCount = 7;
         layoutInfo.pBindings = bindings;
 
         vkCreateDescriptorSetLayout(m_Device, &layoutInfo, nullptr, &m_DescriptorSetLayout);
@@ -449,7 +455,7 @@ namespace Vlkrt
         poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
         poolSizes[1].descriptorCount = 1;
         poolSizes[2].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        poolSizes[2].descriptorCount = 4;  // Now 4 storage buffers (vertices, indices, materials, material indices)
+        poolSizes[2].descriptorCount = 5;  // Now 5 storage buffers (vertices, indices, materials, material indices, lights)
 
         VkDescriptorPoolCreateInfo poolInfo = {};
         poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -517,6 +523,13 @@ namespace Vlkrt
             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
             m_MaterialIndexMemory);
+
+        // Create light buffer
+        m_LightBufferSize = sizeof(GPULight) * scene.Lights.size();
+        m_LightBuffer = CreateBuffer(m_LightBufferSize,
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            m_LightMemory);
     }
 
     void Renderer::UpdateSceneData(const Scene& scene)
@@ -624,6 +637,22 @@ namespace Vlkrt
         memcpy(data, materialIndices.data(), m_MaterialIndexBufferSize);
         vkUnmapMemory(m_Device, m_MaterialIndexMemory);
 
+        // Upload light data
+        std::vector<GPULight> gpuLights(scene.Lights.size());
+        for (size_t i = 0; i < scene.Lights.size(); i++)
+        {
+            gpuLights[i].position = scene.Lights[i].Position;
+            gpuLights[i].intensity = scene.Lights[i].Intensity;
+            gpuLights[i].color = scene.Lights[i].Color;
+            gpuLights[i].type = scene.Lights[i].Type;
+            gpuLights[i].direction = scene.Lights[i].Direction;
+            gpuLights[i].radius = scene.Lights[i].Radius;
+        }
+
+        vkMapMemory(m_Device, m_LightMemory, 0, m_LightBufferSize, 0, &data);
+        memcpy(data, gpuLights.data(), m_LightBufferSize);
+        vkUnmapMemory(m_Device, m_LightMemory);
+
         // Rebuild acceleration structure with all meshes (static + dynamic)
         std::vector<Mesh> allMeshes;
         allMeshes.insert(allMeshes.end(), scene.StaticMeshes.begin(), scene.StaticMeshes.end());
@@ -661,7 +690,12 @@ namespace Vlkrt
         materialIndexBufferInfo.offset = 0;
         materialIndexBufferInfo.range = m_MaterialIndexBufferSize;
 
-        VkWriteDescriptorSet writes[6] = {};
+        VkDescriptorBufferInfo lightBufferInfo = {};
+        lightBufferInfo.buffer = m_LightBuffer;
+        lightBufferInfo.offset = 0;
+        lightBufferInfo.range = m_LightBufferSize;
+
+        VkWriteDescriptorSet writes[7] = {};
 
         // Acceleration structure
         writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -711,7 +745,15 @@ namespace Vlkrt
         writes[5].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         writes[5].pBufferInfo = &materialIndexBufferInfo;
 
-        vkUpdateDescriptorSets(m_Device, 6, writes, 0, nullptr);
+        // Light buffer
+        writes[6].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[6].dstSet = m_DescriptorSet;
+        writes[6].dstBinding = 6;
+        writes[6].descriptorCount = 1;
+        writes[6].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[6].pBufferInfo = &lightBufferInfo;
+
+        vkUpdateDescriptorSets(m_Device, 7, writes, 0, nullptr);
     }
 
     VkBuffer Renderer::CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
