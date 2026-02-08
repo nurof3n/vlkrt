@@ -58,5 +58,10 @@ namespace Vlkrt
         uint32_t m_ViewportWidth{};
         uint32_t m_ViewportHeight{};
         float    m_LastRenderTime{};
+
+        // Scene change tracking
+        glm::vec2 m_LastPlayerPosition{};
+        size_t    m_LastPlayerCount    = 0;
+        bool      m_NetworkDataChanged = false;
     };
 }  // namespace Vlkrt

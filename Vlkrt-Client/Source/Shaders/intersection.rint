@@ -1,0 +1,37 @@
+#version 460
+#extension GL_EXT_ray_tracing : require
+
+struct Sphere {
+    vec3 position;
+    float radius;
+    int materialIndex;
+    int _pad1;
+    int _pad2;
+    int _pad3;
+};
+
+layout(binding = 2, set = 0) buffer Spheres {
+    Sphere spheres[];
+};
+
+hitAttributeEXT vec2 attribs;  // Not used for spheres, but required
+
+void main()
+{
+    Sphere sphere = spheres[gl_PrimitiveID];
+
+    vec3 oc = gl_WorldRayOriginEXT - sphere.position;
+    float a = dot(gl_WorldRayDirectionEXT, gl_WorldRayDirectionEXT);
+    float b = 2.0 * dot(oc, gl_WorldRayDirectionEXT);
+    float c = dot(oc, oc) - sphere.radius * sphere.radius;
+
+    float discriminant = b * b - 4.0 * a * c;
+    if (discriminant < 0.0)
+        return;
+
+    float closestT = (-b - sqrt(discriminant)) / (2.0 * a);
+    if (closestT > gl_RayTminEXT && closestT < gl_RayTmaxEXT)
+    {
+        reportIntersectionEXT(closestT, 0);
+    }
+}

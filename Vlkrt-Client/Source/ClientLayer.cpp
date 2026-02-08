@@ -30,14 +30,14 @@ namespace Vlkrt
         m_Client.SetDataReceivedCallback([this](const Walnut::Buffer& buffer) { OnDataReceived(buffer); });
 
         // Setup raytracing scene materials
-        // Material for current player (red)
+        // Material for current player (green)
         Material& playerMat = m_Scene.Materials.emplace_back();
-        playerMat.Albedo    = { 1.0f, 0.2f, 0.2f };
+        playerMat.Albedo    = { 0.2f, 1.0f, 0.2f };
         playerMat.Roughness = 0.3f;
 
-        // Material for other players (green)
+        // Material for other players (red)
         Material& otherPlayerMat = m_Scene.Materials.emplace_back();
-        otherPlayerMat.Albedo    = { 0.2f, 1.0f, 0.2f };
+        otherPlayerMat.Albedo    = { 1.0f, 0.2f, 0.2f };
         otherPlayerMat.Roughness = 0.3f;
 
         // Material for ground
@@ -91,8 +91,16 @@ namespace Vlkrt
         // Camera update (only when not controlling player movement)
         m_Camera.OnUpdate(ts);
 
-        // Update scene with network player positions
-        UpdateScene();
+        // Only update scene if something actually changed
+        size_t currentPlayerCount = m_PlayerData.size() + 1;  // +1 for local player
+        if (m_PlayerPosition != m_LastPlayerPosition || currentPlayerCount != m_LastPlayerCount
+                || m_NetworkDataChanged) {
+            UpdateScene();
+            m_Renderer.InvalidateScene();
+            m_LastPlayerPosition = m_PlayerPosition;
+            m_LastPlayerCount    = currentPlayerCount;
+            m_NetworkDataChanged = false;
+        }
     }
 
     void ClientLayer::OnRender()
@@ -108,17 +116,22 @@ namespace Vlkrt
     {
         auto connectionStatus = m_Client.GetConnectionStatus();
         if (connectionStatus == Walnut::Client::ConnectionStatus::Connected) {
-            // Get the ImGui viewport size (accounts for dockspace/menus)
-            ImGuiViewport* viewport = ImGui::GetMainViewport();
-            m_ViewportWidth         = (uint32_t) viewport->Size.x;
-            m_ViewportHeight        = (uint32_t) viewport->Size.y;
+            //  Get the ImGui viewport size (accounts for dockspace/menus)
+            ImGuiViewport* viewport          = ImGui::GetMainViewport();
+            uint32_t       newViewportWidth  = (uint32_t) viewport->Size.x;
+            uint32_t       newViewportHeight = (uint32_t) viewport->Size.y;
 
             // Render at half resolution for performance
-            uint32_t renderWidth  = m_ViewportWidth / 2;
-            uint32_t renderHeight = m_ViewportHeight / 2;
+            uint32_t renderWidth  = newViewportWidth / 2;
+            uint32_t renderHeight = newViewportHeight / 2;
 
-            m_Renderer.OnResize(renderWidth, renderHeight);
-            m_Camera.OnResize(renderWidth, renderHeight);
+            // Only resize if viewport size changed (avoid expensive reallocation every frame)
+            if (newViewportWidth != m_ViewportWidth || newViewportHeight != m_ViewportHeight) {
+                m_ViewportWidth  = newViewportWidth;
+                m_ViewportHeight = newViewportHeight;
+                m_Renderer.OnResize(renderWidth, renderHeight);
+                m_Camera.OnResize(renderWidth, renderHeight);
+            }
 
             // Render raytraced image as background
             auto image = m_Renderer.GetFinalImage();
@@ -128,8 +141,8 @@ namespace Vlkrt
                         ImVec2(1, 0));
             }
 
-            // Settings panel overlay
-            ImGui::Begin("Settings");
+            // Stats panel overlay
+            ImGui::Begin("Stats");
             ImGui::Text("Last render: %.3fms", m_LastRenderTime);
             ImGui::Text("Player ID: %u", m_PlayerID);
             ImGui::Text("Players: %zu", m_PlayerData.size());
@@ -203,6 +216,7 @@ namespace Vlkrt
             case PacketType::ClientUpdate:
                 m_PlayerDataMutex.lock();
                 stream.ReadMap(m_PlayerData);
+                m_NetworkDataChanged = true;
                 m_PlayerDataMutex.unlock();
                 break;
             default:

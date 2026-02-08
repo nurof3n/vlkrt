@@ -43,7 +43,18 @@ project "Vlkrt-Client"
       {
          '{COPY} "../%{WalnutNetworkingBinDir}GameNetworkingSockets.dll" "%{cfg.targetdir}"',
          '{COPY} "../%{WalnutNetworkingBinDir}libcrypto-3-x64.dll" "%{cfg.targetdir}"',
+      }
+
+   filter { "system:windows", "configurations:Debug" }
+      postbuildcommands
+      {
          '{COPY} "../%{WalnutNetworkingBinDir}libprotobufd.dll" "%{cfg.targetdir}"',
+      }
+
+   filter { "system:windows", "configurations:Release or Dist" }
+      postbuildcommands
+      {
+         '{COPY} "../%{WalnutNetworkingBinDir}libprotobuf.dll" "%{cfg.targetdir}"',
       }
 
    filter "system:linux"

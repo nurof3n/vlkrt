@@ -75,6 +75,11 @@ namespace Vlkrt
     void ServerLayer::OnClientDisconnected(const Walnut::ClientInfo& clientInfo)
     {
         WL_INFO_TAG("Server", "Client Disconnected: {}", clientInfo.ID);
+
+        // Remove player data for disconnected client
+        m_PlayerDataMutex.lock();
+        m_PlayerData.erase(clientInfo.ID);
+        m_PlayerDataMutex.unlock();
     }
 
     void ServerLayer::OnDataReceived(const Walnut::ClientInfo& clientInfo, const Walnut::Buffer& data)
