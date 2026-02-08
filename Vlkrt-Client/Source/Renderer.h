@@ -14,6 +14,17 @@ namespace Vlkrt
     class Camera;
     struct Scene;
 
+    // GPU-aligned vertex structure (must match shader layout)
+    struct GPUVertex
+    {
+        glm::vec3 position;
+        float     _pad1;  // Align to 16 bytes
+        glm::vec3 normal;
+        float     _pad2;
+        glm::vec2 texCoord;
+        glm::vec2 _pad3;
+    };
+
     class Renderer
     {
     public:
@@ -23,7 +34,7 @@ namespace Vlkrt
         void OnResize(uint32_t width, uint32_t height);
         void Render(const Scene& scene, const Camera& camera);
 
-        // Call this when spheres change position (for multiplayer updates)
+        // Call this when scene geometry changes (for multiplayer updates)
         void InvalidateScene() { m_SceneValid = false; }
 
         std::shared_ptr<Walnut::Image> GetFinalImage() const
@@ -53,7 +64,7 @@ namespace Vlkrt
         VkShaderModule m_RaygenShader = VK_NULL_HANDLE;
         VkShaderModule m_MissShader = VK_NULL_HANDLE;
         VkShaderModule m_ClosestHitShader = VK_NULL_HANDLE;
-        VkShaderModule m_IntersectionShader = VK_NULL_HANDLE;
+        // Removed: VkShaderModule m_IntersectionShader (no longer needed for triangle geometry)
 
         // Shader binding table
         VkBuffer m_SBTBuffer = VK_NULL_HANDLE;
@@ -69,13 +80,22 @@ namespace Vlkrt
         VkDescriptorSet m_DescriptorSet = VK_NULL_HANDLE;
 
         // Scene buffers
-        VkBuffer m_SphereBuffer = VK_NULL_HANDLE;
-        VkDeviceMemory m_SphereMemory = VK_NULL_HANDLE;
-        size_t m_SphereBufferSize = 0;
+        VkBuffer m_VertexBuffer = VK_NULL_HANDLE;
+        VkDeviceMemory m_VertexMemory = VK_NULL_HANDLE;
+        VkDeviceSize m_VertexBufferSize = 0;
+
+        VkBuffer m_IndexBuffer = VK_NULL_HANDLE;
+        VkDeviceMemory m_IndexMemory = VK_NULL_HANDLE;
+        VkDeviceSize m_IndexBufferSize = 0;
 
         VkBuffer m_MaterialBuffer = VK_NULL_HANDLE;
         VkDeviceMemory m_MaterialMemory = VK_NULL_HANDLE;
         size_t m_MaterialBufferSize = 0;
+
+        // Material index buffer (maps triangle ID to material index)
+        VkBuffer m_MaterialIndexBuffer = VK_NULL_HANDLE;
+        VkDeviceMemory m_MaterialIndexMemory = VK_NULL_HANDLE;
+        VkDeviceSize m_MaterialIndexBufferSize = 0;
 
         // Acceleration structure
         std::unique_ptr<AccelerationStructure> m_AccelerationStructure;
@@ -84,7 +104,7 @@ namespace Vlkrt
         VkPhysicalDeviceRayTracingPipelinePropertiesKHR m_RTPipelineProperties = {};
 
         // Track scene changes to avoid unnecessary AS rebuilds
-        size_t m_LastSphereCount = 0;
+        size_t m_LastMeshCount = 0;
         size_t m_LastMaterialCount = 0;
         bool m_SceneValid = false;
         bool m_FirstFrame = true;

@@ -5,7 +5,7 @@
 
 namespace Vlkrt
 {
-	struct Sphere;
+	struct Mesh;
 
 	class AccelerationStructure
 	{
@@ -13,17 +13,16 @@ namespace Vlkrt
 		AccelerationStructure();
 		~AccelerationStructure();
 
-		void Build(const std::vector<Sphere>& spheres);
-		void Rebuild(const std::vector<Sphere>& spheres);
+		void Build(const std::vector<Mesh>& meshes, VkBuffer vertexBuffer, VkBuffer indexBuffer);
+		void Rebuild(const std::vector<Mesh>& meshes, VkBuffer vertexBuffer, VkBuffer indexBuffer);
 		void Cleanup();
 
 		VkAccelerationStructureKHR GetTLAS() const { return m_TLAS; }
 		bool IsBuilt() const { return m_TLAS != VK_NULL_HANDLE; }
 
 	private:
-		void BuildBLAS(const std::vector<Sphere>& spheres, VkCommandBuffer cmd);
+		void BuildBLAS(const std::vector<Mesh>& meshes, VkBuffer vertexBuffer, VkBuffer indexBuffer, VkCommandBuffer cmd);
 		void BuildTLAS(uint32_t instanceCount, VkCommandBuffer cmd);
-		void CreateAABBBuffer(const std::vector<Sphere>& spheres);
 		void CreateScratchBuffer(VkDeviceSize size);
 
 		VkBuffer CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkDeviceMemory& bufferMemory);
@@ -38,11 +37,6 @@ namespace Vlkrt
 		VkAccelerationStructureKHR m_TLAS = VK_NULL_HANDLE;
 		VkBuffer m_TLASBuffer = VK_NULL_HANDLE;
 		VkDeviceMemory m_TLASMemory = VK_NULL_HANDLE;
-
-		// AABB buffer for procedural geometry
-		VkBuffer m_AABBBuffer = VK_NULL_HANDLE;
-		VkDeviceMemory m_AABBMemory = VK_NULL_HANDLE;
-		VkDeviceSize m_AABBBufferSize = 0;
 
 		// Instance buffer
 		VkBuffer m_InstanceBuffer = VK_NULL_HANDLE;

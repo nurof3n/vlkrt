@@ -15,6 +15,7 @@ project "Vlkrt-Client"
       "../Walnut/vendor/glfw/include",
       "../Walnut/vendor/glm",
       "../Walnut/vendor/spdlog/include",
+      "../Walnut/vendor/tinyobjloader",
 
       "../Walnut/Walnut/Source",
       "../Walnut/Walnut/Platform/GUI",

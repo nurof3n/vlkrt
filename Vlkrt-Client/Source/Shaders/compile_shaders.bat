@@ -31,10 +31,4 @@ if %ERRORLEVEL% neq 0 (
     exit /b 1
 )
 
-"%GLSLC%" --target-env=vulkan1.2 -fshader-stage=rint intersection.rint -o intersection.rint.spv
-if %ERRORLEVEL% neq 0 (
-    echo Failed to compile intersection.rint
-    exit /b 1
-)
-
 echo All shaders compiled successfully!

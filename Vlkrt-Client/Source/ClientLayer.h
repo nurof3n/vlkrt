@@ -6,6 +6,7 @@
 #include "Renderer.h"
 #include "Camera.h"
 #include "Scene.h"
+#include "MeshLoader.h"
 
 #include <mutex>
 #include <glm/glm.hpp>

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <vector>
 
 namespace Vlkrt
@@ -20,17 +21,30 @@ namespace Vlkrt
         }
     };
 
-    struct Sphere
+    struct Vertex
     {
-        glm::vec3 Position{ 0.0f };
-        float     Radius = 0.5f;
+        glm::vec3 Position;
+        glm::vec3 Normal;
+        glm::vec2 TexCoord;
+    };
 
-        int MaterialIndex = 0;
+    struct Mesh
+    {
+        std::vector<Vertex>   Vertices;
+        std::vector<uint32_t> Indices;
+        int                   MaterialIndex = 0;
+
+        glm::mat4 Transform = glm::mat4(1.0f);  // For positioning/scaling
+
+        // AABB for culling/debugging
+        glm::vec3 AABBMin;
+        glm::vec3 AABBMax;
     };
 
     struct Scene
     {
-        std::vector<Sphere>   Spheres;
+        std::vector<Mesh>     StaticMeshes;   // Meshes that don't change (ground, objects, etc)
+        std::vector<Mesh>     DynamicMeshes;  // Meshes that change each frame (players)
         std::vector<Material> Materials;
     };
 }  // namespace Vlkrt

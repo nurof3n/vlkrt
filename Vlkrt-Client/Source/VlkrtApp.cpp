@@ -7,7 +7,7 @@ Walnut::Application* Walnut::CreateApplication(int argc, char** argv)
 {
     Walnut::ApplicationSpecification spec;
     spec.Name           = "Vlkrt";
-    spec.CustomTitlebar = true;
+    spec.CustomTitlebar = false;
     spec.UseDockspace   = false;
 
     auto app = new Walnut::Application(spec);

@@ -1,5 +1,6 @@
 #include "AccelerationStructure.h"
 #include "Scene.h"
+#include "Renderer.h"
 #include "Walnut/Application.h"
 #include "Walnut/VulkanRayTracing.h"
 
@@ -7,13 +8,6 @@
 
 namespace Vlkrt
 {
-	// AABB structure for GPU
-	struct AABB
-	{
-		float minX, minY, minZ;
-		float maxX, maxY, maxZ;
-	};
-
 	AccelerationStructure::AccelerationStructure()
 	{
 		m_Device = Walnut::Application::GetDevice();
@@ -24,19 +18,16 @@ namespace Vlkrt
 		Cleanup();
 	}
 
-	void AccelerationStructure::Build(const std::vector<Sphere>& spheres)
+	void AccelerationStructure::Build(const std::vector<Mesh>& meshes, VkBuffer vertexBuffer, VkBuffer indexBuffer)
 	{
-		if (spheres.empty())
+		if (meshes.empty())
 			return;
 
 		// Get command buffer
 		VkCommandBuffer cmd = Walnut::Application::GetCommandBuffer(true);
 
-		// Create AABB buffer for spheres
-		CreateAABBBuffer(spheres);
-
-		// Build BLAS
-		BuildBLAS(spheres, cmd);
+		// Build BLAS with triangle geometry
+		BuildBLAS(meshes, vertexBuffer, indexBuffer, cmd);
 
 		// Build TLAS
 		BuildTLAS(1, cmd);  // Single instance
@@ -45,12 +36,12 @@ namespace Vlkrt
 		Walnut::Application::FlushCommandBuffer(cmd);
 	}
 
-	void AccelerationStructure::Rebuild(const std::vector<Sphere>& spheres)
+	void AccelerationStructure::Rebuild(const std::vector<Mesh>& meshes, VkBuffer vertexBuffer, VkBuffer indexBuffer)
 	{
 		// For simplicity, we'll do a full rebuild instead of an update
 		// This is fine for small dynamic scenes
 		Cleanup();
-		Build(spheres);
+		Build(meshes, vertexBuffer, indexBuffer);
 	}
 
 	void AccelerationStructure::Cleanup()
@@ -87,17 +78,6 @@ namespace Vlkrt
 			m_BLASMemory = VK_NULL_HANDLE;
 		}
 
-		if (m_AABBBuffer != VK_NULL_HANDLE)
-		{
-			vkDestroyBuffer(m_Device, m_AABBBuffer, nullptr);
-			m_AABBBuffer = VK_NULL_HANDLE;
-		}
-		if (m_AABBMemory != VK_NULL_HANDLE)
-		{
-			vkFreeMemory(m_Device, m_AABBMemory, nullptr);
-			m_AABBMemory = VK_NULL_HANDLE;
-		}
-
 		if (m_InstanceBuffer != VK_NULL_HANDLE)
 		{
 			vkDestroyBuffer(m_Device, m_InstanceBuffer, nullptr);
@@ -121,57 +101,34 @@ namespace Vlkrt
 		}
 	}
 
-	void AccelerationStructure::CreateAABBBuffer(const std::vector<Sphere>& spheres)
+	void AccelerationStructure::BuildBLAS(const std::vector<Mesh>& meshes, VkBuffer vertexBuffer, VkBuffer indexBuffer, VkCommandBuffer cmd)
 	{
-		// Create AABBs from spheres
-		std::vector<AABB> aabbs(spheres.size());
-		for (size_t i = 0; i < spheres.size(); i++)
+		// Calculate total triangle count across all meshes
+		uint32_t totalTriangles = 0;
+		for (const auto& mesh : meshes)
 		{
-			const Sphere& sphere = spheres[i];
-			aabbs[i].minX = sphere.Position.x - sphere.Radius;
-			aabbs[i].minY = sphere.Position.y - sphere.Radius;
-			aabbs[i].minZ = sphere.Position.z - sphere.Radius;
-			aabbs[i].maxX = sphere.Position.x + sphere.Radius;
-			aabbs[i].maxY = sphere.Position.y + sphere.Radius;
-			aabbs[i].maxZ = sphere.Position.z + sphere.Radius;
+			totalTriangles += static_cast<uint32_t>(mesh.Indices.size() / 3);
 		}
 
-		VkDeviceSize bufferSize = sizeof(AABB) * aabbs.size();
-
-		// Clean up old buffer if it exists
-		if (m_AABBBuffer != VK_NULL_HANDLE)
+		// Define triangle geometry
+		VkAccelerationStructureGeometryTrianglesDataKHR trianglesData = {};
+		trianglesData.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
+		trianglesData.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+		trianglesData.vertexData.deviceAddress = GetBufferDeviceAddress(vertexBuffer);
+		trianglesData.vertexStride = sizeof(GPUVertex);  // 48 bytes with padding
+		trianglesData.maxVertex = 0;
+		for (const auto& mesh : meshes)
 		{
-			vkDestroyBuffer(m_Device, m_AABBBuffer, nullptr);
-			vkFreeMemory(m_Device, m_AABBMemory, nullptr);
+			trianglesData.maxVertex += static_cast<uint32_t>(mesh.Vertices.size());
 		}
-
-		// Create buffer
-		m_AABBBuffer = CreateBuffer(bufferSize,
-			VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-			m_AABBMemory);
-
-		m_AABBBufferSize = bufferSize;
-
-		// Upload AABB data
-		void* data;
-		vkMapMemory(m_Device, m_AABBMemory, 0, bufferSize, 0, &data);
-		memcpy(data, aabbs.data(), bufferSize);
-		vkUnmapMemory(m_Device, m_AABBMemory);
-	}
-
-	void AccelerationStructure::BuildBLAS(const std::vector<Sphere>& spheres, VkCommandBuffer cmd)
-	{
-		// Define AABB geometry
-		VkAccelerationStructureGeometryAabbsDataKHR aabbsData = {};
-		aabbsData.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR;
-		aabbsData.data.deviceAddress = GetBufferDeviceAddress(m_AABBBuffer);
-		aabbsData.stride = sizeof(AABB);
+		trianglesData.maxVertex -= 1;  // maxVertex is the highest index
+		trianglesData.indexType = VK_INDEX_TYPE_UINT32;
+		trianglesData.indexData.deviceAddress = GetBufferDeviceAddress(indexBuffer);
 
 		VkAccelerationStructureGeometryKHR geometry = {};
 		geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
-		geometry.geometryType = VK_GEOMETRY_TYPE_AABBS_KHR;
-		geometry.geometry.aabbs = aabbsData;
+		geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+		geometry.geometry.triangles = trianglesData;
 		geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
 
 		VkAccelerationStructureBuildGeometryInfoKHR buildInfo = {};
@@ -182,13 +139,11 @@ namespace Vlkrt
 		buildInfo.geometryCount = 1;
 		buildInfo.pGeometries = &geometry;
 
-		uint32_t primitiveCount = static_cast<uint32_t>(spheres.size());
-
 		// Get size requirements
 		VkAccelerationStructureBuildSizesInfoKHR sizeInfo = {};
 		sizeInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
 		pvkGetAccelerationStructureBuildSizesKHR(m_Device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
-			&buildInfo, &primitiveCount, &sizeInfo);
+			&buildInfo, &totalTriangles, &sizeInfo);
 
 		// Create BLAS buffer
 		m_BLASBuffer = CreateBuffer(sizeInfo.accelerationStructureSize,
@@ -212,7 +167,7 @@ namespace Vlkrt
 		buildInfo.scratchData.deviceAddress = GetBufferDeviceAddress(m_ScratchBuffer);
 
 		VkAccelerationStructureBuildRangeInfoKHR buildRange = {};
-		buildRange.primitiveCount = primitiveCount;
+		buildRange.primitiveCount = totalTriangles;
 		buildRange.primitiveOffset = 0;
 		buildRange.firstVertex = 0;
 		buildRange.transformOffset = 0;

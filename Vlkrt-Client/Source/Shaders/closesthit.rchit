@@ -1,13 +1,13 @@
 #version 460
 #extension GL_EXT_ray_tracing : require
 
-struct Sphere {
+struct Vertex {
     vec3 position;
-    float radius;
-    int materialIndex;
-    int _pad1;
-    int _pad2;
-    int _pad3;
+    float _pad1;
+    vec3 normal;
+    float _pad2;
+    vec2 texCoord;
+    vec2 _pad3;
 };
 
 struct Material {
@@ -21,26 +21,49 @@ struct Material {
     float emissionPower;
 };
 
-layout(binding = 2, set = 0) buffer Spheres {
-    Sphere spheres[];
+layout(binding = 2, set = 0) buffer Vertices {
+    Vertex vertices[];
 };
 
-layout(binding = 3, set = 0) buffer Materials {
+layout(binding = 3, set = 0) buffer Indices {
+    uint indices[];
+};
+
+layout(binding = 4, set = 0) buffer Materials {
     Material materials[];
 };
 
+layout(binding = 5, set = 0) buffer MaterialIndices {
+    uint materialIndices[];  // Maps triangle ID to material index
+};
+
 layout(location = 0) rayPayloadInEXT vec3 hitValue;
-hitAttributeEXT vec2 attribs;
+hitAttributeEXT vec2 attribs;  // Barycentric coordinates (automatically provided by Vulkan)
 
 void main()
 {
-    Sphere sphere = spheres[gl_PrimitiveID];
-    Material mat = materials[sphere.materialIndex];
+    // Get triangle vertex indices
+    uint idx0 = indices[gl_PrimitiveID * 3 + 0];
+    uint idx1 = indices[gl_PrimitiveID * 3 + 1];
+    uint idx2 = indices[gl_PrimitiveID * 3 + 2];
 
-    vec3 worldPos = gl_WorldRayOriginEXT + gl_WorldRayDirectionEXT * gl_HitTEXT;
-    vec3 normal = normalize(worldPos - sphere.position);
+    Vertex v0 = vertices[idx0];
+    Vertex v1 = vertices[idx1];
+    Vertex v2 = vertices[idx2];
 
-    // Simple lighting
+    // Barycentric interpolation of normal
+    vec3 barycentrics = vec3(1.0 - attribs.x - attribs.y, attribs.x, attribs.y);
+    vec3 normal = normalize(
+        v0.normal * barycentrics.x +
+        v1.normal * barycentrics.y +
+        v2.normal * barycentrics.z
+    );
+
+    // Get material index for this triangle and fetch material
+    uint matIndex = materialIndices[gl_PrimitiveID];
+    Material mat = materials[matIndex];
+
+    // Simple directional lighting
     vec3 lightDir = normalize(vec3(-1, -1, -1));
     float light = max(dot(normal, -lightDir), 0.0) * 0.8 + 0.2;
 

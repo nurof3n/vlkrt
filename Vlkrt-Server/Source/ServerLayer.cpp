@@ -96,6 +96,10 @@ namespace Vlkrt
                 stream.ReadRaw<glm::vec2>(playerData.Position);
                 stream.ReadRaw<glm::vec2>(playerData.Velocity);
                 m_PlayerDataMutex.unlock();
+                break;
+            default:
+                WL_WARN_TAG("Server", "Received unknown packet type {} from client {}", (uint32_t) type, clientInfo.ID);
+                break;
         }
     }
 }  // namespace Vlkrt

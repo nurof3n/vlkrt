@@ -10,15 +10,6 @@
 
 namespace Vlkrt
 {
-    // GPU-side Sphere structure (must match shader layout)
-    struct GPUSphere
-    {
-        glm::vec3 position;
-        float radius;
-        int materialIndex;
-        int _pad1, _pad2, _pad3;  // Padding for alignment
-    };
-
     // GPU-side Material structure (must match shader layout)
     struct GPUMaterial
     {
@@ -46,16 +37,28 @@ namespace Vlkrt
             vkFreeMemory(m_Device, m_SBTMemory, nullptr);
         }
 
-        if (m_SphereBuffer != VK_NULL_HANDLE)
+        if (m_VertexBuffer != VK_NULL_HANDLE)
         {
-            vkDestroyBuffer(m_Device, m_SphereBuffer, nullptr);
-            vkFreeMemory(m_Device, m_SphereMemory, nullptr);
+            vkDestroyBuffer(m_Device, m_VertexBuffer, nullptr);
+            vkFreeMemory(m_Device, m_VertexMemory, nullptr);
+        }
+
+        if (m_IndexBuffer != VK_NULL_HANDLE)
+        {
+            vkDestroyBuffer(m_Device, m_IndexBuffer, nullptr);
+            vkFreeMemory(m_Device, m_IndexMemory, nullptr);
         }
 
         if (m_MaterialBuffer != VK_NULL_HANDLE)
         {
             vkDestroyBuffer(m_Device, m_MaterialBuffer, nullptr);
             vkFreeMemory(m_Device, m_MaterialMemory, nullptr);
+        }
+
+        if (m_MaterialIndexBuffer != VK_NULL_HANDLE)
+        {
+            vkDestroyBuffer(m_Device, m_MaterialIndexBuffer, nullptr);
+            vkFreeMemory(m_Device, m_MaterialIndexMemory, nullptr);
         }
 
         if (m_DescriptorPool != VK_NULL_HANDLE)
@@ -76,8 +79,6 @@ namespace Vlkrt
             vkDestroyShaderModule(m_Device, m_MissShader, nullptr);
         if (m_ClosestHitShader != VK_NULL_HANDLE)
             vkDestroyShaderModule(m_Device, m_ClosestHitShader, nullptr);
-        if (m_IntersectionShader != VK_NULL_HANDLE)
-            vkDestroyShaderModule(m_Device, m_IntersectionShader, nullptr);
     }
 
     void Renderer::OnResize(uint32_t width, uint32_t height)
@@ -129,29 +130,34 @@ namespace Vlkrt
 
     void Renderer::Render(const Scene& scene, const Camera& camera)
     {
-        if (!m_FinalImage || scene.Spheres.empty())
+        if (!m_FinalImage || (scene.StaticMeshes.empty() && scene.DynamicMeshes.empty()))
             return;
 
         m_ActiveScene = &scene;
         m_ActiveCamera = &camera;
 
         // Check if scene geometry has changed (size changes or manual invalidation)
-        bool sizeChanged = (scene.Spheres.size() != m_LastSphereCount) ||
+        size_t totalMeshCount = scene.StaticMeshes.size() + scene.DynamicMeshes.size();
+        bool sizeChanged = (totalMeshCount != m_LastMeshCount) ||
                           (scene.Materials.size() != m_LastMaterialCount);
 
         bool needsRebuild = !m_SceneValid || sizeChanged;
 
         // Create or update scene buffers on first run or when scene changes
-        if (m_SphereBuffer == VK_NULL_HANDLE || needsRebuild)
+        if (m_VertexBuffer == VK_NULL_HANDLE || needsRebuild)
         {
-            if (needsRebuild && m_SphereBuffer != VK_NULL_HANDLE)
+            if (needsRebuild && m_VertexBuffer != VK_NULL_HANDLE)
             {
                 // Clean up old buffers if size changed
-                if (scene.Spheres.size() != m_LastSphereCount)
+                if (totalMeshCount != m_LastMeshCount)
                 {
-                    vkDestroyBuffer(m_Device, m_SphereBuffer, nullptr);
-                    vkFreeMemory(m_Device, m_SphereMemory, nullptr);
-                    m_SphereBuffer = VK_NULL_HANDLE;
+                    vkDestroyBuffer(m_Device, m_VertexBuffer, nullptr);
+                    vkFreeMemory(m_Device, m_VertexMemory, nullptr);
+                    m_VertexBuffer = VK_NULL_HANDLE;
+
+                    vkDestroyBuffer(m_Device, m_IndexBuffer, nullptr);
+                    vkFreeMemory(m_Device, m_IndexMemory, nullptr);
+                    m_IndexBuffer = VK_NULL_HANDLE;
                 }
                 if (scene.Materials.size() != m_LastMaterialCount)
                 {
@@ -161,13 +167,13 @@ namespace Vlkrt
                 }
             }
 
-            if (m_SphereBuffer == VK_NULL_HANDLE)
+            if (m_VertexBuffer == VK_NULL_HANDLE)
                 CreateSceneBuffers(scene);
 
             UpdateSceneData(scene);
 
             // Store current state and mark scene as valid
-            m_LastSphereCount = scene.Spheres.size();
+            m_LastMeshCount = totalMeshCount;
             m_LastMaterialCount = scene.Materials.size();
             m_SceneValid = true;
         }
@@ -248,19 +254,17 @@ namespace Vlkrt
 
     void Renderer::CreateRayTracingPipeline()
     {
-        // Load shaders
+        // Load shaders (no intersection shader for triangle geometry)
         auto raygenCode = ShaderLoader::LoadShaderSPIRV("Source/Shaders/raygen.rgen.spv");
         auto missCode = ShaderLoader::LoadShaderSPIRV("Source/Shaders/miss.rmiss.spv");
         auto closestHitCode = ShaderLoader::LoadShaderSPIRV("Source/Shaders/closesthit.rchit.spv");
-        auto intersectionCode = ShaderLoader::LoadShaderSPIRV("Source/Shaders/intersection.rint.spv");
 
         m_RaygenShader = ShaderLoader::CreateShaderModule(m_Device, raygenCode);
         m_MissShader = ShaderLoader::CreateShaderModule(m_Device, missCode);
         m_ClosestHitShader = ShaderLoader::CreateShaderModule(m_Device, closestHitCode);
-        m_IntersectionShader = ShaderLoader::CreateShaderModule(m_Device, intersectionCode);
 
         // Shader stages
-        VkPipelineShaderStageCreateInfo stages[4] = {};
+        VkPipelineShaderStageCreateInfo stages[3] = {};
 
         // Raygen
         stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -279,12 +283,6 @@ namespace Vlkrt
         stages[2].stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
         stages[2].module = m_ClosestHitShader;
         stages[2].pName = "main";
-
-        // Intersection
-        stages[3].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        stages[3].stage = VK_SHADER_STAGE_INTERSECTION_BIT_KHR;
-        stages[3].module = m_IntersectionShader;
-        stages[3].pName = "main";
 
         // Shader groups
         VkRayTracingShaderGroupCreateInfoKHR groups[3] = {};
@@ -305,13 +303,13 @@ namespace Vlkrt
         groups[1].anyHitShader = VK_SHADER_UNUSED_KHR;
         groups[1].intersectionShader = VK_SHADER_UNUSED_KHR;
 
-        // Hit group (procedural: closest hit + intersection)
+        // Hit group (triangles: only closest hit, no intersection shader)
         groups[2].sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
-        groups[2].type = VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
+        groups[2].type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
         groups[2].generalShader = VK_SHADER_UNUSED_KHR;
         groups[2].closestHitShader = 2;
         groups[2].anyHitShader = VK_SHADER_UNUSED_KHR;
-        groups[2].intersectionShader = 3;
+        groups[2].intersectionShader = VK_SHADER_UNUSED_KHR;
 
         // Create pipeline layout (push constants for camera)
         VkPushConstantRange pushConstant = {};
@@ -331,7 +329,7 @@ namespace Vlkrt
         // Create ray tracing pipeline
         VkRayTracingPipelineCreateInfoKHR pipelineInfo = {};
         pipelineInfo.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
-        pipelineInfo.stageCount = 4;
+        pipelineInfo.stageCount = 3;
         pipelineInfo.pStages = stages;
         pipelineInfo.groupCount = 3;
         pipelineInfo.pGroups = groups;
@@ -399,7 +397,7 @@ namespace Vlkrt
     void Renderer::CreateDescriptorSets()
     {
         // Create descriptor set layout
-        VkDescriptorSetLayoutBinding bindings[4] = {};
+        VkDescriptorSetLayoutBinding bindings[6] = {};
 
         // Binding 0: Acceleration structure
         bindings[0].binding = 0;
@@ -413,21 +411,33 @@ namespace Vlkrt
         bindings[1].descriptorCount = 1;
         bindings[1].stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
 
-        // Binding 2: Sphere buffer
+        // Binding 2: Vertex buffer
         bindings[2].binding = 2;
         bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         bindings[2].descriptorCount = 1;
-        bindings[2].stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_INTERSECTION_BIT_KHR;
+        bindings[2].stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
 
-        // Binding 3: Material buffer
+        // Binding 3: Index buffer
         bindings[3].binding = 3;
         bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         bindings[3].descriptorCount = 1;
         bindings[3].stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
 
+        // Binding 4: Material buffer
+        bindings[4].binding = 4;
+        bindings[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        bindings[4].descriptorCount = 1;
+        bindings[4].stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+
+        // Binding 5: Material index buffer
+        bindings[5].binding = 5;
+        bindings[5].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        bindings[5].descriptorCount = 1;
+        bindings[5].stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+
         VkDescriptorSetLayoutCreateInfo layoutInfo = {};
         layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        layoutInfo.bindingCount = 4;
+        layoutInfo.bindingCount = 6;
         layoutInfo.pBindings = bindings;
 
         vkCreateDescriptorSetLayout(m_Device, &layoutInfo, nullptr, &m_DescriptorSetLayout);
@@ -439,7 +449,7 @@ namespace Vlkrt
         poolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
         poolSizes[1].descriptorCount = 1;
         poolSizes[2].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        poolSizes[2].descriptorCount = 2;
+        poolSizes[2].descriptorCount = 4;  // Now 4 storage buffers (vertices, indices, materials, material indices)
 
         VkDescriptorPoolCreateInfo poolInfo = {};
         poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -461,12 +471,37 @@ namespace Vlkrt
 
     void Renderer::CreateSceneBuffers(const Scene& scene)
     {
-        // Create sphere buffer
-        m_SphereBufferSize = sizeof(GPUSphere) * scene.Spheres.size();
-        m_SphereBuffer = CreateBuffer(m_SphereBufferSize,
-            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+        // Calculate total vertices and indices across all meshes (static + dynamic)
+        size_t totalVertices = 0;
+        size_t totalIndices = 0;
+        for (const auto& mesh : scene.StaticMeshes)
+        {
+            totalVertices += mesh.Vertices.size();
+            totalIndices += mesh.Indices.size();
+        }
+        for (const auto& mesh : scene.DynamicMeshes)
+        {
+            totalVertices += mesh.Vertices.size();
+            totalIndices += mesh.Indices.size();
+        }
+
+        // Create vertex buffer
+        m_VertexBufferSize = sizeof(GPUVertex) * totalVertices;
+        m_VertexBuffer = CreateBuffer(m_VertexBufferSize,
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+            VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-            m_SphereMemory);
+            m_VertexMemory);
+
+        // Create index buffer
+        m_IndexBufferSize = sizeof(uint32_t) * totalIndices;
+        m_IndexBuffer = CreateBuffer(m_IndexBufferSize,
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+            VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+            VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            m_IndexMemory);
 
         // Create material buffer
         m_MaterialBufferSize = sizeof(GPUMaterial) * scene.Materials.size();
@@ -474,23 +509,100 @@ namespace Vlkrt
             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
             m_MaterialMemory);
+
+        // Create material index buffer (one uint32 per triangle)
+        uint32_t totalTriangles = totalIndices / 3;
+        m_MaterialIndexBufferSize = sizeof(uint32_t) * totalTriangles;
+        m_MaterialIndexBuffer = CreateBuffer(m_MaterialIndexBufferSize,
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            m_MaterialIndexMemory);
     }
 
     void Renderer::UpdateSceneData(const Scene& scene)
     {
-        // Upload sphere data
-        std::vector<GPUSphere> gpuSpheres(scene.Spheres.size());
-        for (size_t i = 0; i < scene.Spheres.size(); i++)
+        // Flatten all meshes (static + dynamic) into single vertex/index buffers
+        std::vector<GPUVertex> gpuVertices;
+        std::vector<uint32_t> gpuIndices;
+        std::vector<uint32_t> materialIndices;  // Material index per triangle
+        uint32_t vertexOffset = 0;
+
+        // Process static meshes
+        for (const auto& mesh : scene.StaticMeshes)
         {
-            gpuSpheres[i].position = scene.Spheres[i].Position;
-            gpuSpheres[i].radius = scene.Spheres[i].Radius;
-            gpuSpheres[i].materialIndex = scene.Spheres[i].MaterialIndex;
+            // Copy vertices and apply mesh transform
+            for (const auto& vertex : mesh.Vertices)
+            {
+                GPUVertex gpuVert;
+                // Transform position
+                glm::vec4 transformedPos = mesh.Transform * glm::vec4(vertex.Position, 1.0f);
+                gpuVert.position = glm::vec3(transformedPos);
+                // Transform normal (use transpose of inverse for normals, but for uniform scaling this simplifies)
+                glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(mesh.Transform)));
+                gpuVert.normal = glm::normalize(normalMatrix * vertex.Normal);
+                gpuVert.texCoord = vertex.TexCoord;
+                gpuVertices.push_back(gpuVert);
+            }
+
+            // Copy indices with offset
+            for (const auto& index : mesh.Indices)
+            {
+                gpuIndices.push_back(index + vertexOffset);
+            }
+
+            // Store material index for each triangle in this mesh
+            uint32_t triangleCount = static_cast<uint32_t>(mesh.Indices.size() / 3);
+            for (uint32_t i = 0; i < triangleCount; i++)
+            {
+                materialIndices.push_back(static_cast<uint32_t>(mesh.MaterialIndex));
+            }
+
+            vertexOffset += static_cast<uint32_t>(mesh.Vertices.size());
         }
 
+        // Process dynamic meshes
+        for (const auto& mesh : scene.DynamicMeshes)
+        {
+            // Copy vertices and apply mesh transform
+            for (const auto& vertex : mesh.Vertices)
+            {
+                GPUVertex gpuVert;
+                // Transform position
+                glm::vec4 transformedPos = mesh.Transform * glm::vec4(vertex.Position, 1.0f);
+                gpuVert.position = glm::vec3(transformedPos);
+                // Transform normal (use transpose of inverse for normals, but for uniform scaling this simplifies)
+                glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(mesh.Transform)));
+                gpuVert.normal = glm::normalize(normalMatrix * vertex.Normal);
+                gpuVert.texCoord = vertex.TexCoord;
+                gpuVertices.push_back(gpuVert);
+            }
+
+            // Copy indices with offset
+            for (const auto& index : mesh.Indices)
+            {
+                gpuIndices.push_back(index + vertexOffset);
+            }
+
+            // Store material index for each triangle in this mesh
+            uint32_t triangleCount = static_cast<uint32_t>(mesh.Indices.size() / 3);
+            for (uint32_t i = 0; i < triangleCount; i++)
+            {
+                materialIndices.push_back(static_cast<uint32_t>(mesh.MaterialIndex));
+            }
+
+            vertexOffset += static_cast<uint32_t>(mesh.Vertices.size());
+        }
+
+        // Upload vertex data to GPU
         void* data;
-        vkMapMemory(m_Device, m_SphereMemory, 0, m_SphereBufferSize, 0, &data);
-        memcpy(data, gpuSpheres.data(), m_SphereBufferSize);
-        vkUnmapMemory(m_Device, m_SphereMemory);
+        vkMapMemory(m_Device, m_VertexMemory, 0, m_VertexBufferSize, 0, &data);
+        memcpy(data, gpuVertices.data(), m_VertexBufferSize);
+        vkUnmapMemory(m_Device, m_VertexMemory);
+
+        // Upload index data to GPU
+        vkMapMemory(m_Device, m_IndexMemory, 0, m_IndexBufferSize, 0, &data);
+        memcpy(data, gpuIndices.data(), m_IndexBufferSize);
+        vkUnmapMemory(m_Device, m_IndexMemory);
 
         // Upload material data
         std::vector<GPUMaterial> gpuMaterials(scene.Materials.size());
@@ -507,8 +619,16 @@ namespace Vlkrt
         memcpy(data, gpuMaterials.data(), m_MaterialBufferSize);
         vkUnmapMemory(m_Device, m_MaterialMemory);
 
-        // Rebuild acceleration structure
-        m_AccelerationStructure->Rebuild(scene.Spheres);
+        // Upload material index data (one per triangle)
+        vkMapMemory(m_Device, m_MaterialIndexMemory, 0, m_MaterialIndexBufferSize, 0, &data);
+        memcpy(data, materialIndices.data(), m_MaterialIndexBufferSize);
+        vkUnmapMemory(m_Device, m_MaterialIndexMemory);
+
+        // Rebuild acceleration structure with all meshes (static + dynamic)
+        std::vector<Mesh> allMeshes;
+        allMeshes.insert(allMeshes.end(), scene.StaticMeshes.begin(), scene.StaticMeshes.end());
+        allMeshes.insert(allMeshes.end(), scene.DynamicMeshes.begin(), scene.DynamicMeshes.end());
+        m_AccelerationStructure->Rebuild(allMeshes, m_VertexBuffer, m_IndexBuffer);
 
         // Update descriptor sets
         VkWriteDescriptorSetAccelerationStructureKHR asInfo = {};
@@ -521,17 +641,27 @@ namespace Vlkrt
         imageInfo.imageView = m_FinalImage->GetVkImageView();
         imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-        VkDescriptorBufferInfo sphereBufferInfo = {};
-        sphereBufferInfo.buffer = m_SphereBuffer;
-        sphereBufferInfo.offset = 0;
-        sphereBufferInfo.range = m_SphereBufferSize;
+        VkDescriptorBufferInfo vertexBufferInfo = {};
+        vertexBufferInfo.buffer = m_VertexBuffer;
+        vertexBufferInfo.offset = 0;
+        vertexBufferInfo.range = m_VertexBufferSize;
+
+        VkDescriptorBufferInfo indexBufferInfo = {};
+        indexBufferInfo.buffer = m_IndexBuffer;
+        indexBufferInfo.offset = 0;
+        indexBufferInfo.range = m_IndexBufferSize;
 
         VkDescriptorBufferInfo materialBufferInfo = {};
         materialBufferInfo.buffer = m_MaterialBuffer;
         materialBufferInfo.offset = 0;
         materialBufferInfo.range = m_MaterialBufferSize;
 
-        VkWriteDescriptorSet writes[4] = {};
+        VkDescriptorBufferInfo materialIndexBufferInfo = {};
+        materialIndexBufferInfo.buffer = m_MaterialIndexBuffer;
+        materialIndexBufferInfo.offset = 0;
+        materialIndexBufferInfo.range = m_MaterialIndexBufferSize;
+
+        VkWriteDescriptorSet writes[6] = {};
 
         // Acceleration structure
         writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -549,23 +679,39 @@ namespace Vlkrt
         writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
         writes[1].pImageInfo = &imageInfo;
 
-        // Sphere buffer
+        // Vertex buffer
         writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[2].dstSet = m_DescriptorSet;
         writes[2].dstBinding = 2;
         writes[2].descriptorCount = 1;
         writes[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[2].pBufferInfo = &sphereBufferInfo;
+        writes[2].pBufferInfo = &vertexBufferInfo;
 
-        // Material buffer
+        // Index buffer
         writes[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[3].dstSet = m_DescriptorSet;
         writes[3].dstBinding = 3;
         writes[3].descriptorCount = 1;
         writes[3].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[3].pBufferInfo = &materialBufferInfo;
+        writes[3].pBufferInfo = &indexBufferInfo;
 
-        vkUpdateDescriptorSets(m_Device, 4, writes, 0, nullptr);
+        // Material buffer
+        writes[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[4].dstSet = m_DescriptorSet;
+        writes[4].dstBinding = 4;
+        writes[4].descriptorCount = 1;
+        writes[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[4].pBufferInfo = &materialBufferInfo;
+
+        // Material index buffer
+        writes[5].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[5].dstSet = m_DescriptorSet;
+        writes[5].dstBinding = 5;
+        writes[5].descriptorCount = 1;
+        writes[5].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[5].pBufferInfo = &materialIndexBufferInfo;
+
+        vkUpdateDescriptorSets(m_Device, 6, writes, 0, nullptr);
     }
 
     VkBuffer Renderer::CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage,

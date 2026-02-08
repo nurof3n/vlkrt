@@ -45,12 +45,24 @@ namespace Vlkrt
         groundMat.Albedo    = { 0.3f, 0.3f, 0.4f };
         groundMat.Roughness = 0.8f;
 
-        // Add ground sphere
-        Sphere ground;
-        ground.Position      = { 0.0f, -1000.5f, 0.0f };
-        ground.Radius        = 1000.0f;
-        ground.MaterialIndex = 2;  // ground material
-        m_Scene.Spheres.push_back(ground);
+        // Material for bunny (white)
+        Material& bunnyMat = m_Scene.Materials.emplace_back();
+        bunnyMat.Albedo    = { 1.0f, 1.0f, 1.0f };
+        bunnyMat.Roughness = 0.5f;
+
+        // Add ground plane as a large quad
+        Mesh groundPlane          = MeshLoader::GenerateQuad(20.0f);
+        groundPlane.MaterialIndex = 2;  // ground material
+        groundPlane.Transform     = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.0f));
+        m_Scene.StaticMeshes.push_back(groundPlane);
+
+        // Load bunny OBJ as a static object
+        Mesh bunnyMesh          = MeshLoader::LoadOBJ("../resources/obj/bunny.obj");
+        bunnyMesh.MaterialIndex = 3;  // bunny material (white)
+        // Scale and position the bunny - bunny is very small so needs large scaling
+        bunnyMesh.Transform = glm::translate(glm::mat4(1.0f), glm::vec3(3.0f, 0.0f, 0.0f))
+                              * glm::scale(glm::mat4(1.0f), glm::vec3(5.0f));
+        m_Scene.StaticMeshes.push_back(bunnyMesh);
     }
 
     void ClientLayer::OnDetach()
@@ -58,26 +70,43 @@ namespace Vlkrt
 
     void ClientLayer::OnUpdate(float ts)
     {
-        // Network player movement
-        glm::vec2 dir{ 0.0f };
-        if (Walnut::Input::IsKeyDown(Walnut::KeyCode::W))
-            dir.y = -1.0f;
-        else if (Walnut::Input::IsKeyDown(Walnut::KeyCode::S))
-            dir.y = 1.0f;
+        // Check if camera control mode (right-click held)
+        bool cameraControlMode = Walnut::Input::IsMouseButtonDown(Walnut::MouseButton::Right);
 
-        if (Walnut::Input::IsKeyDown(Walnut::KeyCode::A))
-            dir.x = -1.0f;
-        else if (Walnut::Input::IsKeyDown(Walnut::KeyCode::D))
-            dir.x = 1.0f;
-
-        if (dir.x != 0.0f || dir.y != 0.0f) {
-            dir              = glm::normalize(dir);
-            m_PlayerVelocity = dir * m_Speed;
-        }
-        else
+        if (cameraControlMode) {
+            // When holding right-click: camera moves with WASD, player stays still
             m_PlayerVelocity = {};
+            m_Camera.OnUpdate(ts);
+        }
+        else {
+            // Normal mode: WASD moves player, camera only moves on mouse drag
+            glm::vec2 dir{ 0.0f };
+            if (Walnut::Input::IsKeyDown(Walnut::KeyCode::W))
+                dir.y = -1.0f;
+            else if (Walnut::Input::IsKeyDown(Walnut::KeyCode::S))
+                dir.y = 1.0f;
 
-        m_PlayerPosition += m_PlayerVelocity * ts;
+            if (Walnut::Input::IsKeyDown(Walnut::KeyCode::A))
+                dir.x = -1.0f;
+            else if (Walnut::Input::IsKeyDown(Walnut::KeyCode::D))
+                dir.x = 1.0f;
+
+            bool playerMoving = (dir.x != 0.0f || dir.y != 0.0f);
+
+            if (playerMoving) {
+                dir              = glm::normalize(dir);
+                m_PlayerVelocity = dir * m_Speed;
+            }
+            else
+                m_PlayerVelocity = {};
+
+            m_PlayerPosition += m_PlayerVelocity * ts;
+
+            // Camera only moves when player is not moving
+            if (!playerMoving) {
+                m_Camera.OnUpdate(ts);
+            }
+        }
 
         // Client update
         if (m_Client.GetConnectionStatus() == Walnut::Client::ConnectionStatus::Connected) {
@@ -87,9 +116,6 @@ namespace Vlkrt
             stream.WriteRaw<glm::vec2>(m_PlayerVelocity);
             m_Client.SendBuffer(stream.GetBuffer());
         }
-
-        // Camera update (only when not controlling player movement)
-        m_Camera.OnUpdate(ts);
 
         // Only update scene if something actually changed
         size_t currentPlayerCount = m_PlayerData.size() + 1;  // +1 for local player
@@ -116,7 +142,7 @@ namespace Vlkrt
     {
         auto connectionStatus = m_Client.GetConnectionStatus();
         if (connectionStatus == Walnut::Client::ConnectionStatus::Connected) {
-            //  Get the ImGui viewport size (accounts for dockspace/menus)
+            //   Get the ImGui viewport size (accounts for dockspace/menus)
             ImGuiViewport* viewport          = ImGui::GetMainViewport();
             uint32_t       newViewportWidth  = (uint32_t) viewport->Size.x;
             uint32_t       newViewportHeight = (uint32_t) viewport->Size.y;
@@ -170,33 +196,34 @@ namespace Vlkrt
 
     void ClientLayer::UpdateScene()
     {
-        // Keep only the ground sphere (index 0)
-        m_Scene.Spheres.resize(1);
+        // Clear only dynamic meshes (players), keep static meshes
+        m_Scene.DynamicMeshes.clear();
 
         // Convert 2D positions to 3D world space for raytracing
         // Map 2D game space (0-800 or similar) to 3D space
-        const float scale        = 0.01f;  // Scale down from screen space
-        const float sphereRadius = 0.5f;
+        const float scale    = 0.01f;  // Scale down from screen space
+        const float cubeSize = 1.0f;
 
-        // Add current player
-        Sphere playerSphere;
-        playerSphere.Position = { (m_PlayerPosition.x - 400.0f) * scale, 0.0f, (m_PlayerPosition.y - 300.0f) * scale };
-        playerSphere.Radius   = sphereRadius;
-        playerSphere.MaterialIndex = 0;  // red material
-        m_Scene.Spheres.push_back(playerSphere);
+        // Add current player as cube mesh (raised to sit on ground)
+        Mesh playerMesh          = MeshLoader::GenerateCube(cubeSize);
+        playerMesh.MaterialIndex = 0;  // green material
+        glm::vec3 playerPos
+                = { (m_PlayerPosition.x - 400.0f) * scale, cubeSize * 0.5f, (m_PlayerPosition.y - 300.0f) * scale };
+        playerMesh.Transform = glm::translate(glm::mat4(1.0f), playerPos);
+        m_Scene.DynamicMeshes.push_back(playerMesh);
 
-        // Add other players
+        // Add other players as cube meshes
         m_PlayerDataMutex.lock();
         for (const auto& [playerID, playerData] : m_PlayerData) {
             if (playerID == m_PlayerID)
                 continue;
 
-            Sphere otherSphere;
-            otherSphere.Position
-                    = { (playerData.Position.x - 400.0f) * scale, 0.0f, (playerData.Position.y - 300.0f) * scale };
-            otherSphere.Radius        = sphereRadius;
-            otherSphere.MaterialIndex = 1;  // green material
-            m_Scene.Spheres.push_back(otherSphere);
+            Mesh otherPlayerMesh          = MeshLoader::GenerateCube(cubeSize);
+            otherPlayerMesh.MaterialIndex = 1;  // red material
+            glm::vec3 otherPos            = { (playerData.Position.x - 400.0f) * scale, cubeSize * 0.5f,
+                           (playerData.Position.y - 300.0f) * scale };
+            otherPlayerMesh.Transform     = glm::translate(glm::mat4(1.0f), otherPos);
+            m_Scene.DynamicMeshes.push_back(otherPlayerMesh);
         }
         m_PlayerDataMutex.unlock();
     }
