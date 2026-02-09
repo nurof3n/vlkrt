@@ -10,11 +10,20 @@ namespace Vlkrt
 {
     Scene SceneLoader::LoadFromYAML(const std::string& filepath)
     {
+        auto [scene, root] = LoadFromYAMLWithHierarchy(filepath);
+        return scene;
+    }
+
+    std::pair<Scene, SceneEntity> SceneLoader::LoadFromYAMLWithHierarchy(const std::string& filepath)
+    {
         try {
             WL_INFO_TAG("SceneLoader", "Loading YAML from: {}", filepath);
             YAML::Node root = YAML::LoadFile(filepath);
 
-            Scene scene;
+            Scene       scene;
+            SceneEntity sceneRoot;
+            sceneRoot.Type = EntityType::Empty;
+            sceneRoot.Name = "scene_root";
 
             // Parse materials
             if (root["materials"]) {
@@ -64,11 +73,12 @@ namespace Vlkrt
                 materialMap[std::to_string(i)] = i;
             }
 
-            // Parse entities
+            // Parse entities and build hierarchy
             if (root["entities"]) {
                 WL_INFO_TAG("SceneLoader", "Found entities section");
                 for (const auto& entityNode : root["entities"]) {
-                    SceneEntity entity = ParseEntity(entityNode);
+                    SceneEntity entity = ParseEntity(entityNode, &sceneRoot);
+                    sceneRoot.Children.push_back(entity);
                     FlattenEntity(entity, glm::mat4(1.0f), scene, materialMap);
                 }
             }
@@ -76,19 +86,20 @@ namespace Vlkrt
             WL_INFO_TAG("SceneLoader", "Scene loaded - Materials: {}, Meshes: {}, Lights: {}", scene.Materials.size(),
                     scene.StaticMeshes.size(), scene.Lights.size());
 
-            return scene;
+            return { scene, sceneRoot };
         }
         catch (const std::exception& e) {
             WL_ERROR_TAG("SceneLoader", "Error loading YAML scene: {} - {}", filepath, e.what());
-            return Scene();
+            return { Scene(), SceneEntity() };
         }
     }
 
-    SceneEntity SceneLoader::ParseEntity(const YAML::Node& entityNode)
+    SceneEntity SceneLoader::ParseEntity(const YAML::Node& entityNode, SceneEntity* parent)
     {
         SceneEntity entity;
         entity.Type           = EntityType::Empty;
         entity.LocalTransform = Transform();
+        entity.Parent         = parent;  // Set parent pointer
 
         // Parse name
         if (entityNode["name"]) {
@@ -140,10 +151,30 @@ namespace Vlkrt
             entity.LocalTransform = ParseTransform(entityNode["transform"]);
         }
 
-        // Parse children
+        // For directional lights with explicit direction in YAML, rotate the transform to match
+        if (entityNode["light_direction"]) {
+            auto      dirVec           = entityNode["light_direction"].as<std::vector<float>>();
+            glm::vec3 desiredDirection = glm::normalize(glm::vec3(dirVec[0], dirVec[1], dirVec[2]));
+
+            // Create a rotation from default direction (0,0,-1) to the desired direction
+            glm::vec3 defaultDirection = glm::vec3(0.0f, 0.0f, -1.0f);
+            glm::vec3 axis             = glm::cross(defaultDirection, desiredDirection);
+            float     dot              = glm::dot(defaultDirection, desiredDirection);
+
+            if (glm::length(axis) > 0.001f) {  // Not parallel
+                float angle                    = glm::acos(glm::clamp(dot, -1.0f, 1.0f));
+                entity.LocalTransform.Rotation = glm::angleAxis(angle, glm::normalize(axis));
+            }
+            else if (dot < 0.0f) {  // Directly opposite
+                entity.LocalTransform.Rotation = glm::angleAxis(glm::pi<float>(), glm::vec3(0.0f, 1.0f, 0.0f));
+            }
+            // else: directions are the same, keep identity rotation
+        }
+
+        // Parse children (pass this entity as parent to children)
         if (entityNode["children"]) {
             for (const auto& childNode : entityNode["children"]) {
-                SceneEntity child = ParseEntity(childNode);
+                SceneEntity child = ParseEntity(childNode, &entity);
                 entity.Children.push_back(child);
             }
         }
@@ -311,6 +342,186 @@ namespace Vlkrt
         }
         catch (const std::exception& e) {
             WL_ERROR_TAG("SceneLoader", "Error saving YAML scene: {} - {}", filepath, e.what());
+        }
+    }
+
+    HierarchyMapping SceneLoader::CreateMapping(const SceneEntity& rootEntity, const Scene& scene)
+    {
+        HierarchyMapping mapping;
+        uint32_t         meshIndex  = 0;
+        uint32_t         lightIndex = 0;
+        PopulateMappingRecursive(rootEntity, scene, mapping, meshIndex, lightIndex);
+        return mapping;
+    }
+
+    void SceneLoader::PopulateMappingRecursive(const SceneEntity& entity, const Scene& scene, HierarchyMapping& mapping,
+            uint32_t& meshIndex, uint32_t& lightIndex)
+    {
+        // Map this entity to its index in the flat arrays
+        if (entity.Type == EntityType::Mesh) {
+            if (meshIndex < scene.StaticMeshes.size()) {
+                mapping.EntityToMeshIdx[const_cast<SceneEntity*>(&entity)] = meshIndex;
+                mapping.MeshIndexToEntity.push_back(const_cast<SceneEntity*>(&entity));
+                meshIndex++;
+            }
+        }
+        else if (entity.Type == EntityType::Light) {
+            if (lightIndex < scene.Lights.size()) {
+                mapping.EntityToLightIdx[const_cast<SceneEntity*>(&entity)] = lightIndex;
+                mapping.LightIndexToEntity.push_back(const_cast<SceneEntity*>(&entity));
+                lightIndex++;
+            }
+        }
+
+        // Recursively map children
+        for (const auto& child : entity.Children) {
+            PopulateMappingRecursive(child, scene, mapping, meshIndex, lightIndex);
+        }
+    }
+
+    void SceneLoader::UpdateFlatScene(const SceneEntity& entity, const glm::mat4& parentWorldTransform, Scene& outScene,
+            const HierarchyMapping& mapping, std::vector<uint32_t>& outModifiedMeshes,
+            std::vector<uint32_t>& outModifiedLights)
+    {
+        // Compute world transform for this entity
+        glm::mat4 worldTransform = entity.LocalTransform.GetWorldMatrix(parentWorldTransform);
+
+        // Update flat arrays if this entity is dirty or parent was (implies this is also dirty)
+        if (entity.Type == EntityType::Mesh) {
+            auto it = mapping.EntityToMeshIdx.find(const_cast<SceneEntity*>(&entity));
+            if (it != mapping.EntityToMeshIdx.end()) {
+                uint32_t meshIdx = it->second;
+                if (meshIdx < outScene.StaticMeshes.size()) {
+                    outScene.StaticMeshes[meshIdx].Transform = worldTransform;
+                    outModifiedMeshes.push_back(meshIdx);
+                }
+            }
+        }
+        else if (entity.Type == EntityType::Light) {
+            auto it = mapping.EntityToLightIdx.find(const_cast<SceneEntity*>(&entity));
+            if (it != mapping.EntityToLightIdx.end()) {
+                uint32_t lightIdx = it->second;
+                if (lightIdx < outScene.Lights.size()) {
+                    Light& light               = outScene.Lights[lightIdx];
+                    light.Position             = glm::vec3(worldTransform[3]);
+                    glm::vec3 defaultDirection = glm::vec3(0.0f, 0.0f, -1.0f);
+                    light.Direction = glm::normalize(glm::vec3(worldTransform * glm::vec4(defaultDirection, 0.0f)));
+                    outModifiedLights.push_back(lightIdx);
+                }
+            }
+        }
+
+        // Recursively update children
+        for (const auto& child : entity.Children) {
+            UpdateFlatScene(child, worldTransform, outScene, mapping, outModifiedMeshes, outModifiedLights);
+        }
+    }
+
+    void SceneLoader::SaveToYAMLWithHierarchy(
+            const std::string& filepath, const Scene& scene, const SceneEntity& rootEntity)
+    {
+        try {
+            WL_INFO_TAG("SceneLoader", "Saving scene with hierarchy to: {}", filepath);
+
+            std::ofstream file(filepath);
+            if (!file.is_open()) {
+                WL_ERROR_TAG("SceneLoader", "Failed to open file for writing: {}", filepath);
+                return;
+            }
+
+            // Write materials section
+            file << "materials:\n";
+            for (const auto& mat : scene.Materials) {
+                file << "- name: " << mat.Name << "\n";
+                file << "  albedo: [ " << mat.Albedo.x << ", " << mat.Albedo.y << ", " << mat.Albedo.z << " ]\n";
+                file << "  roughness: " << mat.Roughness << "\n";
+                file << "  metallic: " << mat.Metallic << "\n";
+
+                if (mat.EmissionPower > 0.0f) {
+                    file << "  emission_color: [ " << mat.EmissionColor.x << ", " << mat.EmissionColor.y << ", "
+                         << mat.EmissionColor.z << " ]\n";
+                    file << "  emission_power: " << mat.EmissionPower << "\n";
+                }
+            }
+
+            // Write entities section - save only the children of root (not the root wrapper itself)
+            file << "\nentities:\n";
+            for (const auto& child : rootEntity.Children) {
+                SaveEntityToYAML(file, child, 0);
+            }
+
+            file.close();
+
+            WL_INFO_TAG("SceneLoader", "Scene saved successfully with {} materials, {} meshes, and {} lights",
+                    scene.Materials.size(), scene.StaticMeshes.size(), scene.Lights.size());
+        }
+        catch (const std::exception& e) {
+            WL_ERROR_TAG("SceneLoader", "Error saving YAML scene: {} - {}", filepath, e.what());
+        }
+    }
+
+    void SceneLoader::SaveEntityToYAML(std::ofstream& file, const SceneEntity& entity, int indentLevel)
+    {
+        std::string indent(indentLevel * 2, ' ');
+        std::string childIndent((indentLevel + 1) * 2, ' ');
+
+        file << indent << "- name: " << entity.Name << "\n";
+
+        // Write type
+        std::string typeStr = "empty";
+        if (entity.Type == EntityType::Mesh)
+            typeStr = "mesh";
+        else if (entity.Type == EntityType::Light)
+            typeStr = "light";
+        else if (entity.Type == EntityType::Camera)
+            typeStr = "camera";
+        file << indent << "  type: " << typeStr << "\n";
+
+        // Write transform
+        file << indent << "  transform:\n";
+        file << indent << "    position: [ " << entity.LocalTransform.Position.x << ", "
+             << entity.LocalTransform.Position.y << ", " << entity.LocalTransform.Position.z << " ]\n";
+        // Convert glm::quat [w, x, y, z] to YAML [x, y, z, w] format
+        file << indent << "    rotation: [ " << entity.LocalTransform.Rotation.x << ", "
+             << entity.LocalTransform.Rotation.y << ", " << entity.LocalTransform.Rotation.z << ", "
+             << entity.LocalTransform.Rotation.w << " ]\n";
+        file << indent << "    scale: [ " << entity.LocalTransform.Scale.x << ", " << entity.LocalTransform.Scale.y
+             << ", " << entity.LocalTransform.Scale.z << " ]\n";
+
+        // Write mesh-specific data
+        if (entity.Type == EntityType::Mesh) {
+            file << indent
+                 << "  mesh_path: " << (entity.MeshData.FilePath.empty() ? "unknown.obj" : entity.MeshData.FilePath)
+                 << "\n";
+            file << indent << "  material: " << entity.MeshData.MaterialIndex << "\n";
+        }
+
+        // Write light-specific data
+        if (entity.Type == EntityType::Light) {
+            file << indent << "  light_color: [ " << entity.LightData.Color.x << ", " << entity.LightData.Color.y
+                 << ", " << entity.LightData.Color.z << " ]\n";
+            file << indent << "  light_intensity: " << entity.LightData.Intensity << "\n";
+            file << indent << "  light_type: " << (int) entity.LightData.Type << "\n";
+
+            // For directional lights, save the direction derived from rotation
+            if (entity.LightData.Type < 0.5f) {  // Directional light
+                glm::vec3 defaultDirection = glm::vec3(0.0f, 0.0f, -1.0f);
+                glm::vec3 direction        = glm::normalize(
+                        glm::vec3(glm::mat4_cast(entity.LocalTransform.Rotation) * glm::vec4(defaultDirection, 0.0f)));
+                file << indent << "  light_direction: [ " << direction.x << ", " << direction.y << ", " << direction.z
+                     << " ]\n";
+            }
+            else {  // Point light
+                file << indent << "  light_radius: " << entity.LightData.Radius << "\n";
+            }
+        }
+
+        // Write children recursively
+        if (!entity.Children.empty()) {
+            file << indent << "  children:\n";
+            for (const auto& child : entity.Children) {
+                SaveEntityToYAML(file, child, indentLevel + 2);
+            }
         }
     }
 }  // namespace Vlkrt

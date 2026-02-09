@@ -6,6 +6,7 @@
 #include "Renderer.h"
 #include "Camera.h"
 #include "Scene.h"
+#include "SceneLoader.h"
 #include "MeshLoader.h"
 
 #include <mutex>
@@ -37,7 +38,15 @@ namespace Vlkrt
         void OnDataReceived(const Walnut::Buffer& buffer);
         void UpdateScene();
         void LoadScene(const std::string& scenePath);
+        void SyncSceneToHierarchy();
         void SaveScene();
+
+        // Hierarchical ImGui scene editor functions
+        void ImGuiRenderSceneHierarchy();
+        void ImGuiRenderEntity(SceneEntity& entity, const glm::mat4& parentWorldTransform);
+        void ImGuiRenderTransformControls(Transform& localTransform, const std::string& id);
+        void ImGuiRenderEntityProperties(SceneEntity& entity);
+        void FlattenHierarchyToScene(const SceneEntity& entity, const glm::mat4& parentWorld);
 
     private:
         // Client player data
@@ -63,8 +72,13 @@ namespace Vlkrt
         float    m_LastRenderTime{};
 
         // Scene management
-        std::string m_CurrentScene = "default";
+        std::string m_CurrentScene  = "default";
         std::string m_SelectedScene = "default";
+
+        // Hierarchical scene data
+        SceneEntity      m_SceneRoot;         // Root of scene hierarchy
+        SceneHierarchy   m_SceneHierarchy;    // Transform management
+        HierarchyMapping m_HierarchyMapping;  // Entity-to-flat-array mapping
 
         // Scene change tracking
         glm::vec2 m_LastPlayerPosition{};

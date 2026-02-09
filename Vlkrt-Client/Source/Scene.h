@@ -96,6 +96,10 @@ namespace Vlkrt
         Transform   LocalTransform;
         glm::mat4   WorldTransform = glm::mat4(1.0f);
 
+        // Transform caching and dirty tracking
+        bool         IsDirty = true;     // Mark for recomputation
+        SceneEntity* Parent  = nullptr;  // Back-reference to parent (set during hierarchy construction)
+
         std::vector<SceneEntity> Children;
 
         // Type-specific data
@@ -119,6 +123,21 @@ namespace Vlkrt
             float Near = 0.1f;
             float Far  = 100.0f;
         } CameraData;
+
+        // Mark this node and all children as dirty for transform recomputation
+        void MarkDirtyRecursive()
+        {
+            IsDirty = true;
+            for (auto& child : Children)
+                child.MarkDirtyRecursive();
+        }
+
+        // Set local transform and mark as dirty
+        void SetLocalTransform(const Transform& newTransform)
+        {
+            LocalTransform = newTransform;
+            IsDirty        = true;
+        }
     };
 
     struct Scene
@@ -127,5 +146,37 @@ namespace Vlkrt
         std::vector<Mesh>     DynamicMeshes;  // Meshes that change each frame (players)
         std::vector<Material> Materials;
         std::vector<Light>    Lights;  // Light sources for shading
+    };
+
+    // Scene hierarchy manager for efficient transform updates
+    class SceneHierarchy
+    {
+    public:
+        // Update a single entity's local transform and mark it dirty
+        void SetLocalTransform(SceneEntity& entity, const Transform& newTransform)
+        {
+            entity.SetLocalTransform(newTransform);
+        }
+
+        // Compute world transforms for all dirty nodes in the hierarchy
+        void UpdateDirtyTransforms(SceneEntity& root, const glm::mat4& parentWorld = glm::mat4(1.0f))
+        {
+            UpdateDirtyTransformsRecursive(root, parentWorld);
+        }
+
+    private:
+        void UpdateDirtyTransformsRecursive(SceneEntity& entity, const glm::mat4& parentWorld)
+        {
+            // Recompute world transform if this node or its parent is dirty
+            if (entity.IsDirty) {
+                entity.WorldTransform = entity.LocalTransform.GetWorldMatrix(parentWorld);
+                entity.IsDirty        = false;
+            }
+
+            // Recursively update children with this node's world transform
+            for (auto& child : entity.Children) {
+                UpdateDirtyTransformsRecursive(child, entity.WorldTransform);
+            }
+        }
     };
 }  // namespace Vlkrt

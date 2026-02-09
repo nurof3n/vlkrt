@@ -11,6 +11,7 @@
 #include "SceneLoader.h"
 
 #include <glm/gtc/type_ptr.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 #include <GLFW/glfw3.h>
 
@@ -51,15 +52,19 @@ namespace Vlkrt
         else {
             // Normal mode: WASD moves player, camera only moves on mouse drag
             glm::vec2 dir{ 0.0f };
-            if (Walnut::Input::IsKeyDown(Walnut::KeyCode::W))
-                dir.y = -1.0f;
-            else if (Walnut::Input::IsKeyDown(Walnut::KeyCode::S))
-                dir.y = 1.0f;
 
-            if (Walnut::Input::IsKeyDown(Walnut::KeyCode::A))
-                dir.x = -1.0f;
-            else if (Walnut::Input::IsKeyDown(Walnut::KeyCode::D))
-                dir.x = 1.0f;
+            // Only process WASD input if ImGui doesn't want keyboard focus
+            if (!ImGui::GetIO().WantCaptureKeyboard) {
+                if (Walnut::Input::IsKeyDown(Walnut::KeyCode::W))
+                    dir.y = -1.0f;
+                else if (Walnut::Input::IsKeyDown(Walnut::KeyCode::S))
+                    dir.y = 1.0f;
+
+                if (Walnut::Input::IsKeyDown(Walnut::KeyCode::A))
+                    dir.x = -1.0f;
+                else if (Walnut::Input::IsKeyDown(Walnut::KeyCode::D))
+                    dir.x = 1.0f;
+            }
 
             bool playerMoving = (dir.x != 0.0f || dir.y != 0.0f);
 
@@ -97,6 +102,9 @@ namespace Vlkrt
             m_LastPlayerCount    = currentPlayerCount;
             m_NetworkDataChanged = false;
         }
+
+        // Sync hierarchy changes to flat arrays every frame for real-time rendering
+        FlattenHierarchyToScene(m_SceneRoot, glm::mat4(1.0f));
     }
 
     void ClientLayer::OnRender()
@@ -137,29 +145,6 @@ namespace Vlkrt
                         ImVec2(1, 0));
             }
 
-            // Scene selector panel
-            ImGui::Begin("Scene");
-            ImGui::Text("Current Scene: %s", m_CurrentScene.c_str());
-
-            if (ImGui::BeginCombo("##SceneSelector", m_SelectedScene.c_str())) {
-                if (ImGui::Selectable("default", m_SelectedScene == "default")) {
-                    m_SelectedScene = "default";
-                    LoadScene("default");
-                }
-                if (ImGui::Selectable("bunny", m_SelectedScene == "bunny")) {
-                    m_SelectedScene = "bunny";
-                    LoadScene("bunny");
-                }
-                ImGui::EndCombo();
-            }
-
-            ImGui::Separator();
-            if (ImGui::Button("Save Scene", ImVec2(-1, 0))) {
-                SaveScene();
-            }
-
-            ImGui::End();
-
             // Stats panel overlay
             ImGui::Begin("Stats");
             ImGui::Text("Last render: %.3fms", m_LastRenderTime);
@@ -167,47 +152,8 @@ namespace Vlkrt
             ImGui::Text("Players: %zu", m_PlayerData.size());
             ImGui::End();
 
-            // Lighting controls panel
-            ImGui::Begin("Lighting");
-            ImGui::Text("Scene Lights: %zu", m_Scene.Lights.size());
-            ImGui::Separator();
-
-            for (size_t i = 0; i < m_Scene.Lights.size(); ++i) {
-                auto&       light = m_Scene.Lights[i];
-                std::string label = (light.Type > 0.5f) ? "Point Light " : "Directional Light ";
-                label += std::to_string(i);
-
-                if (ImGui::TreeNodeEx(label.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
-                    if (light.Type < 0.5f) {
-                        // Directional light
-                        ImGui::SliderFloat(
-                                ("Intensity##dir" + std::to_string(i)).c_str(), &light.Intensity, 0.0f, 2.0f);
-                        ImGui::ColorEdit3(("Color##dir" + std::to_string(i)).c_str(), &light.Color[0]);
-                        ImGui::SliderFloat(("Dir X##x" + std::to_string(i)).c_str(), &light.Direction.x, -1.0f, 1.0f);
-                        ImGui::SliderFloat(("Dir Y##y" + std::to_string(i)).c_str(), &light.Direction.y, -1.0f, 1.0f);
-                        ImGui::SliderFloat(("Dir Z##z" + std::to_string(i)).c_str(), &light.Direction.z, -1.0f, 1.0f);
-                        if (glm::length(light.Direction) > 0.0f) {
-                            light.Direction = glm::normalize(light.Direction);
-                        }
-                    }
-                    else {
-                        // Point light
-                        ImGui::SliderFloat(
-                                ("Intensity##point" + std::to_string(i)).c_str(), &light.Intensity, 0.0f, 2.0f);
-                        ImGui::ColorEdit3(("Color##point" + std::to_string(i)).c_str(), &light.Color[0]);
-                        ImGui::SliderFloat(("Pos X##px" + std::to_string(i)).c_str(), &light.Position.x, -10.0f, 10.0f);
-                        ImGui::SliderFloat(("Pos Y##py" + std::to_string(i)).c_str(), &light.Position.y, 0.0f, 15.0f);
-                        ImGui::SliderFloat(("Pos Z##pz" + std::to_string(i)).c_str(), &light.Position.z, -10.0f, 10.0f);
-                        ImGui::SliderFloat(("Radius##radius" + std::to_string(i)).c_str(), &light.Radius, 1.0f, 50.0f);
-                    }
-                    ImGui::TreePop();
-                }
-            }
-
-            if (m_Scene.Lights.empty()) {
-                ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "No lights loaded!");
-            }
-            ImGui::End();
+            // Scene hierarchy editor panel (replaces old hardcoded Lighting panel)
+            ImGuiRenderSceneHierarchy();
         }
         else {
             auto readOnly = (connectionStatus == Walnut::Client::ConnectionStatus::Connecting);
@@ -266,9 +212,16 @@ namespace Vlkrt
     void ClientLayer::LoadScene(const std::string& sceneName)
     {
         std::string scenePath = "../scenes/" + sceneName + ".yaml";
-        m_Scene               = SceneLoader::LoadFromYAML(scenePath);
-        m_CurrentScene        = sceneName;
-        m_SelectedScene       = sceneName;
+
+        // Load scene with hierarchy to support efficient transforms
+        auto [scene, root] = SceneLoader::LoadFromYAMLWithHierarchy(scenePath);
+        m_Scene            = scene;
+        m_SceneRoot        = root;
+        m_CurrentScene     = sceneName;
+        m_SelectedScene    = sceneName;
+
+        // Create mapping from hierarchy to flat arrays for incremental updates
+        m_HierarchyMapping = SceneLoader::CreateMapping(m_SceneRoot, m_Scene);
     }
 
     void ClientLayer::OnDataReceived(const Walnut::Buffer& data)
@@ -295,10 +248,294 @@ namespace Vlkrt
         }
     }
 
+    glm::mat4 ComputeParentWorldTransform(SceneEntity* entity)
+    {
+        glm::mat4 result = glm::mat4(1.0f);
+        if (!entity)
+            return result;
+
+        // Walk up the parent chain
+        std::vector<SceneEntity*> parents;
+        SceneEntity*              current = entity->Parent;
+        while (current) {
+            parents.push_back(current);
+            current = current->Parent;
+        }
+
+        // Apply transforms from root down to immediate parent
+        for (int i = (int) parents.size() - 1; i >= 0; --i) {
+            result = result * parents[i]->LocalTransform.GetWorldMatrix(glm::mat4(1.0f));
+        }
+        return result;
+    }
+
+    void ClientLayer::SyncSceneToHierarchy()
+    {
+        // Copy light properties from flat array back to hierarchy
+        // NOTE: We only sync properties (color, intensity, radius, direction), NOT position
+        // Position is determined by the hierarchy structure and is updated via FlattenEntity
+        for (size_t i = 0; i < m_Scene.Lights.size(); ++i) {
+            if (i < m_HierarchyMapping.LightIndexToEntity.size()) {
+                SceneEntity* lightEntity = m_HierarchyMapping.LightIndexToEntity[i];
+                if (lightEntity) {
+                    // Sync editable light properties from flat array to hierarchy
+                    lightEntity->LightData.Color     = m_Scene.Lights[i].Color;
+                    lightEntity->LightData.Intensity = m_Scene.Lights[i].Intensity;
+                    lightEntity->LightData.Type      = m_Scene.Lights[i].Type;
+                    lightEntity->LightData.Radius    = m_Scene.Lights[i].Radius;
+
+                    // For directional lights, convert direction back to rotation quaternion
+                    // (Position is not used for directional lights)
+                    if (m_Scene.Lights[i].Type < 0.5f) {
+                        glm::vec3 desiredDirection = glm::normalize(m_Scene.Lights[i].Direction);
+                        glm::vec3 defaultDirection = glm::vec3(0.0f, 0.0f, -1.0f);
+                        glm::vec3 axis             = glm::cross(defaultDirection, desiredDirection);
+                        float     dot              = glm::dot(defaultDirection, desiredDirection);
+
+                        if (glm::length(axis) > 0.001f) {  // Not parallel
+                            float angle                          = glm::acos(glm::clamp(dot, -1.0f, 1.0f));
+                            lightEntity->LocalTransform.Rotation = glm::angleAxis(angle, glm::normalize(axis));
+                        }
+                        else if (dot < 0.0f) {  // Directly opposite
+                            lightEntity->LocalTransform.Rotation
+                                    = glm::angleAxis(glm::pi<float>(), glm::vec3(0.0f, 1.0f, 0.0f));
+                        }
+                        else {
+                            lightEntity->LocalTransform.Rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);  // Identity
+                        }
+                    }
+                    // For point lights: position is determined by hierarchy structure, not synced here
+                    // To move a point light, edit the lighting_group position or light local position in hierarchy
+                }
+            }
+        }
+    }
+
     void ClientLayer::SaveScene()
     {
+        // Hierarchy is already synced to flat arrays every frame in OnUpdate()
+        // Just save to YAML
         std::string scenePath = "../scenes/" + m_CurrentScene + ".yaml";
-        SceneLoader::SaveToYAML(scenePath, m_Scene);
+        SceneLoader::SaveToYAMLWithHierarchy(scenePath, m_Scene, m_SceneRoot);
         WL_INFO_TAG("Client", "Scene saved to: {}", scenePath);
+
+        // Reload scene from file to verify save
+        LoadScene(m_CurrentScene);
     }
-};  // namespace Vlkrt
+
+    void ClientLayer::ImGuiRenderSceneHierarchy()
+    {
+        ImGui::Begin("Scene");
+
+        ImGui::Text("Current Scene: %s", m_CurrentScene.c_str());
+
+        if (ImGui::BeginCombo("##SceneSelector", m_SelectedScene.c_str())) {
+            if (ImGui::Selectable("default", m_SelectedScene == "default")) {
+                m_SelectedScene = "default";
+                LoadScene("default");
+            }
+            if (ImGui::Selectable("bunny", m_SelectedScene == "bunny")) {
+                m_SelectedScene = "bunny";
+                LoadScene("bunny");
+            }
+            ImGui::EndCombo();
+        }
+
+        if (ImGui::Button("Save Scene", ImVec2(-1, 0))) {
+            SaveScene();
+        }
+
+        ImGui::Separator();
+        for (auto& child : m_SceneRoot.Children) {
+            ImGuiRenderEntity(child, glm::mat4(1.0f));
+        }
+
+        ImGui::End();
+    }
+
+    void ClientLayer::ImGuiRenderEntity(SceneEntity& entity, const glm::mat4& parentWorldTransform)
+    {
+        // Compute world transform for this entity
+        glm::mat4 worldTransform = entity.LocalTransform.GetWorldMatrix(parentWorldTransform);
+
+        // Unique ID for this entity using its address
+        auto idStr = std::to_string((uintptr_t) &entity);
+
+        // Create tree node for this entity (collapsed by default)
+        // Use entity pointer as unique ID so tree state persists during name edits
+        // Printf-style formatting keeps label separate from ID for stability
+        bool isOpen = ImGui::TreeNodeEx((void*) (uintptr_t) &entity, 0, "%s", entity.Name.c_str());
+
+        if (isOpen) {
+            // Editable entity name
+            std::string nameLabel = "Name##" + idStr;
+            ImGui::InputText(nameLabel.c_str(), &entity.Name);
+
+            ImGui::Separator();
+
+            // Transform controls (collapsed by default)
+            if (ImGui::TreeNodeEx(("Transform##" + idStr).c_str())) {
+                ImGuiRenderTransformControls(entity.LocalTransform, idStr);
+                ImGui::TreePop();
+            }
+
+            // Entity-specific properties (collapsed by default)
+            if (ImGui::TreeNodeEx(("Properties##" + idStr).c_str())) {
+                ImGuiRenderEntityProperties(entity);
+                ImGui::TreePop();
+            }
+
+            // Children section
+            if (!entity.Children.empty()) {
+                ImGui::Separator();
+                ImGui::Text("Children:");
+                ImGui::Indent();
+                for (auto& child : entity.Children) {
+                    ImGuiRenderEntity(child, worldTransform);
+                }
+                ImGui::Unindent();
+            }
+
+            ImGui::TreePop();
+        }
+    }
+
+    void ClientLayer::ImGuiRenderTransformControls(Transform& localTransform, const std::string& id)
+    {
+        // Position sliders
+        glm::vec3 pos = localTransform.Position;
+        if (ImGui::SliderFloat3(("Position##" + id).c_str(), &pos.x, -50.0f, 50.0f)) {
+            localTransform.Position = pos;
+        }
+
+        // Rotation - display as direction for intuitive control
+        glm::vec3 direction = glm::normalize(
+                glm::vec3(glm::mat4_cast(localTransform.Rotation) * glm::vec4(0.0f, 0.0f, -1.0f, 0.0f)));
+        if (ImGui::DragFloat3(("Direction##" + id).c_str(), &direction.x, 0.05f, -1.0f, 1.0f)) {
+            direction                  = glm::normalize(direction);
+            glm::vec3 defaultDirection = glm::vec3(0.0f, 0.0f, -1.0f);
+            glm::vec3 axis             = glm::cross(defaultDirection, direction);
+            float     dot              = glm::dot(defaultDirection, direction);
+
+            if (glm::length(axis) > 0.001f) {
+                float angle             = glm::acos(glm::clamp(dot, -1.0f, 1.0f));
+                localTransform.Rotation = glm::angleAxis(angle, glm::normalize(axis));
+            }
+            else if (dot < 0.0f) {
+                localTransform.Rotation = glm::angleAxis(glm::pi<float>(), glm::vec3(0.0f, 1.0f, 0.0f));
+            }
+            else {
+                localTransform.Rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+            }
+        }
+
+        // Scale sliders
+        glm::vec3 scale = localTransform.Scale;
+        if (ImGui::SliderFloat3(("Scale##" + id).c_str(), &scale.x, 0.1f, 10.0f)) {
+            localTransform.Scale = scale;
+        }
+    }
+
+    void ClientLayer::ImGuiRenderEntityProperties(SceneEntity& entity)
+    {
+        auto idStr = std::to_string((uintptr_t) &entity);
+
+        switch (entity.Type) {
+            case EntityType::Light: {
+                // Light type
+                bool        isDirectional = entity.LightData.Type < 0.5f;
+                const char* lightTypes[]  = { "Directional", "Point" };
+                int         selectedType  = isDirectional ? 0 : 1;
+                if (ImGui::Combo(
+                            ("Light Type##" + idStr).c_str(), &selectedType, lightTypes, IM_ARRAYSIZE(lightTypes))) {
+                    entity.LightData.Type = selectedType == 0 ? 0.0f : 1.0f;
+                }
+
+                // Color picker
+                ImGui::ColorEdit3(("Color##" + idStr).c_str(), &entity.LightData.Color[0]);
+
+                // Intensity slider
+                ImGui::SliderFloat(("Intensity##" + idStr).c_str(), &entity.LightData.Intensity, 0.0f, 2.0f);
+
+                // Type-specific properties
+                if (!isDirectional) {
+                    ImGui::SliderFloat(("Radius##" + idStr).c_str(), &entity.LightData.Radius, 1.0f, 50.0f);
+                }
+                break;
+            }
+
+            case EntityType::Mesh: {
+                // Material index
+                int matIdx = entity.MeshData.MaterialIndex;
+                if (ImGui::SliderInt(
+                            ("Material Index##" + idStr).c_str(), &matIdx, 0, (int) m_Scene.Materials.size() - 1)) {
+                    entity.MeshData.MaterialIndex = matIdx;
+                }
+
+                // Mesh path (read-only)
+                ImGui::InputText(
+                        ("Mesh Path##" + idStr).c_str(), &entity.MeshData.FilePath, ImGuiInputTextFlags_ReadOnly);
+                break;
+            }
+
+            case EntityType::Empty: {
+                ImGui::Text("Empty group");
+                break;
+            }
+
+            case EntityType::Camera: {
+                ImGui::Text("Camera (not yet editable)");
+                break;
+            }
+
+            default:
+                break;
+        }
+    }
+
+    void ClientLayer::FlattenHierarchyToScene(const SceneEntity& entity, const glm::mat4& parentWorld)
+    {
+        // Compute world transform for this entity
+        glm::mat4 worldTransform = entity.LocalTransform.GetWorldMatrix(parentWorld);
+
+        // Process based on entity type
+        if (entity.Type == EntityType::Mesh) {
+            // Find this entity in the mapping
+            auto it = m_HierarchyMapping.EntityToMeshIdx.find(const_cast<SceneEntity*>(&entity));
+            if (it != m_HierarchyMapping.EntityToMeshIdx.end()) {
+                uint32_t meshIdx = it->second;
+                if (meshIdx < m_Scene.StaticMeshes.size()) {
+                    // Update mesh transform and properties
+                    m_Scene.StaticMeshes[meshIdx].Transform     = worldTransform;
+                    m_Scene.StaticMeshes[meshIdx].MaterialIndex = entity.MeshData.MaterialIndex;
+                }
+            }
+        }
+        else if (entity.Type == EntityType::Light) {
+            // Find this entity in the mapping
+            auto it = m_HierarchyMapping.EntityToLightIdx.find(const_cast<SceneEntity*>(&entity));
+            if (it != m_HierarchyMapping.EntityToLightIdx.end()) {
+                uint32_t lightIdx = it->second;
+                if (lightIdx < m_Scene.Lights.size()) {
+                    // Update light properties
+                    Light& light    = m_Scene.Lights[lightIdx];
+                    light.Color     = entity.LightData.Color;
+                    light.Intensity = entity.LightData.Intensity;
+                    light.Type      = entity.LightData.Type;
+                    light.Radius    = entity.LightData.Radius;
+
+                    // Compute world position and direction
+                    light.Position             = glm::vec3(worldTransform[3]);
+                    glm::vec3 defaultDirection = glm::vec3(0.0f, 0.0f, -1.0f);
+                    light.Direction = glm::normalize(glm::vec3(worldTransform * glm::vec4(defaultDirection, 0.0f)));
+                }
+            }
+        }
+        // Empty and Camera types don't add to scene, just pass through
+
+        // Recursively process children
+        for (const auto& child : entity.Children) {
+            FlattenHierarchyToScene(child, worldTransform);
+        }
+    }
+}  // namespace Vlkrt
