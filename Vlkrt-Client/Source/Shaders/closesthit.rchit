@@ -14,7 +14,7 @@ struct Material {
     vec3 albedo;
     float roughness;
     float metallic;
-    float _pad1;
+    int textureIndex;
     float _pad2;
     float _pad3;
     vec3 emissionColor;
@@ -51,6 +51,8 @@ layout(binding = 6, set = 0) buffer Lights {
     Light lights[];
 };
 
+layout(binding = 7, set = 0) uniform sampler2D textures[16];
+
 // Primary ray payload only
 layout(location = 0) rayPayloadInEXT vec3 hitValue;
 
@@ -85,7 +87,13 @@ void main()
     uint matIndex = materialIndices[gl_PrimitiveID];
     Material mat = materials[matIndex];
 
-    vec3 result = mat.albedo * 0.2;  // Ambient
+    vec3 albedo = mat.albedo;
+    if (mat.textureIndex >= 0) {
+        vec2 uv = v0.texCoord * barycentrics.x + v1.texCoord * barycentrics.y + v2.texCoord * barycentrics.z;
+        albedo *= texture(textures[mat.textureIndex], uv).rgb;
+    }
+
+    vec3 result = albedo * 0.2;  // Ambient
 
     // Process all lights
     if (lights.length() > 0)
@@ -112,7 +120,7 @@ void main()
 
             // Diffuse
             float diffuse = max(0.0, dot(normal, lightDir));
-            vec3 diffuseContrib = mat.albedo * diffuse * light.color * light.intensity * attenuation;
+            vec3 diffuseContrib = albedo * diffuse * light.color * light.intensity * attenuation;
 
             // Specular (Blinn-Phong)
             vec3 viewDir = normalize(-gl_WorldRayDirectionEXT);

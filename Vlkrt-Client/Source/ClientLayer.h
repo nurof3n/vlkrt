@@ -51,6 +51,7 @@ namespace Vlkrt
     private:
         // Client player data
         const float m_Speed{ 100.0f };
+        bool        m_TexturesLoaded = false;
         glm::vec2   m_PlayerPosition{ 50.0f, 50.0f };
         glm::vec2   m_PlayerVelocity{};
 

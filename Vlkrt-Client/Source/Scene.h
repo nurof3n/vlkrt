@@ -18,6 +18,8 @@ namespace Vlkrt
         glm::vec3 EmissionColor{ 0.0f };
         float     EmissionPower = 0.0f;
 
+        std::string TextureFilename;  // Filename of diffuse texture (empty = use flat albedo)
+
         glm::vec3 GetEmission() const
         {
             return EmissionColor * EmissionPower;
@@ -33,7 +35,7 @@ namespace Vlkrt
 
     struct Mesh
     {
-        std::string           FilePath;  // Source file path for serialization
+        std::string           Filename;  // Source filename for serialization
         std::string           Name;      // Mesh name
         std::vector<Vertex>   Vertices;
         std::vector<uint32_t> Indices;
@@ -105,7 +107,7 @@ namespace Vlkrt
         // Type-specific data
         struct MeshData
         {
-            std::string FilePath;
+            std::string Filename;
             int         MaterialIndex = 0;
         } MeshData;
 

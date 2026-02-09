@@ -32,7 +32,7 @@ entities:
   # Ground plane
   - name: ground_plane
     type: mesh
-    mesh_path: ../resources/obj/ground.obj
+    mesh: ground.obj
     material: 2
     transform:
       position: [ 0, -1.5, 0 ]
@@ -42,7 +42,7 @@ entities:
   # Main bunny model - centered and scaled nicely
   - name: bunny_main
     type: mesh
-    mesh_path: ../resources/obj/bunny.obj
+    mesh: bunny.obj
     material: 0
     transform:
       position: [ 0, 0, 0 ]

@@ -6,10 +6,14 @@
 
 namespace Vlkrt
 {
-	class ShaderLoader
-	{
-	public:
-		static std::vector<uint32_t> LoadShaderSPIRV(const std::string& filepath);
-		static VkShaderModule CreateShaderModule(VkDevice device, const std::vector<uint32_t>& code);
-	};
+    /**
+     * @brief Class responsible for loading SPIR-V shader binaries and creating Vulkan shader modules.
+     * 
+     */
+    class ShaderLoader
+    {
+    public:
+        static std::vector<uint32_t> LoadShaderSPIRV(const std::string& filename);
+        static VkShaderModule        CreateShaderModule(VkDevice device, const std::vector<uint32_t>& code);
+    };
 }  // namespace Vlkrt

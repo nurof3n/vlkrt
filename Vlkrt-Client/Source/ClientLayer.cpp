@@ -41,6 +41,11 @@ namespace Vlkrt
 
     void ClientLayer::OnUpdate(float ts)
     {
+        if (!m_TexturesLoaded) {
+            m_Renderer.PreloadTextures();
+            m_TexturesLoaded = true;
+        }
+
         // Check if camera control mode (right-click held)
         bool cameraControlMode = Walnut::Input::IsMouseButtonDown(Walnut::MouseButton::Right);
 
@@ -211,10 +216,7 @@ namespace Vlkrt
 
     void ClientLayer::LoadScene(const std::string& sceneName)
     {
-        std::string scenePath = "../scenes/" + sceneName + ".yaml";
-
-        // Load scene with hierarchy to support efficient transforms
-        auto [scene, root] = SceneLoader::LoadFromYAMLWithHierarchy(scenePath);
+        auto [scene, root] = SceneLoader::LoadFromYAMLWithHierarchy(sceneName + ".yaml");
         m_Scene            = scene;
         m_SceneRoot        = root;
         m_CurrentScene     = sceneName;
@@ -472,9 +474,46 @@ namespace Vlkrt
                     entity.MeshData.MaterialIndex = matIdx;
                 }
 
-                // Mesh path (read-only)
-                ImGui::InputText(
-                        ("Mesh Path##" + idStr).c_str(), &entity.MeshData.FilePath, ImGuiInputTextFlags_ReadOnly);
+                // Texture selector for assigned material
+                if (matIdx >= 0 && matIdx < (int) m_Scene.Materials.size()) {
+                    Material& mat = m_Scene.Materials[matIdx];
+
+                    ImGui::Separator();
+                    ImGui::Text("Texture");
+
+                    // Display current texture path
+                    ImGui::Text("Current: %s", mat.TextureFilename.empty() ? "(none)" : mat.TextureFilename.c_str());
+
+                    // Texture combo box (textures preloaded at startup)
+                    const char* textureOptions[] = { "(none)", "brick.jpg", "tiles.jpg", "wood.jpg" };
+                    int         currentIdx       = 0;
+                    if (!mat.TextureFilename.empty()) {
+                        if (mat.TextureFilename.find("brick.jpg") != std::string::npos) {
+                            currentIdx = 1;
+                        }
+                        else if (mat.TextureFilename.find("tiles.jpg") != std::string::npos) {
+                            currentIdx = 2;
+                        }
+                        else if (mat.TextureFilename.find("wood.jpg") != std::string::npos) {
+                            currentIdx = 3;
+                        }
+                    }
+
+                    if (ImGui::Combo(("Texture##" + idStr).c_str(), &currentIdx, textureOptions, 4)) {
+                        if (currentIdx == 0) {
+                            // No texture selected
+                            mat.TextureFilename.clear();
+                        }
+                        else {
+                            // Set texture path (textures are already preloaded in cache)
+                            const char* textureNames[] = { "", "brick.jpg", "tiles.jpg", "wood.jpg" };
+                            mat.TextureFilename        = textureNames[currentIdx];
+                        }
+                        m_Renderer.InvalidateScene();
+                    }
+                }
+
+                ImGui::InputText(("Mesh##" + idStr).c_str(), &entity.MeshData.Filename, ImGuiInputTextFlags_ReadOnly);
                 break;
             }
 

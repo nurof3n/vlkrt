@@ -1,21 +1,25 @@
 #include "SceneLoader.h"
 #include "MeshLoader.h"
-#include <yaml-cpp/yaml.h>
+#include "Utils.h"
 
 #include "Walnut/Core/Log.h"
 
 #include <fstream>
 
+#include <yaml-cpp/yaml.h>
+
 namespace Vlkrt
 {
-    Scene SceneLoader::LoadFromYAML(const std::string& filepath)
+    Scene SceneLoader::LoadFromYAML(const std::string& filename)
     {
-        auto [scene, root] = LoadFromYAMLWithHierarchy(filepath);
+        auto [scene, root] = LoadFromYAMLWithHierarchy(filename);
         return scene;
     }
 
-    std::pair<Scene, SceneEntity> SceneLoader::LoadFromYAMLWithHierarchy(const std::string& filepath)
+    std::pair<Scene, SceneEntity> SceneLoader::LoadFromYAMLWithHierarchy(const std::string& filename)
     {
+        auto filepath = Vlkrt::SCENES_DIR + filename;
+
         try {
             WL_INFO_TAG("SceneLoader", "Loading YAML from: {}", filepath);
             YAML::Node root = YAML::LoadFile(filepath);
@@ -60,6 +64,10 @@ namespace Vlkrt
 
                     if (matNode["emission_power"]) {
                         mat.EmissionPower = matNode["emission_power"].as<float>();
+                    }
+
+                    if (matNode["texture"]) {
+                        mat.TextureFilename = matNode["texture"].as<std::string>();
                     }
 
                     scene.Materials.push_back(mat);
@@ -120,8 +128,8 @@ namespace Vlkrt
         }
 
         // Parse mesh-specific data
-        if (entityNode["mesh_path"]) {
-            entity.MeshData.FilePath = entityNode["mesh_path"].as<std::string>();
+        if (entityNode["mesh"]) {
+            entity.MeshData.Filename = entityNode["mesh"].as<std::string>();
         }
 
         if (entityNode["material"]) {
@@ -214,17 +222,17 @@ namespace Vlkrt
         // Add entity to scene based on type
         if (entity.Type == EntityType::Mesh) {
             // Load mesh from file and add to scene
-            if (!entity.MeshData.FilePath.empty()) {
+            if (!entity.MeshData.Filename.empty()) {
                 try {
-                    Mesh mesh          = MeshLoader::LoadOBJ(entity.MeshData.FilePath);
-                    mesh.FilePath      = entity.MeshData.FilePath;  // Store original path
-                    mesh.Name          = entity.Name;               // Store mesh name
+                    Mesh mesh          = MeshLoader::LoadOBJ(entity.MeshData.Filename);
+                    mesh.Filename      = entity.MeshData.Filename;
+                    mesh.Name          = entity.Name;
                     mesh.Transform     = worldTransform;
                     mesh.MaterialIndex = entity.MeshData.MaterialIndex;
                     outScene.StaticMeshes.push_back(mesh);
                 }
                 catch (const std::exception& e) {
-                    WL_ERROR_TAG("SceneLoader", "Error loading mesh: {} - {}", entity.MeshData.FilePath, e.what());
+                    WL_ERROR_TAG("SceneLoader", "Error loading mesh: {} - {}", entity.MeshData.Filename, e.what());
                 }
             }
         }
@@ -253,8 +261,10 @@ namespace Vlkrt
         }
     }
 
-    void SceneLoader::SaveToYAML(const std::string& filepath, const Scene& scene)
+    void SceneLoader::SaveToYAML(const std::string& filename, const Scene& scene)
     {
+        auto filepath = Vlkrt::SCENES_DIR + filename;
+
         try {
             WL_INFO_TAG("SceneLoader", "Saving scene to: {}", filepath);
 
@@ -293,7 +303,7 @@ namespace Vlkrt
             for (const auto& mesh : scene.StaticMeshes) {
                 file << "  - name: " << (mesh.Name.empty() ? "Mesh" : mesh.Name) << "\n";
                 file << "    type: mesh\n";
-                file << "    mesh_path: " << (mesh.FilePath.empty() ? "unknown.obj" : mesh.FilePath) << "\n";
+                file << "    mesh: " << (mesh.Filename.empty() ? "unknown.obj" : mesh.Filename) << "\n";
                 file << "    material: " << mesh.MaterialIndex << "\n";
 
                 // Extract position, rotation, and scale from transform matrix
@@ -418,8 +428,10 @@ namespace Vlkrt
     }
 
     void SceneLoader::SaveToYAMLWithHierarchy(
-            const std::string& filepath, const Scene& scene, const SceneEntity& rootEntity)
+            const std::string& filename, const Scene& scene, const SceneEntity& rootEntity)
     {
+        auto filepath = Vlkrt::SCENES_DIR + filename;
+
         try {
             WL_INFO_TAG("SceneLoader", "Saving scene with hierarchy to: {}", filepath);
 
@@ -441,6 +453,10 @@ namespace Vlkrt
                     file << "  emission_color: [ " << mat.EmissionColor.x << ", " << mat.EmissionColor.y << ", "
                          << mat.EmissionColor.z << " ]\n";
                     file << "  emission_power: " << mat.EmissionPower << "\n";
+                }
+
+                if (!mat.TextureFilename.empty()) {
+                    file << "  texture: " << mat.TextureFilename << "\n";
                 }
             }
 
@@ -491,8 +507,7 @@ namespace Vlkrt
         // Write mesh-specific data
         if (entity.Type == EntityType::Mesh) {
             file << indent
-                 << "  mesh_path: " << (entity.MeshData.FilePath.empty() ? "unknown.obj" : entity.MeshData.FilePath)
-                 << "\n";
+                 << "  mesh: " << (entity.MeshData.Filename.empty() ? "unknown.obj" : entity.MeshData.Filename) << "\n";
             file << indent << "  material: " << entity.MeshData.MaterialIndex << "\n";
         }
 

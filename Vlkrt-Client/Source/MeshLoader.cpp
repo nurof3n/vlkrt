@@ -1,12 +1,15 @@
 #include "MeshLoader.h"
+#include "Utils.h"
+
+#include "Walnut/Core/Log.h"
 
 #include <filesystem>
+
 #include <glm/gtc/matrix_transform.hpp>
 
 #define TINYOBJLOADER_IMPLEMENTATION
 #include "tiny_obj_loader.h"
 
-#include "Walnut/Core/Log.h"
 
 namespace Vlkrt
 {
@@ -111,46 +114,34 @@ namespace Vlkrt
         return mesh;
     }
 
-    Mesh MeshLoader::GenerateIcosphere(float radius, int subdivisions, const glm::mat4& transform)
-    {
-        // TODO: Implement icosphere generation for smoother spheres
-        // For now, just return a cube
-        return GenerateCube(radius * 2.0f, transform);
-    }
-
-    Mesh MeshLoader::LoadOBJ(const std::string& filepath, const glm::mat4& transform)
+    Mesh MeshLoader::LoadOBJ(const std::string& filename, const glm::mat4& transform)
     {
         Mesh mesh;
 
-        // Extract directory from filepath for material file resolution
-        std::filesystem::path filePath(filepath);
-        std::string           mtl_basedir = filePath.parent_path().string();
+        auto filepath = Vlkrt::MODELS_DIR + filename;
 
-        // Load OBJ file
         tinyobj::attrib_t                attrib;
         std::vector<tinyobj::shape_t>    shapes;
         std::vector<tinyobj::material_t> materials;
         std::string                      warn, err;
 
-        bool success
-                = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, filepath.c_str(), mtl_basedir.c_str(),
-                        true,  // triangulate (convert quads to triangles)
-                        true   // default_vcols_fallback
-                );
+        bool success = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, filepath.c_str(), Vlkrt::MODELS_DIR,
+                true,  // convert quads to triangles
+                true);
 
         // Handle errors
         if (!success) {
-            WL_ERROR("Failed to load OBJ file '{}': {}", filepath, err);
-            return mesh;  // Return empty mesh on failure
+            WL_ERROR_TAG("MeshLoader", "Failed to load OBJ file '{}': {}", filepath, err);
+            return mesh;
         }
 
         if (!warn.empty()) {
-            WL_WARN("OBJ loading warnings for '{}': {}", filepath, warn);
+            WL_WARN_TAG("MeshLoader", "OBJ loading warnings for '{}': {}", filepath, warn);
         }
 
         // If file is empty
         if (shapes.empty()) {
-            WL_WARN("OBJ file '{}' contains no shapes", filepath);
+            WL_WARN_TAG("MeshLoader", "OBJ file '{}' contains no shapes", filepath);
             return mesh;
         }
 
@@ -185,7 +176,7 @@ namespace Vlkrt
                     }
                     else {
                         vertex.Position = glm::vec3(0.0f);
-                        WL_WARN("Vertex without position in OBJ file");
+                        WL_WARN_TAG("MeshLoader", "Vertex without position in OBJ file");
                     }
 
                     // Normal (may not be present)
@@ -227,7 +218,7 @@ namespace Vlkrt
             }
         }
         if (!hasNormals) {
-            WL_INFO("Calculating normals for OBJ file '{}'", filepath);
+            WL_INFO_TAG("MeshLoader", "Calculating normals for OBJ file '{}'", filepath);
             CalculateNormals(mesh);
         }
 
@@ -241,7 +232,7 @@ namespace Vlkrt
         mesh.Transform = transform;
         CalculateAABB(mesh);
 
-        WL_INFO("Loaded OBJ file '{}': {} vertices, {} triangles", filepath, mesh.Vertices.size(),
+        WL_INFO_TAG("MeshLoader", "Loaded OBJ file '{}': {} vertices, {} triangles", filepath, mesh.Vertices.size(),
                 mesh.Indices.size() / 3);
 
         return mesh;

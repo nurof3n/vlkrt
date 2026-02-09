@@ -5,6 +5,7 @@
 
 #include <memory>
 #include <vector>
+#include <unordered_map>
 #include <glm/glm.hpp>
 #include <vulkan/vulkan.h>
 
@@ -67,14 +68,17 @@ namespace Vlkrt
             return m_FinalImage;
         }
 
+        void PreloadTextures();
+
     private:
-        void     CreateRayTracingPipeline();
-        void     CreateShaderBindingTable();
-        void     CreateDescriptorSets();
-        void     CreateSceneBuffers(const Scene& scene);
-        void     UpdateSceneData(const Scene& scene);
-        void     UpdateDirtyMeshTransforms(const Scene& scene);
-        void     UpdateDirtyLights(const Scene& scene);
+        std::shared_ptr<Walnut::Image> LoadOrGetTexture(const std::string& filename);
+
+        void CreateRayTracingPipeline();
+        void CreateShaderBindingTable();
+        void CreateDescriptorSets();
+        void CreateSceneBuffers(const Scene& scene);
+        void UpdateSceneData(const Scene& scene);
+
         VkBuffer CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties,
                 VkDeviceMemory& bufferMemory);
 
@@ -143,7 +147,11 @@ namespace Vlkrt
         // Track scene changes to avoid unnecessary AS rebuilds
         size_t m_LastMeshCount     = 0;
         size_t m_LastMaterialCount = 0;
+        size_t m_LastLightCount    = 0;
         bool   m_SceneValid        = false;
         bool   m_FirstFrame        = true;
+
+        // Texture loading with caching (loaded at startup, not during runtime)
+        std::unordered_map<std::string, std::shared_ptr<Walnut::Image>> m_TextureCache;
     };
 }  // namespace Vlkrt

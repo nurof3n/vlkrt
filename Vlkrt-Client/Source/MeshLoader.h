@@ -5,16 +5,17 @@
 
 namespace Vlkrt
 {
+    /**
+     * @brief Class used to load meshes (from OBJ files) and generate procedural meshes.
+     * Contains utility functions for calculating normals and AABBs as well.
+     *
+     */
     class MeshLoader
     {
     public:
-        // Load OBJ file and return mesh
-        static Mesh LoadOBJ(const std::string& filepath, const glm::mat4& transform = glm::mat4(1.0f));
-
-        // Generate procedural meshes (for player representation)
+        static Mesh LoadOBJ(const std::string& filename, const glm::mat4& transform = glm::mat4(1.0f));
         static Mesh GenerateCube(float size, const glm::mat4& transform = glm::mat4(1.0f));
         static Mesh GenerateQuad(float size, const glm::mat4& transform = glm::mat4(1.0f));
-        static Mesh GenerateIcosphere(float radius, int subdivisions, const glm::mat4& transform = glm::mat4(1.0f));
 
     private:
         static void CalculateNormals(Mesh& mesh);
