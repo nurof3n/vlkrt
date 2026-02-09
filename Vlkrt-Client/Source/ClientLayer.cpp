@@ -404,16 +404,16 @@ namespace Vlkrt
 
     void ClientLayer::ImGuiRenderTransformControls(Transform& localTransform, const std::string& id)
     {
-        // Position sliders
+        // Position drag controls
         glm::vec3 pos = localTransform.Position;
-        if (ImGui::SliderFloat3(("Position##" + id).c_str(), &pos.x, -50.0f, 50.0f)) {
+        if (ImGui::DragFloat3(("Position##" + id).c_str(), &pos.x, 0.1f, -100.0f, 100.0f)) {
             localTransform.Position = pos;
         }
 
         // Rotation - display as direction for intuitive control
         glm::vec3 direction = glm::normalize(
                 glm::vec3(glm::mat4_cast(localTransform.Rotation) * glm::vec4(0.0f, 0.0f, -1.0f, 0.0f)));
-        if (ImGui::DragFloat3(("Direction##" + id).c_str(), &direction.x, 0.05f, -1.0f, 1.0f)) {
+        if (ImGui::DragFloat3(("Direction##" + id).c_str(), &direction.x, 0.01f, -1.0f, 1.0f)) {
             direction                  = glm::normalize(direction);
             glm::vec3 defaultDirection = glm::vec3(0.0f, 0.0f, -1.0f);
             glm::vec3 axis             = glm::cross(defaultDirection, direction);
@@ -431,9 +431,9 @@ namespace Vlkrt
             }
         }
 
-        // Scale sliders
+        // Scale drag controls
         glm::vec3 scale = localTransform.Scale;
-        if (ImGui::SliderFloat3(("Scale##" + id).c_str(), &scale.x, 0.1f, 10.0f)) {
+        if (ImGui::DragFloat3(("Scale##" + id).c_str(), &scale.x, 0.1f, 0.01f, 100.0f)) {
             localTransform.Scale = scale;
         }
     }
@@ -456,12 +456,12 @@ namespace Vlkrt
                 // Color picker
                 ImGui::ColorEdit3(("Color##" + idStr).c_str(), &entity.LightData.Color[0]);
 
-                // Intensity slider
-                ImGui::SliderFloat(("Intensity##" + idStr).c_str(), &entity.LightData.Intensity, 0.0f, 2.0f);
+                // Intensity control
+                ImGui::DragFloat(("Intensity##" + idStr).c_str(), &entity.LightData.Intensity, 0.01f, 0.0f, 10.0f);
 
                 // Type-specific properties
                 if (!isDirectional) {
-                    ImGui::SliderFloat(("Radius##" + idStr).c_str(), &entity.LightData.Radius, 1.0f, 50.0f);
+                    ImGui::DragFloat(("Radius##" + idStr).c_str(), &entity.LightData.Radius, 0.1f, 0.1f, 100.0f);
                 }
                 break;
             }
@@ -469,8 +469,8 @@ namespace Vlkrt
             case EntityType::Mesh: {
                 // Material index
                 int matIdx = entity.MeshData.MaterialIndex;
-                if (ImGui::SliderInt(
-                            ("Material Index##" + idStr).c_str(), &matIdx, 0, (int) m_Scene.Materials.size() - 1)) {
+                if (ImGui::DragInt(
+                            ("Material Index##" + idStr).c_str(), &matIdx, 1.0f, 0, (int) m_Scene.Materials.size() - 1)) {
                     entity.MeshData.MaterialIndex = matIdx;
                 }
 
@@ -479,6 +479,13 @@ namespace Vlkrt
                     Material& mat = m_Scene.Materials[matIdx];
 
                     ImGui::Separator();
+                    ImGui::Text("Material: %s", mat.Name.c_str());
+
+                    // Tiling factor
+                    if (ImGui::DragFloat(("Tiling##" + idStr).c_str(), &mat.Tiling, 0.1f, 0.01f, 100.0f)) {
+                        m_Renderer.InvalidateScene();
+                    }
+
                     ImGui::Text("Texture");
 
                     // Display current texture path
