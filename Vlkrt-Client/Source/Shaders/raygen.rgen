@@ -10,7 +10,13 @@ layout(push_constant) uniform CameraData {
     vec3 position;
 } camera;
 
-layout(location = 0) rayPayloadEXT vec3 hitValue;
+struct RayPayload {
+    vec3 hitValue;
+    float coneWidth;
+    float spreadAngle;
+};
+
+layout(location = 0) rayPayloadEXT RayPayload payload;
 
 void main()
 {
@@ -24,11 +30,16 @@ void main()
 
     vec3 origin = camera.position;
 
+    // Initialize ray cone
+    // Approximate spread angle based on vertical FOV and resolution
+    payload.spreadAngle = atan(2.0 * camera.inverseProj[1][1] / gl_LaunchSizeEXT.y);
+    payload.coneWidth = 0.0; // Start at a point
+
     uint rayFlags = gl_RayFlagsOpaqueEXT;
     float tMin = 0.001;
     float tMax = 10000.0;
 
     traceRayEXT(topLevelAS, rayFlags, 0xFF, 0, 0, 0, origin, tMin, direction, tMax, 0);
 
-    imageStore(outputImage, ivec2(gl_LaunchIDEXT.xy), vec4(hitValue, 1.0));
+    imageStore(outputImage, ivec2(gl_LaunchIDEXT.xy), vec4(payload.hitValue, 1.0));
 }

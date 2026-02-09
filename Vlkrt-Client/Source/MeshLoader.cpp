@@ -4,7 +4,6 @@
 #include "Walnut/Core/Log.h"
 
 #include <filesystem>
-
 #include <glm/gtc/matrix_transform.hpp>
 
 #define TINYOBJLOADER_IMPLEMENTATION

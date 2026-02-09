@@ -20,7 +20,8 @@ namespace Vlkrt
         float     roughness;
         float     metallic;
         int       textureIndex;  // -1 if no texture
-        float     _pad2, _pad3;
+        float     tiling;
+        float     _pad3;
         glm::vec3 emissionColor;
         float     emissionPower;
     };
@@ -250,7 +251,7 @@ namespace Vlkrt
                 m_FinalImage->GetWidth(), m_FinalImage->GetHeight(), 1);
 
         // Transition image back to SHADER_READ_ONLY for ImGui
-        barrier.oldLayout     = VK_IMAGE_LAYOUT_GENERAL;g
+        barrier.oldLayout     = VK_IMAGE_LAYOUT_GENERAL;
         barrier.newLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
         barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
@@ -631,6 +632,7 @@ namespace Vlkrt
                 gpuMaterials[i].metallic      = scene.Materials[i].Metallic;
                 gpuMaterials[i].emissionColor = scene.Materials[i].EmissionColor;
                 gpuMaterials[i].emissionPower = scene.Materials[i].EmissionPower;
+                gpuMaterials[i].tiling        = scene.Materials[i].Tiling;
 
                 // Sync texture index
                 gpuMaterials[i].textureIndex = -1;
@@ -736,6 +738,7 @@ namespace Vlkrt
                 gpuMaterials[i].metallic      = scene.Materials[i].Metallic;
                 gpuMaterials[i].emissionColor = scene.Materials[i].EmissionColor;
                 gpuMaterials[i].emissionPower = scene.Materials[i].EmissionPower;
+                gpuMaterials[i].tiling        = scene.Materials[i].Tiling;
 
                 auto it                      = textureToIndex.find(scene.Materials[i].TextureFilename);
                 gpuMaterials[i].textureIndex = (it != textureToIndex.end()) ? it->second : -1;

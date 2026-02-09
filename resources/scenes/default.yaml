@@ -4,6 +4,7 @@ materials:
   roughness: 0.8
   metallic: 0
   texture: tiles.jpg
+  tiling: 10.0
 - name: metal
   albedo: [ 0.8, 0.8, 0.8 ]
   roughness: 0.2

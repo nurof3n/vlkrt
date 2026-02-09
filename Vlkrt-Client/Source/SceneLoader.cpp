@@ -5,7 +5,6 @@
 #include "Walnut/Core/Log.h"
 
 #include <fstream>
-
 #include <yaml-cpp/yaml.h>
 
 namespace Vlkrt
@@ -68,6 +67,10 @@ namespace Vlkrt
 
                     if (matNode["texture"]) {
                         mat.TextureFilename = matNode["texture"].as<std::string>();
+                    }
+
+                    if (matNode["tiling"]) {
+                        mat.Tiling = matNode["tiling"].as<float>();
                     }
 
                     scene.Materials.push_back(mat);
@@ -457,6 +460,7 @@ namespace Vlkrt
 
                 if (!mat.TextureFilename.empty()) {
                     file << "  texture: " << mat.TextureFilename << "\n";
+                    file << "  tiling: " << mat.Tiling << "\n";
                 }
             }
 

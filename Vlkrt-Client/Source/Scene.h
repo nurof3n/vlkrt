@@ -12,13 +12,14 @@ namespace Vlkrt
     {
         std::string Name;  // Material name
         glm::vec3   Albedo{ 1.0f };
-        float       Roughness = 1.0f;
-        float       Metallic  = 0.0f;
+        float       Roughness{ 1.0f };
+        float       Metallic{};
 
-        glm::vec3 EmissionColor{ 0.0f };
-        float     EmissionPower = 0.0f;
+        glm::vec3 EmissionColor{};
+        float     EmissionPower{};
 
         std::string TextureFilename;  // Filename of diffuse texture (empty = use flat albedo)
+        float       Tiling{1.0f};
 
         glm::vec3 GetEmission() const
         {

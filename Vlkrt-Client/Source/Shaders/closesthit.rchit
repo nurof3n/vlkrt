@@ -15,7 +15,7 @@ struct Material {
     float roughness;
     float metallic;
     int textureIndex;
-    float _pad2;
+    float tiling;
     float _pad3;
     vec3 emissionColor;
     float emissionPower;
@@ -53,13 +53,23 @@ layout(binding = 6, set = 0) buffer Lights {
 
 layout(binding = 7, set = 0) uniform sampler2D textures[16];
 
+struct RayPayload {
+    vec3 hitValue;
+    float coneWidth;
+    float spreadAngle;
+};
+
 // Primary ray payload only
-layout(location = 0) rayPayloadInEXT vec3 hitValue;
+layout(location = 0) rayPayloadInEXT RayPayload payload;
 
 hitAttributeEXT vec2 attribs;
 
 void main()
 {
+    // Update cone width for this hit
+    float currentConeWidth = payload.coneWidth + payload.spreadAngle * gl_HitTEXT;
+    payload.coneWidth = currentConeWidth;
+
     // Get triangle vertex indices
     uint idx0 = indices[gl_PrimitiveID * 3 + 0];
     uint idx1 = indices[gl_PrimitiveID * 3 + 1];
@@ -89,8 +99,36 @@ void main()
 
     vec3 albedo = mat.albedo;
     if (mat.textureIndex >= 0) {
-        vec2 uv = v0.texCoord * barycentrics.x + v1.texCoord * barycentrics.y + v2.texCoord * barycentrics.z;
-        albedo *= texture(textures[mat.textureIndex], uv).rgb;
+        vec2 uv = (v0.texCoord * barycentrics.x + v1.texCoord * barycentrics.y + v2.texCoord * barycentrics.z) * mat.tiling;
+        
+        // EA Advanced Ray Cone LOD - https://media.contentapi.ea.com/content/dam/ea/seed/presentations/2019-ray-tracing-gems-chapter-20-akenine-moller-et-al.pdf
+        // 1. Compute Triangle Areas
+        vec3 edge1 = v1.position - v0.position;
+        vec3 edge2 = v2.position - v0.position;
+        float triArea = length(cross(edge1, edge2)); // 2 * Area_world
+
+        vec2 texEdge1 = v1.texCoord - v0.texCoord;
+        vec2 texEdge2 = v2.texCoord - v0.texCoord;
+        float uvArea = abs(texEdge1.x * texEdge2.y - texEdge1.y * texEdge2.x); // 2 * Area_uv
+        uvArea *= (mat.tiling * mat.tiling);
+
+        // 2. Calculate LOD constant based on geometry ratio
+        float lodConstant = 0.5 * log2(uvArea / max(triArea, 1e-10));
+        
+        // 3. Texture resolution term
+        ivec2 texSize = textureSize(textures[mat.textureIndex], 0);
+        float texScale = 0.5 * log2(float(texSize.x * texSize.y));
+        
+        // 4. Ray term including incidence angle
+        float cosTheta = abs(dot(normal, gl_WorldRayDirectionEXT));
+        float rayTerm = log2(max(currentConeWidth, 1e-10) / max(cosTheta, 1e-10));
+        
+        // Final LOD calculation (EA Equation 34)
+        // Manual bias to fine-tune sharpness. -0.5 is usually a good balance.
+        float lod = lodConstant + rayTerm + texScale - 0.5;
+        lod = max(0.0, lod);
+        
+        albedo *= textureLod(textures[mat.textureIndex], uv, lod).rgb;
     }
 
     vec3 result = albedo * 0.2;  // Ambient
@@ -132,5 +170,5 @@ void main()
         }
     }
 
-    hitValue = result;
+    payload.hitValue = result;
 }
