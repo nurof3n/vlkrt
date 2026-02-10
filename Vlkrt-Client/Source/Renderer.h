@@ -69,7 +69,7 @@ namespace Vlkrt
             return m_FinalImage;
         }
 
-        void PreloadTextures();
+        void PreloadTextures(const std::vector<std::string>& textureFilenames);
 
     private:
         std::shared_ptr<Walnut::Image> LoadOrGetTexture(const std::string& filename);
@@ -147,6 +147,8 @@ namespace Vlkrt
 
         // Track scene changes to avoid unnecessary AS rebuilds
         size_t m_LastMeshCount     = 0;
+        size_t m_LastVertexCount   = 0;
+        size_t m_LastIndexCount    = 0;
         size_t m_LastMaterialCount = 0;
         size_t m_LastLightCount    = 0;
         bool   m_SceneValid        = false;

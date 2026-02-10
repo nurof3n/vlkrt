@@ -20,7 +20,6 @@ namespace Vlkrt
         auto filepath = Vlkrt::SCENES_DIR + filename;
 
         try {
-            WL_INFO_TAG("SceneLoader", "Loading YAML from: {}", filepath);
             YAML::Node root = YAML::LoadFile(filepath);
 
             Scene       scene;
@@ -115,6 +114,10 @@ namespace Vlkrt
         // Parse name
         if (entityNode["name"]) {
             entity.Name = entityNode["name"].as<std::string>();
+        }
+
+        if (entityNode["script"]) {
+            entity.ScriptPath = entityNode["script"].as<std::string>();
         }
 
         // Parse type
@@ -486,6 +489,10 @@ namespace Vlkrt
         std::string childIndent((indentLevel + 1) * 2, ' ');
 
         file << indent << "- name: " << entity.Name << "\n";
+
+        if (!entity.ScriptPath.empty()) {
+            file << indent << "  script: " << entity.ScriptPath << "\n";
+        }
 
         // Write type
         std::string typeStr = "empty";

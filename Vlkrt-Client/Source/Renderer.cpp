@@ -134,9 +134,21 @@ namespace Vlkrt
         m_ActiveScene  = &scene;
         m_ActiveCamera = &camera;
 
-        // Check if scene geometry has changed (size changes or manual invalidation)
+        // Calculate current scene metrics
         size_t totalMeshCount = scene.StaticMeshes.size() + scene.DynamicMeshes.size();
-        bool   sizeChanged    = (totalMeshCount != m_LastMeshCount) || (scene.Materials.size() != m_LastMaterialCount);
+        size_t totalVertices  = 0;
+        size_t totalIndices   = 0;
+        for (const auto& mesh : scene.StaticMeshes) {
+            totalVertices += mesh.Vertices.size();
+            totalIndices += mesh.Indices.size();
+        }
+        for (const auto& mesh : scene.DynamicMeshes) {
+            totalVertices += mesh.Vertices.size();
+            totalIndices += mesh.Indices.size();
+        }
+
+        bool sizeChanged = (totalMeshCount != m_LastMeshCount) || (totalVertices != m_LastVertexCount)
+                        || (totalIndices != m_LastIndexCount) || (scene.Materials.size() != m_LastMaterialCount);
 
         bool needsRebuild = !m_SceneValid || sizeChanged;
 
@@ -144,7 +156,8 @@ namespace Vlkrt
         if (m_VertexBuffer == VK_NULL_HANDLE || needsRebuild) {
             if (needsRebuild && m_VertexBuffer != VK_NULL_HANDLE) {
                 // Clean up old buffers if size changed
-                if (totalMeshCount != m_LastMeshCount) {
+                if (totalMeshCount != m_LastMeshCount || totalVertices != m_LastVertexCount
+                        || totalIndices != m_LastIndexCount) {
                     Walnut::Application::SubmitResourceFree(
                             [device = m_Device, vbuf = m_VertexBuffer, vmem = m_VertexMemory, ibuf = m_IndexBuffer,
                                     imem = m_IndexMemory, mibuf = m_MaterialIndexBuffer,
@@ -195,6 +208,8 @@ namespace Vlkrt
 
             // Store current state and mark scene as valid
             m_LastMeshCount     = totalMeshCount;
+            m_LastVertexCount   = totalVertices;
+            m_LastIndexCount    = totalIndices;
             m_LastMaterialCount = scene.Materials.size();
             m_LastLightCount    = scene.Lights.size();
             m_SceneValid        = true;
@@ -880,12 +895,9 @@ namespace Vlkrt
         return buffer;
     }
 
-    void Renderer::PreloadTextures()
+    void Renderer::PreloadTextures(const std::vector<std::string>& textureFilenames)
     {
-        // Load all available textures
-        const char* availableTextures[] = { "brick.jpg", "tiles.jpg", "wood.jpg" };
-
-        for (const auto& textureFilename : availableTextures) {
+        for (const auto& textureFilename : textureFilenames) {
             LoadOrGetTexture(textureFilename);
         }
     }

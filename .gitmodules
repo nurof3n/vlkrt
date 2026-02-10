@@ -2,3 +2,9 @@
 	path = Walnut
 	url = https://github.com/StudioCherno/Walnut.git
 	branch = dev
+[submodule "vendor/sol2"]
+	path = vendor/sol2
+	url = https://github.com/ThePhD/sol2
+[submodule "vendor/luajit"]
+	path = vendor/luajit
+	url = https://github.com/LuaJIT/LuaJIT

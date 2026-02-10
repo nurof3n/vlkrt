@@ -26,17 +26,27 @@ project "Vlkrt-Client"
       -- Walnut-Networking
       "../Walnut/Walnut-Modules/Walnut-Networking/Source",
       "../Walnut/Walnut-Modules/Walnut-Networking/vendor/GameNetworkingSockets/include",
+
+      "../vendor/sol2/include",
+      "../vendor/luajit/src",
    }
 
    defines
    {
-      "YAML_CPP_STATIC_DEFINE"
+      "YAML_CPP_STATIC_DEFINE",
+      "SOL_ALL_SAFETIES_ON=1"
    }
 
    links
    {
       "Vlkrt-Common",
-      "yaml-cpp"
+      "yaml-cpp",
+      "lua51"
+   }
+
+   libdirs
+   {
+      "../vendor/luajit/src"
    }
 
    targetdir ("../bin/" .. outputdir .. "/%{prj.name}")
@@ -47,11 +57,16 @@ project "Vlkrt-Client"
       defines { "WL_PLATFORM_WINDOWS" }
       buildoptions { "/utf-8" }
 
+      prebuildcommands
+      {
+         "pushd ..\\vendor\\luajit\\src && if not exist lua51.lib ( msvcbuild.bat ) && popd"
+      }
+
       postbuildcommands
       {
          '{COPY} "../%{WalnutNetworkingBinDir}GameNetworkingSockets.dll" "%{cfg.targetdir}"',
          '{COPY} "../%{WalnutNetworkingBinDir}libcrypto-3-x64.dll" "%{cfg.targetdir}"',
-         '{COPYDIR} "../../scenes" "%{cfg.targetdir}/scenes"',
+         '{COPY} "../vendor/luajit/src/lua51.dll" "%{cfg.targetdir}"',
       }
 
    filter { "system:windows", "configurations:Debug" }

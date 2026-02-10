@@ -9,11 +9,16 @@
 #include "ServerPacket.h"
 
 #include "SceneLoader.h"
+#include "ScriptEngine.h"
+#include "Utils.h"
 
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtc/quaternion.hpp>
 
 #include <GLFW/glfw3.h>
+
+#include <filesystem>
+#include <algorithm>
 
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -28,6 +33,8 @@ namespace Vlkrt
 
     void ClientLayer::OnAttach()
     {
+        ScriptEngine::Init();
+        RefreshResources();
         s_ScratchBuffer.Allocate(10 * 1024 * 1024);  // 10 MB
 
         m_Client.SetDataReceivedCallback([this](const Walnut::Buffer& buffer) { OnDataReceived(buffer); });
@@ -36,15 +43,51 @@ namespace Vlkrt
         LoadScene("default");
     }
 
+    void ClientLayer::RefreshResources()
+    {
+        namespace fs = std::filesystem;
+
+        m_AvailableTextures.clear();
+        m_AvailableModels.clear();
+        m_AvailableScenes.clear();
+        m_AvailableScripts.clear();
+
+        auto scanDirectory = [](const std::string& path, std::vector<std::string>& list, const std::vector<std::string>& extensions, bool stripExtension = false) {
+            if (!fs::exists(path)) return;
+            for (const auto& entry : fs::directory_iterator(path)) {
+                if (entry.is_regular_file()) {
+                    std::string ext = entry.path().extension().string();
+                    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                    if (extensions.empty() || std::find(extensions.begin(), extensions.end(), ext) != extensions.end()) {
+                        if (stripExtension)
+                            list.push_back(entry.path().stem().string());
+                        else
+                            list.push_back(entry.path().filename().string());
+                    }
+                }
+            }
+            std::sort(list.begin(), list.end());
+        };
+
+        scanDirectory(TEXTURES_DIR, m_AvailableTextures, { ".jpg", ".jpeg" });
+        scanDirectory(MODELS_DIR, m_AvailableModels, { ".obj" });
+        scanDirectory(SCENES_DIR, m_AvailableScenes, { ".yaml", ".yml" }, true);
+        scanDirectory(SCRIPTS_DIR, m_AvailableScripts, { ".lua" });
+    }
+
     void ClientLayer::OnDetach()
-    {}
+    {
+        ScriptEngine::Shutdown();
+    }
 
     void ClientLayer::OnUpdate(float ts)
     {
         if (!m_TexturesLoaded) {
-            m_Renderer.PreloadTextures();
+            m_Renderer.PreloadTextures(m_AvailableTextures);
             m_TexturesLoaded = true;
         }
+
+        RunScripts(m_SceneRoot, ts);
 
         // Check if camera control mode (right-click held)
         bool cameraControlMode = Walnut::Input::IsMouseButtonDown(Walnut::MouseButton::Right);
@@ -214,6 +257,19 @@ namespace Vlkrt
         m_PlayerDataMutex.unlock();
     }
 
+    void ClientLayer::RunScripts(SceneEntity& entity, float ts)
+    {
+        if (!entity.ScriptPath.empty()) {
+            if (!entity.ScriptInitialized)
+                ScriptEngine::LoadScript(entity);
+
+            ScriptEngine::CallOnUpdate(entity, ts);
+        }
+
+        for (auto& child : entity.Children)
+            RunScripts(child, ts);
+    }
+
     void ClientLayer::LoadScene(const std::string& sceneName)
     {
         auto [scene, root] = SceneLoader::LoadFromYAMLWithHierarchy(sceneName + ".yaml");
@@ -332,13 +388,11 @@ namespace Vlkrt
         ImGui::Text("Current Scene: %s", m_CurrentScene.c_str());
 
         if (ImGui::BeginCombo("##SceneSelector", m_SelectedScene.c_str())) {
-            if (ImGui::Selectable("default", m_SelectedScene == "default")) {
-                m_SelectedScene = "default";
-                LoadScene("default");
-            }
-            if (ImGui::Selectable("bunny", m_SelectedScene == "bunny")) {
-                m_SelectedScene = "bunny";
-                LoadScene("bunny");
+            for (const auto& sceneName : m_AvailableScenes) {
+                if (ImGui::Selectable(sceneName.c_str(), m_SelectedScene == sceneName)) {
+                    m_SelectedScene = sceneName;
+                    LoadScene(sceneName);
+                }
             }
             ImGui::EndCombo();
         }
@@ -469,8 +523,8 @@ namespace Vlkrt
             case EntityType::Mesh: {
                 // Material index
                 int matIdx = entity.MeshData.MaterialIndex;
-                if (ImGui::DragInt(
-                            ("Material Index##" + idStr).c_str(), &matIdx, 1.0f, 0, (int) m_Scene.Materials.size() - 1)) {
+                if (ImGui::DragInt(("Material Index##" + idStr).c_str(), &matIdx, 1.0f, 0,
+                            (int) m_Scene.Materials.size() - 1)) {
                     entity.MeshData.MaterialIndex = matIdx;
                 }
 
@@ -491,36 +545,45 @@ namespace Vlkrt
                     // Display current texture path
                     ImGui::Text("Current: %s", mat.TextureFilename.empty() ? "(none)" : mat.TextureFilename.c_str());
 
-                    // Texture combo box (textures preloaded at startup)
-                    const char* textureOptions[] = { "(none)", "brick.jpg", "tiles.jpg", "wood.jpg" };
-                    int         currentIdx       = 0;
-                    if (!mat.TextureFilename.empty()) {
-                        if (mat.TextureFilename.find("brick.jpg") != std::string::npos) {
-                            currentIdx = 1;
-                        }
-                        else if (mat.TextureFilename.find("tiles.jpg") != std::string::npos) {
-                            currentIdx = 2;
-                        }
-                        else if (mat.TextureFilename.find("wood.jpg") != std::string::npos) {
-                            currentIdx = 3;
-                        }
-                    }
-
-                    if (ImGui::Combo(("Texture##" + idStr).c_str(), &currentIdx, textureOptions, 4)) {
-                        if (currentIdx == 0) {
-                            // No texture selected
+                    // Texture combo box (textures discovered at startup)
+                    if (ImGui::BeginCombo(("Texture##" + idStr).c_str(), mat.TextureFilename.empty() ? "(none)" : mat.TextureFilename.c_str())) {
+                        if (ImGui::Selectable("(none)", mat.TextureFilename.empty())) {
                             mat.TextureFilename.clear();
+                            m_Renderer.InvalidateScene();
                         }
-                        else {
-                            // Set texture path (textures are already preloaded in cache)
-                            const char* textureNames[] = { "", "brick.jpg", "tiles.jpg", "wood.jpg" };
-                            mat.TextureFilename        = textureNames[currentIdx];
+                        for (const auto& textureName : m_AvailableTextures) {
+                            if (ImGui::Selectable(textureName.c_str(), mat.TextureFilename == textureName)) {
+                                mat.TextureFilename = textureName;
+                                m_Renderer.InvalidateScene();
+                            }
                         }
-                        m_Renderer.InvalidateScene();
+                        ImGui::EndCombo();
                     }
                 }
 
-                ImGui::InputText(("Mesh##" + idStr).c_str(), &entity.MeshData.Filename, ImGuiInputTextFlags_ReadOnly);
+                if (ImGui::BeginCombo(("Mesh##" + idStr).c_str(), entity.MeshData.Filename.c_str())) {
+                    for (const auto& modelName : m_AvailableModels) {
+                        if (ImGui::Selectable(modelName.c_str(), entity.MeshData.Filename == modelName)) {
+                            entity.MeshData.Filename = modelName;
+
+                            // Load new mesh data and update the flat scene mesh
+                            Mesh newMesh = MeshLoader::LoadOBJ(modelName);
+                            auto it      = m_HierarchyMapping.EntityToMeshIdx.find(&entity);
+                            if (it != m_HierarchyMapping.EntityToMeshIdx.end()) {
+                                uint32_t meshIdx = it->second;
+                                if (meshIdx < m_Scene.StaticMeshes.size()) {
+                                    // Keep transform and material index, update geometry
+                                    newMesh.Transform             = m_Scene.StaticMeshes[meshIdx].Transform;
+                                    newMesh.MaterialIndex         = m_Scene.StaticMeshes[meshIdx].MaterialIndex;
+                                    m_Scene.StaticMeshes[meshIdx] = newMesh;
+                                }
+                            }
+
+                            m_Renderer.InvalidateScene();
+                        }
+                    }
+                    ImGui::EndCombo();
+                }
                 break;
             }
 
@@ -536,6 +599,22 @@ namespace Vlkrt
 
             default:
                 break;
+        }
+
+        ImGui::Separator();
+        ImGui::Text("Script");
+        if (ImGui::BeginCombo(("Script##" + idStr).c_str(), entity.ScriptPath.empty() ? "(none)" : entity.ScriptPath.c_str())) {
+            if (ImGui::Selectable("(none)", entity.ScriptPath.empty())) {
+                entity.ScriptPath.clear();
+                entity.ScriptInitialized = false;
+            }
+            for (const auto& scriptName : m_AvailableScripts) {
+                if (ImGui::Selectable(scriptName.c_str(), entity.ScriptPath == scriptName)) {
+                    entity.ScriptPath        = scriptName;
+                    entity.ScriptInitialized = false;  // Force reload
+                }
+            }
+            ImGui::EndCombo();
         }
     }
 

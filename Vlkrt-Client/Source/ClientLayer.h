@@ -11,6 +11,9 @@
 
 #include <mutex>
 #include <glm/glm.hpp>
+#include <filesystem>
+#include <vector>
+#include <string>
 
 namespace Vlkrt
 {
@@ -37,9 +40,13 @@ namespace Vlkrt
     private:
         void OnDataReceived(const Walnut::Buffer& buffer);
         void UpdateScene();
+        void RunScripts(SceneEntity& entity, float ts);
         void LoadScene(const std::string& scenePath);
         void SyncSceneToHierarchy();
         void SaveScene();
+
+        // Resource discovery
+        void RefreshResources();
 
         // Hierarchical ImGui scene editor functions
         void ImGuiRenderSceneHierarchy();
@@ -85,5 +92,11 @@ namespace Vlkrt
         glm::vec2 m_LastPlayerPosition{};
         size_t    m_LastPlayerCount    = 0;
         bool      m_NetworkDataChanged = false;
+
+        // Resource cache
+        std::vector<std::string> m_AvailableTextures;
+        std::vector<std::string> m_AvailableModels;
+        std::vector<std::string> m_AvailableScenes;
+        std::vector<std::string> m_AvailableScripts;
     };
 }  // namespace Vlkrt

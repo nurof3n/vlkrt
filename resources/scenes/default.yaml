@@ -16,11 +16,11 @@ entities:
 - name: scene_root
   type: empty
   transform:
-    position: [ 0, 0, 0 ]
-    rotation: [ 0, 0, 0, 1 ]
+    position: [ 0, -0.408099, 0 ]
+    rotation: [ 0, 0.104899, 0, -0.994483 ]
     scale: [ 1, 1, 1 ]
   children:
-    - name: ground
+    - name: grounded
       type: mesh
       transform:
         position: [ 0, -1, 0 ]
@@ -29,10 +29,11 @@ entities:
       mesh: ground.obj
       material: 0
     - name: cube
+      script: cube_animation.lua
       type: mesh
       transform:
-        position: [ 2, 1, 0 ]
-        rotation: [ 0, 0.7071, 0, 0.7071 ]
+        position: [ 2, 2.3196, 0 ]
+        rotation: [ 0, 0.580628, 0, 0.814169 ]
         scale: [ 1, 1, 1 ]
       mesh: cube.obj
       material: 1

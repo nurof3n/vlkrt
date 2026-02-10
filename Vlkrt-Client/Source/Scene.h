@@ -19,7 +19,7 @@ namespace Vlkrt
         float     EmissionPower{};
 
         std::string TextureFilename;  // Filename of diffuse texture (empty = use flat albedo)
-        float       Tiling{1.0f};
+        float       Tiling{ 1.0f };
 
         glm::vec3 GetEmission() const
         {
@@ -98,6 +98,9 @@ namespace Vlkrt
         EntityType  Type = EntityType::Empty;
         Transform   LocalTransform;
         glm::mat4   WorldTransform = glm::mat4(1.0f);
+
+        std::string ScriptPath;
+        bool        ScriptInitialized = false;
 
         // Transform caching and dirty tracking
         bool         IsDirty = true;     // Mark for recomputation
