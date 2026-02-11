@@ -38,7 +38,9 @@ FROM scratch AS runtime
 WORKDIR /app
 
 COPY --from=deps /deps/ /
+COPY --from=deps /lib/x86_64-linux-gnu/libtinfo.so.6 /lib/x86_64-linux-gnu/libtinfo.so.6
 
-ENV LD_LIBRARY_PATH=/app/lib
+COPY --from=deps /bin/sh /bin/sh
+COPY --from=deps /bin/bash /bin/bash
 
 CMD ["/app/Vlkrt-Server"]

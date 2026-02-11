@@ -1,0 +1,7 @@
+spec: v0.6
+
+runtime: base-compat:latest
+
+rootfs: ./Dockerfile
+
+cmd: [ "bash", "-c", "'export LD_LIBRARY_PATH=/app/lib; /app/Vlkrt-Server'" ]

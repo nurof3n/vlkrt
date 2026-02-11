@@ -48,7 +48,7 @@ Many thanks to Cherno for providing such a great starting point and for his amaz
     # PowerShell (Windows)
     msbuild Vlkrt.sln /p:Configuration=Release # or do it from Visual Studio
     # Linux/Mac
-    make -j$(nproc)
+    make -j $(nproc)
     ```
 
 5. Compile the shaders:
@@ -66,6 +66,42 @@ Many thanks to Cherno for providing such a great starting point and for his amaz
 The executables will be located in `bin/Release-<platform>-<arch>/Vlkrt-{Client,Server}`.
 Run the server first, then launch one or more clients to connect to it.
 
-### Hosting the Server in Unikraft Cloud
+### Hosting the server in Unikraft Cloud
 
-TODO
+[Unikraft Cloud](https://unikraft.cloud/), codenamed "the millisecond platform", is a blazing-fast cloud platform.
+IT allows deploying applications inside microVMs that outperform containers in both security and performance, with boot times in the order of milliseconds.
+
+To deploy the server on Unikraft Cloud, you first need to create an account on the [console](https://console.unikraft.cloud/).
+Then, install the [kraft CLI](https://unikraft.com/docs/introduction) and make sure you have Docker Engine installed and running on your machine.
+Also, grab your token from the console, and you're ready to go:
+
+```bash
+ kraft cloud deploy \
+    -M 128 \
+    -p 1337:1337/tls \
+    --scale-to-zero on \
+    --scale-to-zero-stateful \
+    --rootfs-type erofs \
+    .
+```
+
+You will get an output similar to this:
+
+```text
+[●] Deployed but instance is on standby!
+ │
+ ├────── name: vlkrt-beogr
+ ├────── uuid: 227f20d8-b8f2-4d40-8ed2-146365773430
+ ├───── metro: https://api.fra.unikraft.cloud/v1
+ ├───── state: standby
+ ├──── domain: late-bonobo-pgy3l5qy.fra.unikraft.app
+ ├───── image: acioc/vlkrt@sha256:d273cc3b46bb6b248b24631e1486324c9344bc150bf56611bc595206ec0f11eb
+ ├─ boot time: 66.82 ms
+ ├──── memory: 128 MiB
+ ├─── service: late-bonobo-pgy3l5qy
+ ├ private ip: 10.0.2.169
+ └────── args: LD_LIBRARY_PATH=/app/lib /app/Vlkrt-Server
+```
+
+Grab the FQDN from the output, and use it to connect to the server from the client.
+The server will automatically scale down to zero when not in use, and scale up again when a client tries to connect, saving on resources and costs.

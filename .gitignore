@@ -72,3 +72,6 @@ vendor/
 *.out
 *.fdb_latexmk
 *.fls
+
+# Kraftkit artefacts
+.unikraft/
