@@ -1,6 +1,6 @@
 [submodule "Walnut"]
 	path = Walnut
-	url = https://github.com/StudioCherno/Walnut.git
+	url = https://github.com/nurof3n/Walnut
 	branch = dev
 [submodule "vendor/sol2"]
 	path = vendor/sol2
