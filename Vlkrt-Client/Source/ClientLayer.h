@@ -8,12 +8,14 @@
 #include "Scene.h"
 #include "SceneLoader.h"
 #include "MeshLoader.h"
+#include "UserInfo.h"
 
 #include <mutex>
 #include <glm/glm.hpp>
 #include <filesystem>
 #include <vector>
 #include <string>
+#include <deque>
 
 namespace Vlkrt
 {
@@ -60,6 +62,10 @@ namespace Vlkrt
         void ImGuiRenderEntityProperties(SceneEntity& entity);
         void FlattenHierarchyToScene(const SceneEntity& entity, const glm::mat4& parentWorld);
 
+        // Chat UI functions
+        void ImGuiRenderChatPanel();
+        void SendChatMessage(const std::string& message);
+
     private:
         bool m_TexturesLoaded{ false };
 
@@ -77,6 +83,12 @@ namespace Vlkrt
         Walnut::Client m_Client;
         uint32_t m_PlayerID{};
         bool m_NetworkDataChanged = false;
+        UserInfo m_UserInfo{ 0xFFFFFF, "Player" };
+
+        // Chat
+        std::deque<ChatMessage> m_ChatHistory;
+        std::string m_ChatInputBuffer;
+        std::mutex m_ChatMutex;
 
         // Rendering
         Camera m_Camera{ 45.0f, 0.1f, 100.0f };

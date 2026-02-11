@@ -50,9 +50,6 @@ namespace Vlkrt
         int MaterialIndex = 0;
 
         glm::mat4 Transform = glm::mat4(1.0f);
-
-        glm::vec3 AABBMin;
-        glm::vec3 AABBMax;
     };
 
     /**

@@ -179,6 +179,9 @@ namespace Vlkrt
             ImGui::Text("Players: %zu", m_PlayerData.size());
             ImGui::End();
 
+            // Chat panel
+            ImGuiRenderChatPanel();
+
             // Scene hierarchy editor panel
             ImGuiRenderSceneHierarchy();
         }
@@ -231,7 +234,8 @@ namespace Vlkrt
     void ClientLayer::RunScripts(SceneEntity& entity, float ts)
     {
         if (!entity.ScriptPath.empty()) {
-            if (!entity.ScriptInitialized) ScriptEngine::LoadScript(entity);
+            if (!entity.ScriptInitialized) [[unlikely]]
+                ScriptEngine::LoadScript(entity);
 
             ScriptEngine::CallOnUpdate(entity, ts);
         }
@@ -263,6 +267,16 @@ namespace Vlkrt
                 stream.ReadRaw(m_PlayerID);
                 WL_INFO_TAG("Client", "Connected to server with Player ID: {}", m_PlayerID);
                 break;
+            case PacketType::Message: {
+                ChatMessage msg;
+                msg.Deserialize(&stream, msg);
+                m_ChatMutex.lock();
+                m_ChatHistory.push_back(msg);
+                // Keep history limited to 100 messages
+                while (m_ChatHistory.size() > 100) { m_ChatHistory.pop_front(); }
+                m_ChatMutex.unlock();
+                break;
+            }
             case PacketType::ClientUpdate:
                 m_PlayerDataMutex.lock();
                 stream.ReadMap(m_PlayerData);
@@ -601,5 +615,56 @@ namespace Vlkrt
 
         // Recursively process children
         for (const auto& child : entity.Children) { FlattenHierarchyToScene(child, worldTransform); }
+    }
+
+    void ClientLayer::ImGuiRenderChatPanel()
+    {
+        if (ImGui::Begin("Chat", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+            ImGui::BeginChild("ChatHistory", ImVec2(400, 200), true);
+            m_ChatMutex.lock();
+            for (const auto& msg : m_ChatHistory) {
+                ImGui::TextWrapped("%s: %s", msg.Username.c_str(), msg.Message.c_str());
+            }
+            m_ChatMutex.unlock();
+
+            // Auto-scroll to bottom
+            if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) { ImGui::SetScrollHereY(1.0f); }
+            ImGui::EndChild();
+
+            // Input field
+            ImGui::Spacing();
+            bool sendMessage = false;
+            if (ImGui::InputText("##ChatInput", &m_ChatInputBuffer, ImGuiInputTextFlags_EnterReturnsTrue)) {
+                sendMessage = true;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Send", ImVec2(80, 0))) { sendMessage = true; }
+
+            if (sendMessage && !m_ChatInputBuffer.empty()) {
+                SendChatMessage(m_ChatInputBuffer);
+                m_ChatInputBuffer.clear();
+                ImGui::SetKeyboardFocusHere(-1);  // Return focus to input
+            }
+        }
+        ImGui::End();
+    }
+
+    void ClientLayer::SendChatMessage(const std::string& message)
+    {
+        if (m_Client.GetConnectionStatus() != Walnut::Client::ConnectionStatus::Connected) {
+            WL_WARN_TAG("Client", "Cannot send message: not connected to server");
+            return;
+        }
+
+        // Format username with player ID
+        std::string usernameWithId = m_UserInfo.Username + " [" + std::to_string(m_PlayerID) + "]";
+
+        Walnut::BufferStreamWriter stream(s_ScratchBuffer);
+        stream.WriteRaw(PacketType::Message);
+        stream.WriteString(usernameWithId);
+        stream.WriteString(message);
+
+        m_Client.SendBuffer(stream.GetBuffer());
+        // Message will appear in chat when server broadcasts it back to all clients
     }
 }  // namespace Vlkrt

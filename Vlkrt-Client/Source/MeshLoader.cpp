@@ -111,9 +111,8 @@ namespace Vlkrt
             mesh.MaterialIndex = shapes[0].mesh.material_ids[0];
         }
 
-        // Apply transform and calculate AABB
+        // Apply transform
         mesh.Transform = transform;
-        CalculateAABB(mesh);
 
         WL_INFO_TAG("MeshLoader", "Loaded OBJ file '{}': {} vertices", filepath, mesh.Vertices.size());
 
@@ -174,9 +173,8 @@ namespace Vlkrt
             mesh.Indices.push_back(base + 0);
         }
 
-        // Apply transform and calculate AABB
+        // Apply transform
         mesh.Transform = transform;
-        CalculateAABB(mesh);
 
         return mesh;
     }
@@ -199,9 +197,8 @@ namespace Vlkrt
         mesh.Indices.push_back(3);
         mesh.Indices.push_back(0);
 
-        // Apply transform and calculate AABB
+        // Apply transform
         mesh.Transform = transform;
-        CalculateAABB(mesh);
 
         return mesh;
     }
@@ -228,19 +225,6 @@ namespace Vlkrt
             mesh.Vertices[i0].Normal += faceNormal;
             mesh.Vertices[i1].Normal += faceNormal;
             mesh.Vertices[i2].Normal += faceNormal;
-        }
-    }
-
-    void MeshLoader::CalculateAABB(Mesh& mesh)
-    {
-        if (mesh.Vertices.empty()) return;
-
-        mesh.AABBMin = mesh.Vertices[0].Position;
-        mesh.AABBMax = mesh.Vertices[0].Position;
-
-        for (const auto& vertex : mesh.Vertices) {
-            mesh.AABBMin = glm::min(mesh.AABBMin, vertex.Position);
-            mesh.AABBMax = glm::max(mesh.AABBMax, vertex.Position);
         }
     }
 }  // namespace Vlkrt

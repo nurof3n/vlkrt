@@ -35,9 +35,11 @@ namespace Vlkrt
 
     private:
         HeadlessConsole m_Console;
-        Walnut::Server  m_Server{ 1337 };
+        Walnut::Server m_Server{ 1337 };
 
-        std::mutex                     m_PlayerDataMutex;
+        std::mutex m_PlayerDataMutex;
         std::map<uint32_t, PlayerData> m_PlayerData;
+
+        float m_UpdateAccumulator{ 0.0f };
     };
 };  // namespace Vlkrt

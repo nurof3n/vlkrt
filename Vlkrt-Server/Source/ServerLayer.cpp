@@ -1,9 +1,9 @@
 #include "ServerLayer.h"
+#include "ServerPacket.h"
+#include "UserInfo.h"
 
 #include "Walnut/Core/Log.h"
-
 #include "Walnut/Serialization/BufferStream.h"
-#include "ServerPacket.h"
 
 
 namespace Vlkrt
@@ -27,13 +27,17 @@ namespace Vlkrt
         m_Server.Start();
     }
 
-    void ServerLayer::OnDetach()
-    {
-        m_Server.Stop();
-    }
+    void ServerLayer::OnDetach() { m_Server.Stop(); }
 
     void ServerLayer::OnUpdate(float ts)
     {
+        static const float UPDATE_INTERVAL = 0.02f;
+
+        m_UpdateAccumulator += ts;
+        if (m_UpdateAccumulator < UPDATE_INTERVAL) return;
+
+        m_UpdateAccumulator -= UPDATE_INTERVAL;
+
         Walnut::BufferStreamWriter stream(s_ScratchBuffer);
         stream.WriteRaw(PacketType::ClientUpdate);
 
@@ -42,16 +46,11 @@ namespace Vlkrt
         m_PlayerDataMutex.unlock();
 
         m_Server.SendBufferToAllClients(stream.GetBuffer());
-
-        // throttle updates to 20 times per second
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 
-    void ServerLayer::OnRender()
-    {}
+    void ServerLayer::OnRender() {}
 
-    void ServerLayer::OnUIRender()
-    {}
+    void ServerLayer::OnUIRender() {}
 
     void ServerLayer::OnConsoleMessage(std::string_view message)
     {
@@ -90,6 +89,23 @@ namespace Vlkrt
         stream.ReadRaw(type);
 
         switch (type) {
+            case PacketType::Message: {
+                // Read chat message from client
+                std::string username;
+                std::string message;
+                stream.ReadString(username);
+                stream.ReadString(message);
+
+                // Broadcast message to all connected clients
+                Walnut::BufferStreamWriter broadcastStream(s_ScratchBuffer);
+                broadcastStream.WriteRaw(PacketType::Message);
+                broadcastStream.WriteString(username);
+                broadcastStream.WriteString(message);
+
+                m_Server.SendBufferToAllClients(broadcastStream.GetBuffer());
+                WL_INFO_TAG("Server", "Chat [{} from {}]: {}", clientInfo.ID, username, message);
+                break;
+            }
             case PacketType::ClientUpdate: {
                 m_PlayerDataMutex.lock();
                 auto& playerData = m_PlayerData[clientInfo.ID];

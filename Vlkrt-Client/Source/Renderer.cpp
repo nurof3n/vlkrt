@@ -17,13 +17,13 @@ namespace Vlkrt
     struct GPUMaterial
     {
         glm::vec3 albedo;
-        float     roughness;
-        float     metallic;
-        int       textureIndex;  // -1 if no texture
-        float     tiling;
-        float     _pad3;
+        float roughness;
+        float metallic;
+        int textureIndex;  // -1 if no texture
+        float tiling;
+        float _pad3;
         glm::vec3 emissionColor;
-        float     emissionPower;
+        float emissionPower;
     };
 
     Renderer::Renderer()
@@ -61,31 +61,24 @@ namespace Vlkrt
             vkFreeMemory(m_Device, m_MaterialIndexMemory, nullptr);
         }
 
-        if (m_DescriptorPool != VK_NULL_HANDLE)
-            vkDestroyDescriptorPool(m_Device, m_DescriptorPool, nullptr);
+        if (m_DescriptorPool != VK_NULL_HANDLE) vkDestroyDescriptorPool(m_Device, m_DescriptorPool, nullptr);
 
         if (m_DescriptorSetLayout != VK_NULL_HANDLE)
             vkDestroyDescriptorSetLayout(m_Device, m_DescriptorSetLayout, nullptr);
 
-        if (m_RTPipeline != VK_NULL_HANDLE)
-            vkDestroyPipeline(m_Device, m_RTPipeline, nullptr);
+        if (m_RTPipeline != VK_NULL_HANDLE) vkDestroyPipeline(m_Device, m_RTPipeline, nullptr);
 
-        if (m_RTPipelineLayout != VK_NULL_HANDLE)
-            vkDestroyPipelineLayout(m_Device, m_RTPipelineLayout, nullptr);
+        if (m_RTPipelineLayout != VK_NULL_HANDLE) vkDestroyPipelineLayout(m_Device, m_RTPipelineLayout, nullptr);
 
-        if (m_RaygenShader != VK_NULL_HANDLE)
-            vkDestroyShaderModule(m_Device, m_RaygenShader, nullptr);
-        if (m_MissShader != VK_NULL_HANDLE)
-            vkDestroyShaderModule(m_Device, m_MissShader, nullptr);
-        if (m_ClosestHitShader != VK_NULL_HANDLE)
-            vkDestroyShaderModule(m_Device, m_ClosestHitShader, nullptr);
+        if (m_RaygenShader != VK_NULL_HANDLE) vkDestroyShaderModule(m_Device, m_RaygenShader, nullptr);
+        if (m_MissShader != VK_NULL_HANDLE) vkDestroyShaderModule(m_Device, m_MissShader, nullptr);
+        if (m_ClosestHitShader != VK_NULL_HANDLE) vkDestroyShaderModule(m_Device, m_ClosestHitShader, nullptr);
     }
 
     void Renderer::OnResize(uint32_t width, uint32_t height)
     {
         if (m_FinalImage) {
-            if (m_FinalImage->GetWidth() == width && m_FinalImage->GetHeight() == height)
-                return;
+            if (m_FinalImage->GetWidth() == width && m_FinalImage->GetHeight() == height) return;
 
             m_FinalImage->Resize(width, height);
         }
@@ -125,11 +118,9 @@ namespace Vlkrt
 
     void Renderer::Render(const Scene& scene, const Camera& camera)
     {
-        if (!m_FinalImage || (m_FinalImage->GetWidth() == 0 || m_FinalImage->GetHeight() == 0))
-            return;
+        if (!m_FinalImage || (m_FinalImage->GetWidth() == 0 || m_FinalImage->GetHeight() == 0)) return;
 
-        if (scene.StaticMeshes.empty() && scene.DynamicMeshes.empty())
-            return;
+        if (scene.StaticMeshes.empty() && scene.DynamicMeshes.empty()) return;
 
         m_ActiveScene  = &scene;
         m_ActiveCamera = &camera;
@@ -148,7 +139,7 @@ namespace Vlkrt
         }
 
         bool sizeChanged = (totalMeshCount != m_LastMeshCount) || (totalVertices != m_LastVertexCount)
-                        || (totalIndices != m_LastIndexCount) || (scene.Materials.size() != m_LastMaterialCount);
+                           || (totalIndices != m_LastIndexCount) || (scene.Materials.size() != m_LastMaterialCount);
 
         bool needsRebuild = !m_SceneValid || sizeChanged;
 
@@ -162,18 +153,12 @@ namespace Vlkrt
                             [device = m_Device, vbuf = m_VertexBuffer, vmem = m_VertexMemory, ibuf = m_IndexBuffer,
                                     imem = m_IndexMemory, mibuf = m_MaterialIndexBuffer,
                                     mimem = m_MaterialIndexMemory]() {
-                                if (vbuf)
-                                    vkDestroyBuffer(device, vbuf, nullptr);
-                                if (vmem)
-                                    vkFreeMemory(device, vmem, nullptr);
-                                if (ibuf)
-                                    vkDestroyBuffer(device, ibuf, nullptr);
-                                if (imem)
-                                    vkFreeMemory(device, imem, nullptr);
-                                if (mibuf)
-                                    vkDestroyBuffer(device, mibuf, nullptr);
-                                if (mimem)
-                                    vkFreeMemory(device, mimem, nullptr);
+                                if (vbuf) vkDestroyBuffer(device, vbuf, nullptr);
+                                if (vmem) vkFreeMemory(device, vmem, nullptr);
+                                if (ibuf) vkDestroyBuffer(device, ibuf, nullptr);
+                                if (imem) vkFreeMemory(device, imem, nullptr);
+                                if (mibuf) vkDestroyBuffer(device, mibuf, nullptr);
+                                if (mimem) vkFreeMemory(device, mimem, nullptr);
                             });
                     m_VertexBuffer        = VK_NULL_HANDLE;
                     m_IndexBuffer         = VK_NULL_HANDLE;
@@ -182,27 +167,22 @@ namespace Vlkrt
                 if (scene.Materials.size() != m_LastMaterialCount) {
                     Walnut::Application::SubmitResourceFree(
                             [device = m_Device, buf = m_MaterialBuffer, mem = m_MaterialMemory]() {
-                                if (buf)
-                                    vkDestroyBuffer(device, buf, nullptr);
-                                if (mem)
-                                    vkFreeMemory(device, mem, nullptr);
+                                if (buf) vkDestroyBuffer(device, buf, nullptr);
+                                if (mem) vkFreeMemory(device, mem, nullptr);
                             });
                     m_MaterialBuffer = VK_NULL_HANDLE;
                 }
                 if (scene.Lights.size() != m_LastLightCount) {
                     Walnut::Application::SubmitResourceFree(
                             [device = m_Device, buf = m_LightBuffer, mem = m_LightMemory]() {
-                                if (buf)
-                                    vkDestroyBuffer(device, buf, nullptr);
-                                if (mem)
-                                    vkFreeMemory(device, mem, nullptr);
+                                if (buf) vkDestroyBuffer(device, buf, nullptr);
+                                if (mem) vkFreeMemory(device, mem, nullptr);
                             });
                     m_LightBuffer = VK_NULL_HANDLE;
                 }
             }
 
-            if (m_VertexBuffer == VK_NULL_HANDLE)
-                CreateSceneBuffers(scene);
+            if (m_VertexBuffer == VK_NULL_HANDLE) CreateSceneBuffers(scene);
 
             UpdateSceneData(scene);
 
@@ -215,8 +195,7 @@ namespace Vlkrt
             m_SceneValid        = true;
         }
 
-        if (!m_AccelerationStructure->IsBuilt())
-            return;
+        if (!m_AccelerationStructure->IsBuilt()) return;
 
         // Get command buffer
         VkCommandBuffer cmd = Walnut::Application::GetCommandBuffer(true);
@@ -561,9 +540,9 @@ namespace Vlkrt
     {
         // Flatten all meshes (static + dynamic) into single vertex/index buffers
         std::vector<GPUVertex> gpuVertices;
-        std::vector<uint32_t>  gpuIndices;
-        std::vector<uint32_t>  materialIndices;  // Material index per triangle
-        uint32_t               vertexOffset = 0;
+        std::vector<uint32_t> gpuIndices;
+        std::vector<uint32_t> materialIndices;  // Material index per triangle
+        uint32_t vertexOffset = 0;
 
         // Process static meshes
         for (const auto& mesh : scene.StaticMeshes) {
@@ -581,9 +560,7 @@ namespace Vlkrt
             }
 
             // Copy indices with offset
-            for (const auto& index : mesh.Indices) {
-                gpuIndices.push_back(index + vertexOffset);
-            }
+            for (const auto& index : mesh.Indices) { gpuIndices.push_back(index + vertexOffset); }
 
             // Store material index for each triangle in this mesh
             uint32_t triangleCount = static_cast<uint32_t>(mesh.Indices.size() / 3);
@@ -610,9 +587,7 @@ namespace Vlkrt
             }
 
             // Copy indices with offset
-            for (const auto& index : mesh.Indices) {
-                gpuIndices.push_back(index + vertexOffset);
-            }
+            for (const auto& index : mesh.Indices) { gpuIndices.push_back(index + vertexOffset); }
 
             // Store material index for each triangle in this mesh
             uint32_t triangleCount = static_cast<uint32_t>(mesh.Indices.size() / 3);
@@ -733,7 +708,7 @@ namespace Vlkrt
 
         // Collect all textures from the scene materials
         std::vector<std::shared_ptr<Walnut::Image>> allTextures;
-        std::unordered_map<std::string, int>        textureToIndex;
+        std::unordered_map<std::string, int> textureToIndex;
         for (const auto& mat : scene.Materials) {
             if (!mat.TextureFilename.empty() && textureToIndex.find(mat.TextureFilename) == textureToIndex.end()) {
                 auto tex = LoadOrGetTexture(mat.TextureFilename);
@@ -851,8 +826,7 @@ namespace Vlkrt
     VkBuffer Renderer::CreateBuffer(
             VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkDeviceMemory& bufferMemory)
     {
-        if (size == 0)
-            size = 16;  // Minimum size to avoid Vulkan errors
+        if (size == 0) size = 16;  // Minimum size to avoid Vulkan errors
 
         VkBufferCreateInfo bufferInfo = {};
         bufferInfo.sType              = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -897,9 +871,7 @@ namespace Vlkrt
 
     void Renderer::PreloadTextures(const std::vector<std::string>& textureFilenames)
     {
-        for (const auto& textureFilename : textureFilenames) {
-            LoadOrGetTexture(textureFilename);
-        }
+        for (const auto& textureFilename : textureFilenames) { LoadOrGetTexture(textureFilename); }
     }
 
     std::shared_ptr<Walnut::Image> Renderer::LoadOrGetTexture(const std::string& filename)
@@ -908,11 +880,9 @@ namespace Vlkrt
 
         // Check if texture already cached
         auto it = m_TextureCache.find(filename);
-        if (it != m_TextureCache.end()) {
-            return it->second;
-        }
+        if (it != m_TextureCache.end()) { return it->second; }
 
-        // Try to load texture from disk (check both local and parent paths for IDE/bin consistency)
+        // Try to load texture from disk
         std::shared_ptr<Walnut::Image> texture;
 
         try {
@@ -927,9 +897,7 @@ namespace Vlkrt
             WL_WARN_TAG("Renderer", "Failed to load texture '{}': {}", filepath, e.what());
         }
 
-        if (!texture) {
-            WL_WARN_TAG("Renderer", "Failed to load texture '{}'.", filepath);
-        }
+        if (!texture) { WL_WARN_TAG("Renderer", "Failed to load texture '{}'.", filepath); }
 
         return texture;
     }

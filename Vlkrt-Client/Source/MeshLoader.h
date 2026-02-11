@@ -18,6 +18,5 @@ namespace Vlkrt
 
     private:
         static void CalculateNormals(Mesh& mesh);
-        static void CalculateAABB(Mesh& mesh);
     };
 }  // namespace Vlkrt
