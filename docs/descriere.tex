@@ -1,0 +1,318 @@
+\documentclass[12pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{float}
+
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},   
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\scriptsize,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=5pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=2
+}
+\lstset{style=mystyle}
+\renewcommand{\lstlistingname}{Listarea}
+
+\title{\textbf{Proiect MGTR\\ Vlkrt}}
+\author{Alex-Andrei Cioc}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+
+\section{Introducere}
+Proiectul \textbf{Vlkrt} reprezintă o implementare de bază a unui motor grafic ce folosește Vulkan SDK pentru interfațarea cu GPU.
+Acesta construiește un pipeline de Ray tracing, cu funcționalități de bază precum încărcarea și editarea scenelor 3D și o arhitectură client-server ce permite mai multor clienți să interacționeze în aceeași scenă.
+
+
+\section{Arhitectura}
+
+Proiectul adoptă o arhitectură modulară, decuplată, construită pe un model client-server.
+Această structură permite separarea logicii de procesare a datelor și a stării globale (server headless) de logica de prezentare grafică și interacțiune cu utilizatorul (client).
+
+\subsection{Walnut Framework}
+
+La baza aplicației se află framework-ul \href{https://github.com/StudioCherno/Walnut}{\textbf{Walnut}}, care oferă un strat subțire de abstractizare peste Vulkan și rulează aplicația \textbf{Vlkrt}.
+Acesta se ocupă de:
+\begin{itemize}
+    \item \textbf{Gestionarea ferestrelor și a contextului:} Walnut utilizează \textbf{GLFW} sub capotă pentru crearea ferestrelor și gestionarea contextului de execuție.
+    \item \textbf{Layer System:} Arhitectura este bazată pe un sistem de \textit{Layere}, similar cu cel din motoarele grafice moderne (ex. Hazel).
+        Orice funcționalitate nouă este implementată ca un \texttt{Layer} (ex. \texttt{ClientLayer}, \texttt{ServerLayer}), care primește evenimente de \texttt{OnUpdate}, \texttt{OnRender} și \texttt{OnUIRender}.
+    \item \textbf{Integrare ImGui:} Framework-ul oferă o integrare \textit{out-of-the-box} cu \textbf{ImGui} pentru crearea rapidă de interfețe de utilizator reactive, optimizând procesul de dezvoltare.
+        Pipeline-ul de randare 3D este de asemenea derivat din implementarea de Vulkan a \textbf{ImGui}.
+\end{itemize}
+
+\subsection{Vlkrt-Client}
+
+Clientul reprezintă componenta principală de interfațare cu utilizatorul și motorul de vizualizare.
+Acesta conține:
+\begin{itemize}
+    \item \textbf{Motor de randare:} Utilizează Vulkan SDK pentru un control granular asupra pipeline-ului de randare.
+        Acesta este configurat pentru a utiliza extensiile de Ray tracing hardware (\texttt{VK\_KHR\_ray\_tracing\_pipeline}).
+    \item \textbf{Procesare de input:} Gestionează camera și interacțiunile de mouse/tastatură prin intermediul framework-ului \textbf{Walnut}.
+        În spate, \textbf{Walnut} folosește de fapt API-ul \textbf{GLFW}.
+    \item \textbf{Motor de scripting:} Include un motor de scripting bazat pe \textbf{Lua} (via \texttt{Sol2} și \texttt{LuaJIT}), permițând definirea de logică custom pentru obiectele din scenă, fără recompilarea codului C++.
+\end{itemize}
+
+\subsection{Vlkrt-Server}
+
+Serverul este o aplicație \textit{headless} responsabilă pentru sincronizarea stării jocului.
+Acesta nu inițializează contextul Vulkan pentru randare, utilizând în schimb o variantă minimală a \textbf{Walnut} (\texttt{Walnut-Headless}).
+Atribuții:
+\begin{itemize}
+    \item \textbf{State Management:} Menține o bază de date in-memory cu toți utilizatorii conectați.
+    \item \textbf{Packet Handling:} Procesează cererile primite de la clienți și replică modificările către toți ceilalți participanți în timp real.
+\end{itemize}
+
+\subsection{Vlkrt-Common}
+
+Această bibliotecă statică conține simboluri partajate între binarele de client și server pentru a asigura consistența datelor.
+Aici se definesc structurile pachetelor de rețea (\texttt{ServerPacket.h} și \texttt{UserInfo.h}). 
+
+\subsection{Sistemul de building}
+
+Pentru gestionarea complexității proiectului și a multiplelor dependențe, se utilizează un sistem de meta-build bazat pe \textbf{Premake5}.
+Caracteristici:
+\begin{itemize}
+    \item \textbf{Modularizare:} Fiecare sub-componentă are propriul fișier de configurare scris în Lua (\texttt{Build-Vlkrt-Client.lua}, etc.).
+        De asemenea, configurări de bază ce ar putea fi shared între diferite aplicații sunt definite în fișierele Lua \texttt{Build-Vlkrt-Common.lua}, respectiv \texttt{Build-Vlkrt-Common-Headless.lua}.
+    \item \textbf{Portabilitate:} Soluția generează automat soluții de Visual Studio sau Makefile-uri de Linux, facilitând dezvoltarea cross-platform.
+        Pentru testare, am rulat serverul într-un mediu de Linux, iar client-ul în Windows.
+\end{itemize}
+
+
+\section{Networking}
+
+Comunicarea între clienți și server este gestionată de modulul \texttt{Walnut-Networking}, care utilizează biblioteca \textbf{GameNetworkingSockets} de la Valve pentru o comunicare bazată pe UDP, optimizată pentru latență redusă.
+Caracteristici:
+\begin{itemize}
+    \item \textbf{Modelul de date:} Schimbul de informații se bazează pe pachete binare (structura \texttt{PacketType}).
+        Mesajele sunt serializate într-un format compact pentru a minimiza utilizarea lățimii de bandă.
+    \item \textbf{Sincronizarea stării:} Clientul trimite periodic actualizări ale poziției și stării proprii, în timp ce serverul transmite aceste date către ceilalți clienți conectați pentru a reconstrui scena globală.
+    \item \textbf{Gestiunea conexiunilor:} Serverul implementează logica de acceptare/respingere a conexiunilor și de gestionare a deconectărilor.
+    \item \textbf{Chat}: Clienții conectați pot comunica printr-un chat comun.
+    \item \textbf{Server tickrate:} Pentru eficiență, serverul limitează procesarea pachetelor la o frecvență de 50Hz. Aceasta se poate crește cu ușurință.
+\end{itemize}
+
+
+\section{Input handling}
+
+Gestionarea evenimentelor de intrare este realizată prin integrarea cu sistemul de polling al \textbf{GLFW}, expus prin \textbf{Walnut}.
+\begin{itemize}
+    \item \textbf{Polling:} \textbf{GLFW} procesează evenimentele de input prin polling.
+        La fiecare frame, clientul verifică ultima stare a tastelor și a mouse-ului prin intermediul funcțiilor \texttt{glfwGetKey()} și \texttt{glfwGetMouseButton()}.
+    \item \textbf{Interacțiune UI:} Sistemul de input este partajat cu \textbf{ImGui}; evenimentele sunt consumate prioritar de interfața grafică dacă este focusată o fereastră de UI.
+\end{itemize}
+
+
+\section{Gestiunea resurselor}
+
+Un aspect critic al proiectului este încărcarea și organizarea eficientă a resurselor digitale (mesh-uri, scene, texturi).
+
+\subsection{Mesh-uri}
+
+Clasa \texttt{MeshLoader} utilizează biblioteca \textbf{tinyobjloader} pentru a încărca fișiere de tip \texttt{.obj}.
+După încărcare, se calculează automat normalele (dacă lipsesc) și coordonatele de textură.
+
+Se folosește un format custom (structura \texttt{Mesh}) pentru a reține informații precum buffer-ele de vertecși și indecși, sau matricea de model.
+Se pot crea și obiecte în mod procedural, spre exemplu se pot folosi funcțiile \texttt{GenerateQuad} și \texttt{GenerateCube}.
+
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, frame=single]
+/**
+ * @brief Mesh definition containing CPU vertex/index data and material reference.
+ */
+struct Mesh
+{
+    std::string Filename;
+    std::string Name;
+    std::vector<Vertex> Vertices;
+    std::vector<uint32_t> Indices;
+    int MaterialIndex = 0;
+    glm::mat4 Transform = glm::mat4(1.0f);
+};
+\end{lstlisting}
+
+\subsection{Texturi}
+
+\textbf{Vlkrt} suportă încărcarea de texturi prin intermediul bibliotecii \textbf{stb\_image}.
+Resursele de tip imagini sunt gestionate prin clasa \texttt{Walnut::Image}.
+\begin{itemize}
+    \item \textbf{Diferite formate:} Sunt suportate JPEG și PNG (teoretic și HDR, dar nu este suport în shadere).
+    \item \textbf{Mipmap:} Texturile sunt mipmapped de către Vulkan (vezi Secțiunea~\ref{sec:rendering}).
+    \item \textbf{Customizare:} Utilizatorul poate schimba texturile materialelor și aplica factori diferiți de tiling prin intermediul GUI-ului.
+\end{itemize}
+
+\subsection{Shadere}
+
+Shader-ele sunt scrise în GLSL și compilate în format intermediar SPIRV folosind \texttt{glslc}.
+Pasul de compilare trebuie gestionat separat de compilarea aplicației.
+Aceasta încarcă direct codul SPIRV la runtime.
+Proiectul include script-uri de compilare pentru Windows (\texttt{compile\_shaders.bat}) și Linux (\texttt{compile\_shaders.sh}).
+
+Pentru mai multe detalii vezi Secțiunea~\ref{sec:pipeline}.
+
+\subsection{Scripturi}
+
+Scripturile Lua sunt încărcate on-demand la primul update al fiecărui obiect scriptat.
+Mai multe detalii în Secțiunea~\ref{sec:scripting}.
+
+\subsection{Scene}
+
+\subsubsection{Sistemul ierarhic}
+
+\textbf{Vlkrt} utilizează un sistem ierarhic de entități (\texttt{SceneEntity}), în care fiecare obiect din lume are o transformare relativă față de părintele său.
+Caracteristici:
+\begin{itemize}
+    \item \textbf{Matrice separate:} Fiecare entitate deține o structură \texttt{Transform} care stochează separat poziția (\texttt{vec3}), rotația (\texttt{quat} - cuaternioni pentru evitarea \textit{Gimbal Lock}) și scalarea (\texttt{vec3}).
+    \item \textbf{Tipuri de entități:} Sistemul suportă multiple tipuri de entități: \texttt{Mesh} (geometrie), \texttt{Light} (surse de lumină), și \texttt{Empty} (folosite pentru gruparea logică a obiectelor).
+    \item \textbf{Ierarhia transformărilor:} Matricea de transformare globală (\texttt{WorldTransform}) este recalculată recursiv: $M_{world} = M_{parent\_world} \times M_{local}$.
+\end{itemize}
+
+\subsubsection{Serializare}
+
+Scenele sunt salvate și încărcate utilizând formatul YAML.
+\texttt{yaml-cpp} este biblioteca utilizată pentru parsarea și generarea fișierelor YAML.
+\begin{itemize}
+    \item \textbf{Structură ierarhică:} YAML-ul reflectă ierarhia entităților din scenă, fiecare entitate având un câmp \texttt{children} care conține sub-entitățile sale, facilitând organizarea logică a scenei.
+    \item \textbf{Persistență:} Toate proprietățile entităților (poziție, rotație, scalare, materiale etc.) sunt serializate, permițând salvarea progresului într-un fișier ușor de citit de către om (ex. \texttt{resources/scenes/default.yaml}).
+        Modificările se pot salva și în timp real, din cadrul GUI-ului de editare a scenei.
+    \item \textbf{Dynamic Loading:} Sistemul permite reîncărcarea la runtime a scenelor fără repornirea aplicației, facilitând iterarea rapidă asupra design-ului.
+\end{itemize}
+
+
+\section{Rendering}\label{sec:rendering}
+
+Nucleul grafic al proiectului este un motor de \textbf{Ray tracing} bazat pe API-ul Vulkan, implementat în clasa \texttt{Renderer}.
+
+\subsection{Pipeline}\label{sec:pipeline}
+
+Spre deosebire de rasterizarea tradițională, \textbf{Vlkrt} folosește extensia de pipeline Vulkan \texttt{VK\_KHR\_ray\_tracing\_pipeline} pentru a implementa un pipeline de Ray tracing.
+\begin{itemize}
+    \item \textbf{Acceleration Structures (AS):} Geometria este organizată în două niveluri:
+        \begin{enumerate}
+            \item \textbf{Bottom-Level AS (BLAS):} Conține geometria brută a fiecărui mesh (buffere de vertex și index).
+            \item \textbf{Top-Level AS (TLAS):} Conține instanțe ale BLAS-urilor, fiecare cu propria matrice de transformare, permițând instanțierea eficientă a obiectelor.
+        \end{enumerate}
+    \item \textbf{Shader Binding Table (SBT):} O structură de date critică în Vulkan RT care face legătura între razele lansate și grupurile de shadere ce trebuie executate la impact.
+        De altfel, se definesc 3 diferite tipuri de shadere: \texttt{raygen}, \texttt{closesthit}, \texttt{miss}.
+\end{itemize}
+
+Procesul de randare urmează fluxul standard de Ray tracing:
+\begin{enumerate}
+    \item \textbf{Ray Generation (\texttt{raygen.rgen}):} Calculează direcția razei primare pentru fiecare pixel de pe ecran, plecând din poziția camerei.
+    \item \textbf{Acceleration Structure Traversal:} GPU-ul parcurge TLAS și BLAS pentru a găsi cel mai apropiat punct de intersecție.
+    \item \textbf{Closest Hit (\texttt{closesthit.rchit}):} Se execută la intersecția cu geometria.
+        Aici se calculează modelul de iluminare Phong și se eșantionează texturile.
+        Pentru acestea din urmă, am folosit mipmap-uri cu calcul de LoD bazat pe [Ray Cones](https://media.contentapi.ea.com/content/dam/ea/seed/presentations/2019-ray-tracing-gems-chapter-20-akenine-moller-et-al.pdf).
+    \item \textbf{Miss (\texttt{miss.rmiss}):} Se execută dacă raza nu întâlnește niciun obiect, returnând culoarea \textit{skybox}-ului.
+\end{enumerate}
+
+\subsection{Camera}
+
+Sistemul de cameră este implementat în clasa \texttt{Camera}, oferind o proiecție perspectivă și control de tip \textit{first-person}.
+Utilizatorul poate naviga folosind tastele WASD pentru translație și mouse-ul pentru rotație (pitch/yaw).
+Rotația se realizează numai la apăsarea butonului de click dreapta.
+
+
+\section{Scripting}\label{sec:scripting}
+
+Pentru a oferi flexibilitate în simulare, a fost integrat motorul de scripting \textbf{Lua}.
+\begin{itemize}
+    \item \textbf{Sol2 + LuaJIT:} S-a utilizat biblioteca \texttt{sol2} ca wrapper C++ peste \texttt{LuaJIT}, oferind o performanță ridicată și o sintaxă curată pentru bind-uri.
+    \item \textbf{Expunerea API-ului:} Entitățile din scenă sunt expuse către scripturi, permițând modificarea transformărilor sau a proprietăților materialelor la runtime (ex. animația \texttt{cube\_animation.lua}).
+        Proprietățile expuse includ:
+        \begin{itemize}
+            \item \textbf{Transform:} Structura care conține poziția (vec3), rotația (quat), și scalarea (vec3) a entității. Modificările la acestea sunt automat aplicate la entitate.
+            \item \textbf{Operatori glm:} Bindings pentru calcule cu vectori (operații de adunare, scădere, normalizare, produs scalar) și cuaternioni (rotații, interpolare).
+            \item \textbf{Input:} Funcții pentru verificarea input-urilor utilizatorului (ex. \texttt{Input.IsKeyDown(keycode)}).
+            \item \textbf{Funcții de bibliotecă standard:} Accesul la bibliotecile Lua standard (\texttt{math, os, string, table}) pentru logică complexă.
+        \end{itemize}
+    \item \textbf{Ciclul de viață al scriptului:}
+        \begin{enumerate}
+            \item La prima actualizare a unei entități cu script, scriptul este încărcat din fișierul \texttt{.lua} și o funcție \texttt{OnUpdate(entity, deltaTime)} este căutată.
+            \item La fiecare frame, funcția \texttt{OnUpdate} este apelată cu entitatea și intervalul de timp (deltaTime) ca parametri.
+            \item Scriptul poate modifica transformarile sau alte proprietăți ale entității în mod direct.
+        \end{enumerate}
+\end{itemize}
+
+
+\section{GUI}
+
+Interfața utilizatorului este construită folosind \textbf{ImGui}, o bibliotecă populară pentru GUI-uri imediate, integrată direct în pipeline-ul de rendering Vulkan.
+
+\subsection{Conectare la server}
+
+La pornirea clientului:
+\begin{itemize}
+    \item Utilizatorul este solicitat să introducă adresa serverului și portul pentru conexiune.
+    \item După stabilirea conexiunii, se randează scena \textit{default}.
+    \item Toți jucătorii conectați sunt vizualizați drept cuburi mobile în scenă.
+\end{itemize}
+
+\subsection{Editor de Scene}
+
+Clientul include un editor vizual cu următoarele funcționalități:
+\begin{itemize}
+    \item \textbf{Arborele de entități:} Afișează o reprezentare ierarhică a tuturor obiectelor din scenă. Utilizatorul poate:
+        \begin{itemize}
+            \item Selecta entități în arbore.
+            \item Extinde/restrânge noduri pentru a vizualiza relațiile părinte-copil.
+            \item Modifica, salva și încărca scene.
+        \end{itemize}
+    \item \textbf{Inspector de proprietăți:} Afișează detaliile entității selectate:
+        \begin{itemize}
+            \item \textbf{Transform Controls:} Câmpuri pentru poziție (X, Y, Z), pentru rotație Euler (pitch, yaw, roll) și pentru scalare. Schimbările sunt aplicate imediat.
+            \item \textbf{Material Properties:} Selectare de material dintr-o listă, ajustare a albedoului, roughness-ului, și metallic-ului. Texturile pot fi selectate dintr-o listă a fișierelor disponibile.
+            \item \textbf{Light Properties:} Pentru entități light, oferă controale pentru culoare, direcție (la lumini direcționale), intensitate, și raza de influență (la lumini de tip punct).
+            \item \textbf{Script Path:} Permite atribuirea unui script Lua unei entități.
+        \end{itemize}
+    \item \textbf{Chat:} Acceptă input de la utilizator și afișează toate mesajele stocate pe server
+    \item \textbf{Statistics Panel:} Afișează:
+        \begin{itemize}
+            \item Durata buclei de randare în millisecunde.
+            \item ID-ul jucătorului.
+            \item Numărul de jucători conectați.
+        \end{itemize}
+\end{itemize}
+
+
+\section{Hostarea serverului}
+
+TODO about UKC
+
+\section{TODO}
+
+\begin{itemize}
+    \item Sincronizarea scenelor pe server
+    \item Rularea scripturilor server-side
+    \item Interpolarea update-urilor de transformare de la server
+    \item Customizarea caracterului
+    \item Pipeline îmbunătățit de Ray tracing (umbre, reflexii/refracții, Path tracing)
+\end{itemize}
+
+\end{document}
+
