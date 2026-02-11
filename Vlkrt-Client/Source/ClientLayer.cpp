@@ -137,6 +137,7 @@ namespace Vlkrt
 
         // Sync hierarchy changes to flat arrays
         FlattenHierarchyToScene(m_SceneRoot, glm::mat4(1.0f));
+        m_Renderer.InvalidateScene();
     }
 
     void ClientLayer::OnRender()
