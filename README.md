@@ -78,7 +78,7 @@ Also, grab your token from the console, and you're ready to go:
 ```bash
  kraft cloud deploy \
     -M 128 \
-    -p 1337:1337/tls \
+    -p 1337:1337/udp \
     --scale-to-zero on \
     --scale-to-zero-stateful \
     --rootfs-type erofs \
