@@ -17,6 +17,11 @@
 
 namespace Vlkrt
 {
+    /**
+     * @brief ClientLayer is the main application layer for the Vlkrt client. It manages the connection to the server,
+     * handles player input, receives updates from the server, and renders the scene. It also includes a hierarchical
+     * ImGui scene editor.
+     */
     class ClientLayer : public Walnut::Layer
     {
     public:
@@ -28,7 +33,7 @@ namespace Vlkrt
         };
 
     public:
-        ClientLayer();
+        ClientLayer() = default;
 
         void OnAttach() override;
         void OnDetach() override;
@@ -56,42 +61,43 @@ namespace Vlkrt
         void FlattenHierarchyToScene(const SceneEntity& entity, const glm::mat4& parentWorld);
 
     private:
+        bool m_TexturesLoaded{ false };
+
         // Client player data
         const float m_Speed{ 100.0f };
-        bool        m_TexturesLoaded = false;
-        glm::vec2   m_PlayerPosition{ 50.0f, 50.0f };
-        glm::vec2   m_PlayerVelocity{};
+        glm::vec2 m_PlayerPosition{ 50.0f, 50.0f };
+        glm::vec2 m_PlayerVelocity{};
 
         // Server player data
-        std::mutex                     m_PlayerDataMutex;
+        std::mutex m_PlayerDataMutex;
         std::map<uint32_t, PlayerData> m_PlayerData;
 
         // Networking
-        std::string    m_ServerAddress;
+        std::string m_ServerAddress;
         Walnut::Client m_Client;
-        uint32_t       m_PlayerID{};
+        uint32_t m_PlayerID{};
+        bool m_NetworkDataChanged = false;
 
         // Rendering
+        Camera m_Camera{ 45.0f, 0.1f, 100.0f };
         Renderer m_Renderer;
-        Camera   m_Camera;
-        Scene    m_Scene;
+        Scene m_Scene;
         uint32_t m_ViewportWidth{};
         uint32_t m_ViewportHeight{};
-        float    m_LastRenderTime{};
+        float m_LastRenderTime{};
 
         // Scene management
-        std::string m_CurrentScene  = "default";
-        std::string m_SelectedScene = "default";
+        std::string m_CurrentScene{ "default" };
+        std::string m_SelectedScene{ "default" };
 
         // Hierarchical scene data
-        SceneEntity      m_SceneRoot;         // Root of scene hierarchy
-        SceneHierarchy   m_SceneHierarchy;    // Transform management
-        HierarchyMapping m_HierarchyMapping;  // Entity-to-flat-array mapping
+        SceneEntity m_SceneRoot;
+        SceneHierarchy m_SceneHierarchy;
+        HierarchyMapping m_HierarchyMapping;
 
         // Scene change tracking
         glm::vec2 m_LastPlayerPosition{};
-        size_t    m_LastPlayerCount    = 0;
-        bool      m_NetworkDataChanged = false;
+        size_t m_LastPlayerCount{ 0 };
 
         // Resource cache
         std::vector<std::string> m_AvailableTextures;

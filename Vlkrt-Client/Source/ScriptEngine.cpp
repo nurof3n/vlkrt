@@ -2,6 +2,7 @@
 #include "Utils.h"
 
 #include "Walnut/Input/Input.h"
+#include "Walnut/Core/Log.h"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -19,10 +20,7 @@ namespace Vlkrt
         RegisterBindings();
     }
 
-    void ScriptEngine::Shutdown()
-    {
-        s_LuaState.reset();
-    }
+    void ScriptEngine::Shutdown() { s_LuaState.reset(); }
 
     void ScriptEngine::RegisterBindings()
     {
@@ -62,36 +60,33 @@ namespace Vlkrt
 
     void ScriptEngine::LoadScript(SceneEntity& entity)
     {
-        if (entity.ScriptPath.empty())
-            return;
+        if (entity.ScriptPath.empty()) return;
 
         try {
             auto result = s_LuaState->safe_script_file(Vlkrt::SCRIPTS_DIR + entity.ScriptPath);
             if (!result.valid()) {
                 sol::error err = result;
-                std::cerr << "Failed to load script: " << err.what() << std::endl;
+                WL_ERROR_TAG("ScriptEngine", "Failed to load script '{}': {}", entity.ScriptPath, err.what());
                 return;
             }
             entity.ScriptInitialized = true;
         }
         catch (const std::exception& e) {
-            std::cerr << "Script exception: " << e.what() << std::endl;
+            WL_ERROR_TAG("ScriptEngine", "LoadScript exception: {}", e.what());
         }
     }
 
     void ScriptEngine::CallOnUpdate(SceneEntity& entity, float ts)
     {
-        if (!entity.ScriptInitialized)
-            return;
+        if (!entity.ScriptInitialized) return;
 
         sol::protected_function onUpdate = (*s_LuaState)["OnUpdate"];
-        if (!onUpdate.valid())
-            return;
+        if (!onUpdate.valid()) return;
 
         auto result = onUpdate(entity, ts);
         if (!result.valid()) {
             sol::error err = result;
-            std::cerr << "Script Error in OnUpdate: " << err.what() << std::endl;
+            WL_ERROR_TAG("ScriptEngine", "Script Error in OnUpdate: {}", err.what());
         }
     }
 }  // namespace Vlkrt

@@ -283,9 +283,9 @@ namespace Vlkrt
     void Renderer::CreateRayTracingPipeline()
     {
         // Load shaders
-        auto raygenCode     = ShaderLoader::LoadShaderSPIRV("raygen.rgen.spv");
-        auto missCode       = ShaderLoader::LoadShaderSPIRV("miss.rmiss.spv");
-        auto closestHitCode = ShaderLoader::LoadShaderSPIRV("closesthit.rchit.spv");
+        auto raygenCode     = ShaderLoader::LoadShaderBytecode("raygen.rgen.spv");
+        auto missCode       = ShaderLoader::LoadShaderBytecode("miss.rmiss.spv");
+        auto closestHitCode = ShaderLoader::LoadShaderBytecode("closesthit.rchit.spv");
 
         m_RaygenShader     = ShaderLoader::CreateShaderModule(m_Device, raygenCode);
         m_MissShader       = ShaderLoader::CreateShaderModule(m_Device, missCode);

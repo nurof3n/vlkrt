@@ -90,13 +90,14 @@ namespace Vlkrt
         stream.ReadRaw(type);
 
         switch (type) {
-            case PacketType::ClientUpdate:
+            case PacketType::ClientUpdate: {
                 m_PlayerDataMutex.lock();
                 auto& playerData = m_PlayerData[clientInfo.ID];
                 stream.ReadRaw<glm::vec2>(playerData.Position);
                 stream.ReadRaw<glm::vec2>(playerData.Velocity);
                 m_PlayerDataMutex.unlock();
                 break;
+            }
             default:
                 WL_WARN_TAG("Server", "Received unknown packet type {} from client {}", (uint32_t) type, clientInfo.ID);
                 break;

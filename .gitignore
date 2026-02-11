@@ -62,3 +62,13 @@ imgui.ini
 # Submodules
 Walnut/
 vendor/
+
+# Latex auxiliary files
+*.aux
+*.lof
+*.log
+*.synctex.gz
+*.toc
+*.out
+*.fdb_latexmk
+*.fls

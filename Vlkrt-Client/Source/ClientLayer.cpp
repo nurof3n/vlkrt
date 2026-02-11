@@ -1,35 +1,29 @@
 #include "ClientLayer.h"
+#include "ServerPacket.h"
+#include "SceneLoader.h"
+#include "ScriptEngine.h"
+#include "Utils.h"
 
 #include "Walnut/Application.h"
 #include "Walnut/Input/Input.h"
 #include "Walnut/ImGui/ImGuiTheme.h"
 #include "Walnut/Timer.h"
-
 #include "Walnut/Serialization/BufferStream.h"
-#include "ServerPacket.h"
-
-#include "SceneLoader.h"
-#include "ScriptEngine.h"
-#include "Utils.h"
-
-#include <glm/gtc/type_ptr.hpp>
-#include <glm/gtc/quaternion.hpp>
-
-#include <GLFW/glfw3.h>
-
-#include <filesystem>
-#include <algorithm>
 
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "misc/cpp/imgui_stdlib.h"
 
+#include <glm/gtc/type_ptr.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <GLFW/glfw3.h>
+#include <filesystem>
+#include <algorithm>
+
+
 namespace Vlkrt
 {
     static Walnut::Buffer s_ScratchBuffer{};
-
-    ClientLayer::ClientLayer() : m_Camera(45.0f, 0.1f, 100.0f)
-    {}
 
     void ClientLayer::OnAttach()
     {
@@ -39,26 +33,25 @@ namespace Vlkrt
 
         m_Client.SetDataReceivedCallback([this](const Walnut::Buffer& buffer) { OnDataReceived(buffer); });
 
-        // Load default scene from YAML file
         LoadScene("default");
     }
 
     void ClientLayer::RefreshResources()
     {
-        namespace fs = std::filesystem;
-
         m_AvailableTextures.clear();
         m_AvailableModels.clear();
         m_AvailableScenes.clear();
         m_AvailableScripts.clear();
 
-        auto scanDirectory = [](const std::string& path, std::vector<std::string>& list, const std::vector<std::string>& extensions, bool stripExtension = false) {
-            if (!fs::exists(path)) return;
-            for (const auto& entry : fs::directory_iterator(path)) {
+        auto scanDirectory = [](const std::string& path, std::vector<std::string>& list,
+                                     const std::vector<std::string>& extensions, bool stripExtension = false) {
+            if (!std::filesystem::exists(path)) return;
+            for (const auto& entry : std::filesystem::directory_iterator(path)) {
                 if (entry.is_regular_file()) {
                     std::string ext = entry.path().extension().string();
                     std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-                    if (extensions.empty() || std::find(extensions.begin(), extensions.end(), ext) != extensions.end()) {
+                    if (extensions.empty()
+                            || std::find(extensions.begin(), extensions.end(), ext) != extensions.end()) {
                         if (stripExtension)
                             list.push_back(entry.path().stem().string());
                         else
@@ -75,10 +68,7 @@ namespace Vlkrt
         scanDirectory(SCRIPTS_DIR, m_AvailableScripts, { ".lua" });
     }
 
-    void ClientLayer::OnDetach()
-    {
-        ScriptEngine::Shutdown();
-    }
+    void ClientLayer::OnDetach() { ScriptEngine::Shutdown(); }
 
     void ClientLayer::OnUpdate(float ts)
     {
@@ -89,19 +79,15 @@ namespace Vlkrt
 
         RunScripts(m_SceneRoot, ts);
 
-        // Check if camera control mode (right-click held)
         bool cameraControlMode = Walnut::Input::IsMouseButtonDown(Walnut::MouseButton::Right);
-
         if (cameraControlMode) {
             // When holding right-click: camera moves with WASD, player stays still
             m_PlayerVelocity = {};
             m_Camera.OnUpdate(ts);
         }
         else {
-            // Normal mode: WASD moves player, camera only moves on mouse drag
-            glm::vec2 dir{ 0.0f };
-
             // Only process WASD input if ImGui doesn't want keyboard focus
+            glm::vec2 dir{ 0.0f };
             if (!ImGui::GetIO().WantCaptureKeyboard) {
                 if (Walnut::Input::IsKeyDown(Walnut::KeyCode::W))
                     dir.y = -1.0f;
@@ -126,9 +112,7 @@ namespace Vlkrt
             m_PlayerPosition += m_PlayerVelocity * ts;
 
             // Camera only moves when player is not moving
-            if (!playerMoving) {
-                m_Camera.OnUpdate(ts);
-            }
+            if (!playerMoving) { m_Camera.OnUpdate(ts); }
         }
 
         // Client update
@@ -141,7 +125,7 @@ namespace Vlkrt
         }
 
         // Only update scene if something actually changed
-        size_t currentPlayerCount = m_PlayerData.size() + 1;  // +1 for local player
+        size_t currentPlayerCount = m_PlayerData.size();
         if (m_PlayerPosition != m_LastPlayerPosition || currentPlayerCount != m_LastPlayerCount
                 || m_NetworkDataChanged) {
             UpdateScene();
@@ -151,13 +135,13 @@ namespace Vlkrt
             m_NetworkDataChanged = false;
         }
 
-        // Sync hierarchy changes to flat arrays every frame for real-time rendering
+        // Sync hierarchy changes to flat arrays
         FlattenHierarchyToScene(m_SceneRoot, glm::mat4(1.0f));
     }
 
     void ClientLayer::OnRender()
     {
-        if (m_Client.GetConnectionStatus() == Walnut::Client::ConnectionStatus::Connected) {
+        if (m_Client.GetConnectionStatus() == Walnut::Client::ConnectionStatus::Connected) [[likely]] {
             Walnut::Timer timer;
             m_Renderer.Render(m_Scene, m_Camera);
             m_LastRenderTime = timer.ElapsedMillis();
@@ -166,23 +150,17 @@ namespace Vlkrt
 
     void ClientLayer::OnUIRender()
     {
-        auto connectionStatus = m_Client.GetConnectionStatus();
-        if (connectionStatus == Walnut::Client::ConnectionStatus::Connected) {
-            //   Get the ImGui viewport size (accounts for dockspace/menus)
-            ImGuiViewport* viewport          = ImGui::GetMainViewport();
-            uint32_t       newViewportWidth  = (uint32_t) viewport->Size.x;
-            uint32_t       newViewportHeight = (uint32_t) viewport->Size.y;
+        if (m_Client.GetConnectionStatus() == Walnut::Client::ConnectionStatus::Connected) [[likely]] {
+            ImGuiViewport* viewport    = ImGui::GetMainViewport();
+            uint32_t newViewportWidth  = (uint32_t) viewport->Size.x;
+            uint32_t newViewportHeight = (uint32_t) viewport->Size.y;
 
-            // Render at half resolution for performance
-            uint32_t renderWidth  = newViewportWidth / 2;
-            uint32_t renderHeight = newViewportHeight / 2;
-
-            // Only resize if viewport size changed (avoid expensive reallocation every frame)
+            // Check if we need to resize
             if (newViewportWidth != m_ViewportWidth || newViewportHeight != m_ViewportHeight) {
                 m_ViewportWidth  = newViewportWidth;
                 m_ViewportHeight = newViewportHeight;
-                m_Renderer.OnResize(renderWidth, renderHeight);
-                m_Camera.OnResize(renderWidth, renderHeight);
+                m_Renderer.OnResize(m_ViewportWidth, m_ViewportHeight);
+                m_Camera.OnResize(m_ViewportWidth, m_ViewportHeight);
             }
 
             // Render raytraced image as background
@@ -200,11 +178,12 @@ namespace Vlkrt
             ImGui::Text("Players: %zu", m_PlayerData.size());
             ImGui::End();
 
-            // Scene hierarchy editor panel (replaces old hardcoded Lighting panel)
+            // Scene hierarchy editor panel
             ImGuiRenderSceneHierarchy();
         }
         else {
-            auto readOnly = (connectionStatus == Walnut::Client::ConnectionStatus::Connecting);
+            auto connectionStatus = m_Client.GetConnectionStatus();
+            auto readOnly         = (connectionStatus == Walnut::Client::ConnectionStatus::Connecting);
 
             ImGui::Begin("Connect to Server");
 
@@ -215,9 +194,7 @@ namespace Vlkrt
             else if (connectionStatus == Walnut::Client::ConnectionStatus::FailedToConnect) {
                 ImGui::TextColored(ImColor(Walnut::UI::Colors::Theme::error), "Failed to connect to server.");
             }
-            if (ImGui::Button("Connect")) {
-                m_Client.ConnectToServer(m_ServerAddress);
-            }
+            if (ImGui::Button("Connect")) { m_Client.ConnectToServer(m_ServerAddress); }
 
             ImGui::End();
         }
@@ -225,7 +202,7 @@ namespace Vlkrt
 
     void ClientLayer::UpdateScene()
     {
-        // Clear only dynamic meshes (players), keep static meshes
+        // Clear only dynamic meshes
         m_Scene.DynamicMeshes.clear();
 
         // Convert 2D positions to 3D world space for raytracing
@@ -235,7 +212,7 @@ namespace Vlkrt
 
         // Add current player as cube mesh (raised to sit on ground)
         Mesh playerMesh          = MeshLoader::GenerateCube(cubeSize);
-        playerMesh.MaterialIndex = 0;  // green material
+        playerMesh.MaterialIndex = 0;
         glm::vec3 playerPos
                 = { (m_PlayerPosition.x - 400.0f) * scale, cubeSize * 0.5f, (m_PlayerPosition.y - 300.0f) * scale };
         playerMesh.Transform = glm::translate(glm::mat4(1.0f), playerPos);
@@ -244,11 +221,10 @@ namespace Vlkrt
         // Add other players as cube meshes
         m_PlayerDataMutex.lock();
         for (const auto& [playerID, playerData] : m_PlayerData) {
-            if (playerID == m_PlayerID)
-                continue;
+            if (playerID == m_PlayerID) continue;
 
             Mesh otherPlayerMesh          = MeshLoader::GenerateCube(cubeSize);
-            otherPlayerMesh.MaterialIndex = 1;  // red material
+            otherPlayerMesh.MaterialIndex = 1;
             glm::vec3 otherPos            = { (playerData.Position.x - 400.0f) * scale, cubeSize * 0.5f,
                            (playerData.Position.y - 300.0f) * scale };
             otherPlayerMesh.Transform     = glm::translate(glm::mat4(1.0f), otherPos);
@@ -260,14 +236,12 @@ namespace Vlkrt
     void ClientLayer::RunScripts(SceneEntity& entity, float ts)
     {
         if (!entity.ScriptPath.empty()) {
-            if (!entity.ScriptInitialized)
-                ScriptEngine::LoadScript(entity);
+            if (!entity.ScriptInitialized) ScriptEngine::LoadScript(entity);
 
             ScriptEngine::CallOnUpdate(entity, ts);
         }
 
-        for (auto& child : entity.Children)
-            RunScripts(child, ts);
+        for (auto& child : entity.Children) RunScripts(child, ts);
     }
 
     void ClientLayer::LoadScene(const std::string& sceneName)
@@ -300,31 +274,8 @@ namespace Vlkrt
                 m_NetworkDataChanged = true;
                 m_PlayerDataMutex.unlock();
                 break;
-            default:
-                WL_WARN_TAG("Client", "Received unknown packet type: {}", (int) type);
-                break;
+            default: WL_WARN_TAG("Client", "Received unknown packet type: {}", (int) type); break;
         }
-    }
-
-    glm::mat4 ComputeParentWorldTransform(SceneEntity* entity)
-    {
-        glm::mat4 result = glm::mat4(1.0f);
-        if (!entity)
-            return result;
-
-        // Walk up the parent chain
-        std::vector<SceneEntity*> parents;
-        SceneEntity*              current = entity->Parent;
-        while (current) {
-            parents.push_back(current);
-            current = current->Parent;
-        }
-
-        // Apply transforms from root down to immediate parent
-        for (int i = (int) parents.size() - 1; i >= 0; --i) {
-            result = result * parents[i]->LocalTransform.GetWorldMatrix(glm::mat4(1.0f));
-        }
-        return result;
     }
 
     void ClientLayer::SyncSceneToHierarchy()
@@ -348,7 +299,7 @@ namespace Vlkrt
                         glm::vec3 desiredDirection = glm::normalize(m_Scene.Lights[i].Direction);
                         glm::vec3 defaultDirection = glm::vec3(0.0f, 0.0f, -1.0f);
                         glm::vec3 axis             = glm::cross(defaultDirection, desiredDirection);
-                        float     dot              = glm::dot(defaultDirection, desiredDirection);
+                        float dot                  = glm::dot(defaultDirection, desiredDirection);
 
                         if (glm::length(axis) > 0.001f) {  // Not parallel
                             float angle                          = glm::acos(glm::clamp(dot, -1.0f, 1.0f));
@@ -373,7 +324,7 @@ namespace Vlkrt
     {
         // Hierarchy is already synced to flat arrays every frame in OnUpdate()
         // Just save to YAML
-        std::string scenePath = "../scenes/" + m_CurrentScene + ".yaml";
+        std::string scenePath = SCENES_DIR + m_CurrentScene + ".yaml";
         SceneLoader::SaveToYAMLWithHierarchy(scenePath, m_Scene, m_SceneRoot);
         WL_INFO_TAG("Client", "Scene saved to: {}", scenePath);
 
@@ -397,14 +348,10 @@ namespace Vlkrt
             ImGui::EndCombo();
         }
 
-        if (ImGui::Button("Save Scene", ImVec2(-1, 0))) {
-            SaveScene();
-        }
+        if (ImGui::Button("Save Scene", ImVec2(-1, 0))) { SaveScene(); }
 
         ImGui::Separator();
-        for (auto& child : m_SceneRoot.Children) {
-            ImGuiRenderEntity(child, glm::mat4(1.0f));
-        }
+        for (auto& child : m_SceneRoot.Children) { ImGuiRenderEntity(child, glm::mat4(1.0f)); }
 
         ImGui::End();
     }
@@ -446,9 +393,7 @@ namespace Vlkrt
                 ImGui::Separator();
                 ImGui::Text("Children:");
                 ImGui::Indent();
-                for (auto& child : entity.Children) {
-                    ImGuiRenderEntity(child, worldTransform);
-                }
+                for (auto& child : entity.Children) { ImGuiRenderEntity(child, worldTransform); }
                 ImGui::Unindent();
             }
 
@@ -471,7 +416,7 @@ namespace Vlkrt
             direction                  = glm::normalize(direction);
             glm::vec3 defaultDirection = glm::vec3(0.0f, 0.0f, -1.0f);
             glm::vec3 axis             = glm::cross(defaultDirection, direction);
-            float     dot              = glm::dot(defaultDirection, direction);
+            float dot                  = glm::dot(defaultDirection, direction);
 
             if (glm::length(axis) > 0.001f) {
                 float angle             = glm::acos(glm::clamp(dot, -1.0f, 1.0f));
@@ -499,9 +444,9 @@ namespace Vlkrt
         switch (entity.Type) {
             case EntityType::Light: {
                 // Light type
-                bool        isDirectional = entity.LightData.Type < 0.5f;
-                const char* lightTypes[]  = { "Directional", "Point" };
-                int         selectedType  = isDirectional ? 0 : 1;
+                bool isDirectional       = entity.LightData.Type < 0.5f;
+                const char* lightTypes[] = { "Directional", "Point" };
+                int selectedType         = isDirectional ? 0 : 1;
                 if (ImGui::Combo(
                             ("Light Type##" + idStr).c_str(), &selectedType, lightTypes, IM_ARRAYSIZE(lightTypes))) {
                     entity.LightData.Type = selectedType == 0 ? 0.0f : 1.0f;
@@ -546,7 +491,8 @@ namespace Vlkrt
                     ImGui::Text("Current: %s", mat.TextureFilename.empty() ? "(none)" : mat.TextureFilename.c_str());
 
                     // Texture combo box (textures discovered at startup)
-                    if (ImGui::BeginCombo(("Texture##" + idStr).c_str(), mat.TextureFilename.empty() ? "(none)" : mat.TextureFilename.c_str())) {
+                    if (ImGui::BeginCombo(("Texture##" + idStr).c_str(),
+                                mat.TextureFilename.empty() ? "(none)" : mat.TextureFilename.c_str())) {
                         if (ImGui::Selectable("(none)", mat.TextureFilename.empty())) {
                             mat.TextureFilename.clear();
                             m_Renderer.InvalidateScene();
@@ -597,13 +543,13 @@ namespace Vlkrt
                 break;
             }
 
-            default:
-                break;
+            default: break;
         }
 
         ImGui::Separator();
         ImGui::Text("Script");
-        if (ImGui::BeginCombo(("Script##" + idStr).c_str(), entity.ScriptPath.empty() ? "(none)" : entity.ScriptPath.c_str())) {
+        if (ImGui::BeginCombo(
+                    ("Script##" + idStr).c_str(), entity.ScriptPath.empty() ? "(none)" : entity.ScriptPath.c_str())) {
             if (ImGui::Selectable("(none)", entity.ScriptPath.empty())) {
                 entity.ScriptPath.clear();
                 entity.ScriptInitialized = false;
@@ -659,8 +605,6 @@ namespace Vlkrt
         // Empty and Camera types don't add to scene, just pass through
 
         // Recursively process children
-        for (const auto& child : entity.Children) {
-            FlattenHierarchyToScene(child, worldTransform);
-        }
+        for (const auto& child : entity.Children) { FlattenHierarchyToScene(child, worldTransform); }
     }
 }  // namespace Vlkrt

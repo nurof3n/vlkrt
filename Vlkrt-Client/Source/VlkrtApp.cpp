@@ -1,7 +1,7 @@
+#include "ClientLayer.h"
+
 #include "Walnut/Application.h"
 #include "Walnut/EntryPoint.h"
-
-#include "ClientLayer.h"
 
 Walnut::Application* Walnut::CreateApplication(int argc, char** argv)
 {
