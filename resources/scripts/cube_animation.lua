@@ -3,7 +3,7 @@ local initialPos = nil
 
 function OnUpdate(entity, dt)
     local time = os.clock() - startTime
-    
+
     if initialPos == nil then
         initialPos = vec3.new(entity.Transform.Position.x, entity.Transform.Position.y, entity.Transform.Position.z)
     end

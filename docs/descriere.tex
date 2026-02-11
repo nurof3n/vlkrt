@@ -60,8 +60,13 @@ La baza aplicației se află framework-ul \href{https://github.com/StudioCherno/
 Acesta se ocupă de:
 \begin{itemize}
     \item \textbf{Gestionarea ferestrelor și a contextului:} Walnut utilizează \textbf{GLFW} sub capotă pentru crearea ferestrelor și gestionarea contextului de execuție.
-    \item \textbf{Layer System:} Arhitectura este bazată pe un sistem de \textit{Layere}, similar cu cel din motoarele grafice moderne (ex. Hazel).
+    \item \textbf{Gestiunea resurselor Vulkan:} Framework-ul abstractizează concepte precum \textit{Command Pool} și \textit{Swapchain}.
+        Clasa \texttt{Renderer} obține un \texttt{VkCommandBuffer} valid pentru fiecare frame prin \texttt{Walnut::Application::GetCommandBuffer()}.
+        De asemenea, pentru a gestiona ștergerea resurselor utilizate de GPU în mod asincron (și a evita situații precum buffere distruse în timp ce sunt încă în uz într-un frame anterior), se folosește coada de eliberare a resurselor prin \texttt{SubmitResourceFree()}.
+    \item \textbf{Layer System:} Arhitectura este bazată pe un sistem de \textit{Layere}, similar cu cel din motoarele grafice moderne.
         Orice funcționalitate nouă este implementată ca un \texttt{Layer} (ex. \texttt{ClientLayer}, \texttt{ServerLayer}), care primește evenimente de \texttt{OnUpdate}, \texttt{OnRender} și \texttt{OnUIRender}.
+    \item \textbf{Networking:} Walnut oferă suport pentru comunicații de rețea reliable prin UDP, folosind biblioteca \textbf{GameNetworkingSockets} de la Valve.
+    \item \textbf{Imagini:} Clasa \texttt{Walnut::Image} încapsulează crearea \texttt{VkImage}, \texttt{VkImageView} și a descriptorilor necesari pentru a afișa rezultatul randării în \textbf{ImGui}.
     \item \textbf{Integrare ImGui:} Framework-ul oferă o integrare \textit{out-of-the-box} cu \textbf{ImGui} pentru crearea rapidă de interfețe de utilizator reactive, optimizând procesul de dezvoltare.
         Pipeline-ul de randare 3D este de asemenea derivat din implementarea de Vulkan a \textbf{ImGui}.
 \end{itemize}
@@ -118,6 +123,33 @@ Caracteristici:
     \item \textbf{Server tickrate:} Pentru eficiență, serverul limitează procesarea pachetelor la o frecvență de 50Hz. Aceasta se poate crește cu ușurință.
 \end{itemize}
 
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, frame=single]
+// Exemplu: Trimitere update de la client la server
+void ClientLayer::OnUpdate(float ts)
+{
+    // ...
+    if (m_Client.GetConnectionStatus() == 
+        Walnut::Client::ConnectionStatus::Connected)
+    {
+        Walnut::BufferStreamWriter stream(s_ScratchBuffer);
+        
+        // Scrie tip pachet si date player
+        stream.WriteRaw(PacketType::ClientUpdate);
+        stream.WriteRaw<glm::vec3>(m_PlayerPosition);
+        stream.WriteRaw<glm::vec3>(m_PlayerVelocity);
+        
+        m_Client.SendBuffer(stream.GetBuffer());
+    }
+}
+\end{lstlisting}
+
+La pornirea clientului:
+\begin{itemize}
+    \item Utilizatorul este solicitat să introducă adresa serverului și portul pentru conexiune.
+    \item După stabilirea conexiunii, se randează scena \textit{default}.
+    \item Toți jucătorii conectați sunt vizualizați drept cuburi mobile în scenă.
+\end{itemize}
+
 
 \section{Input handling}
 
@@ -142,18 +174,33 @@ Se folosește un format custom (structura \texttt{Mesh}) pentru a reține inform
 Se pot crea și obiecte în mod procedural, spre exemplu se pot folosi funcțiile \texttt{GenerateQuad} și \texttt{GenerateCube}.
 
 \begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, frame=single]
-/**
- * @brief Mesh definition containing CPU vertex/index data and material reference.
- */
+struct Vertex
+{
+    glm::vec3 Position{};
+    glm::vec3 Normal{};
+    glm::vec2 TexCoord{};
+};
+
 struct Mesh
 {
     std::string Filename;
     std::string Name;
     std::vector<Vertex> Vertices;
     std::vector<uint32_t> Indices;
-    int MaterialIndex = 0;
+
+    int MaterialIndex{ 0 };
+
     glm::mat4 Transform = glm::mat4(1.0f);
 };
+\end{lstlisting}
+
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, frame=single]
+// Exemplu: Creare mesh procedural
+Mesh cube = MeshLoader::GenerateCube();
+cube.Transform = glm::translate(glm::mat4(1.0f), 
+    glm::vec3(-3.0f, 0.0f, 0.0f));
+cube.MaterialIndex = 0;  // Referinta la un material din scena
+m_Scene.StaticMeshes.push_back(cube);
 \end{lstlisting}
 
 \subsection{Texturi}
@@ -165,6 +212,23 @@ Resursele de tip imagini sunt gestionate prin clasa \texttt{Walnut::Image}.
     \item \textbf{Mipmap:} Texturile sunt mipmapped de către Vulkan (vezi Secțiunea~\ref{sec:rendering}).
     \item \textbf{Customizare:} Utilizatorul poate schimba texturile materialelor și aplica factori diferiți de tiling prin intermediul GUI-ului.
 \end{itemize}
+
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, frame=single]
+struct Material
+{
+    std::string Name;
+    glm::vec3 Albedo{ 1.0f };
+    glm::vec3 Specular{ 1.0f };
+    float Shininess{ 32.0f };
+    
+    std::string TextureFilename; // Daca este gol, se foloseste doar Albedo
+    float Tiling{ 1.0f };
+};
+
+// Exemplu incarcare textura
+auto newImg = std::make_shared<Walnut::Image>("resources/textures/tiles.jpg");
+m_TextureCache["tiles.jpg"] = texture;
+\end{lstlisting}
 
 \subsection{Shadere}
 
@@ -203,75 +267,80 @@ Scenele sunt salvate și încărcate utilizând formatul YAML.
     \item \textbf{Dynamic Loading:} Sistemul permite reîncărcarea la runtime a scenelor fără repornirea aplicației, facilitând iterarea rapidă asupra design-ului.
 \end{itemize}
 
+\begin{lstlisting}[basicstyle=\ttfamily\small, frame=single]
+materials:
+- name: stone
+  albedo: [ 0.5, 0.5, 0.5 ]
+  shininess: 25.6
+  specular: [ 0.1, 0.1, 0.1 ]
+  texture: tiles.jpg
+  tiling: 5
+- name: metal
+  albedo: [ 0.8, 0.8, 0.8 ]
+  shininess: 102.4
+  specular: [ 1.0, 1.0, 1.0 ]
+  texture: wood.jpg
+  tiling: 0.5
+- name: bricks
+  albedo: [ 0.9, 0.9, 0.9 ]
+  shininess: 8.0
+  specular: [ 0.1, 0.1, 0.1 ]
+  texture: brick.jpg
+  tiling: 2.0
 
-\section{Rendering}\label{sec:rendering}
-
-Nucleul grafic al proiectului este un motor de \textbf{Ray tracing} bazat pe API-ul Vulkan, implementat în clasa \texttt{Renderer}.
-
-\subsection{Pipeline}\label{sec:pipeline}
-
-Spre deosebire de rasterizarea tradițională, \textbf{Vlkrt} folosește extensia de pipeline Vulkan \texttt{VK\_KHR\_ray\_tracing\_pipeline} pentru a implementa un pipeline de Ray tracing.
-\begin{itemize}
-    \item \textbf{Acceleration Structures (AS):} Geometria este organizată în două niveluri:
-        \begin{enumerate}
-            \item \textbf{Bottom-Level AS (BLAS):} Conține geometria brută a fiecărui mesh (buffere de vertex și index).
-            \item \textbf{Top-Level AS (TLAS):} Conține instanțe ale BLAS-urilor, fiecare cu propria matrice de transformare, permițând instanțierea eficientă a obiectelor.
-        \end{enumerate}
-    \item \textbf{Shader Binding Table (SBT):} O structură de date critică în Vulkan RT care face legătura între razele lansate și grupurile de shadere ce trebuie executate la impact.
-        De altfel, se definesc 3 diferite tipuri de shadere: \texttt{raygen}, \texttt{closesthit}, \texttt{miss}.
-\end{itemize}
-
-Procesul de randare urmează fluxul standard de Ray tracing:
-\begin{enumerate}
-    \item \textbf{Ray Generation (\texttt{raygen.rgen}):} Calculează direcția razei primare pentru fiecare pixel de pe ecran, plecând din poziția camerei.
-    \item \textbf{Acceleration Structure Traversal:} GPU-ul parcurge TLAS și BLAS pentru a găsi cel mai apropiat punct de intersecție.
-    \item \textbf{Closest Hit (\texttt{closesthit.rchit}):} Se execută la intersecția cu geometria.
-        Aici se calculează modelul de iluminare Phong și se eșantionează texturile.
-        Pentru acestea din urmă, am folosit mipmap-uri cu calcul de LoD bazat pe [Ray Cones](https://media.contentapi.ea.com/content/dam/ea/seed/presentations/2019-ray-tracing-gems-chapter-20-akenine-moller-et-al.pdf).
-    \item \textbf{Miss (\texttt{miss.rmiss}):} Se execută dacă raza nu întâlnește niciun obiect, returnând culoarea \textit{skybox}-ului.
-\end{enumerate}
-
-\subsection{Camera}
-
-Sistemul de cameră este implementat în clasa \texttt{Camera}, oferind o proiecție perspectivă și control de tip \textit{first-person}.
-Utilizatorul poate naviga folosind tastele WASD pentru translație și mouse-ul pentru rotație (pitch/yaw).
-Rotația se realizează numai la apăsarea butonului de click dreapta.
-
-
-\section{Scripting}\label{sec:scripting}
-
-Pentru a oferi flexibilitate în simulare, a fost integrat motorul de scripting \textbf{Lua}.
-\begin{itemize}
-    \item \textbf{Sol2 + LuaJIT:} S-a utilizat biblioteca \texttt{sol2} ca wrapper C++ peste \texttt{LuaJIT}, oferind o performanță ridicată și o sintaxă curată pentru bind-uri.
-    \item \textbf{Expunerea API-ului:} Entitățile din scenă sunt expuse către scripturi, permițând modificarea transformărilor sau a proprietăților materialelor la runtime (ex. animația \texttt{cube\_animation.lua}).
-        Proprietățile expuse includ:
-        \begin{itemize}
-            \item \textbf{Transform:} Structura care conține poziția (vec3), rotația (quat), și scalarea (vec3) a entității. Modificările la acestea sunt automat aplicate la entitate.
-            \item \textbf{Operatori glm:} Bindings pentru calcule cu vectori (operații de adunare, scădere, normalizare, produs scalar) și cuaternioni (rotații, interpolare).
-            \item \textbf{Input:} Funcții pentru verificarea input-urilor utilizatorului (ex. \texttt{Input.IsKeyDown(keycode)}).
-            \item \textbf{Funcții de bibliotecă standard:} Accesul la bibliotecile Lua standard (\texttt{math, os, string, table}) pentru logică complexă.
-        \end{itemize}
-    \item \textbf{Ciclul de viață al scriptului:}
-        \begin{enumerate}
-            \item La prima actualizare a unei entități cu script, scriptul este încărcat din fișierul \texttt{.lua} și o funcție \texttt{OnUpdate(entity, deltaTime)} este căutată.
-            \item La fiecare frame, funcția \texttt{OnUpdate} este apelată cu entitatea și intervalul de timp (deltaTime) ca parametri.
-            \item Scriptul poate modifica transformarile sau alte proprietăți ale entității în mod direct.
-        \end{enumerate}
-\end{itemize}
-
-
-\section{GUI}
-
-Interfața utilizatorului este construită folosind \textbf{ImGui}, o bibliotecă populară pentru GUI-uri imediate, integrată direct în pipeline-ul de rendering Vulkan.
-
-\subsection{Conectare la server}
-
-La pornirea clientului:
-\begin{itemize}
-    \item Utilizatorul este solicitat să introducă adresa serverului și portul pentru conexiune.
-    \item După stabilirea conexiunii, se randează scena \textit{default}.
-    \item Toți jucătorii conectați sunt vizualizați drept cuburi mobile în scenă.
-\end{itemize}
+entities:
+- name: scene_root
+  type: empty
+  transform:
+    position: [ 0, -0.408099, 0 ]
+    rotation: [ 0, 0, 0, 0 ]
+    scale: [ 1, 1, 1 ]
+  children:
+  - name: grounded
+    type: mesh
+    transform:
+      position: [ 0, -1, 0 ]
+      rotation: [ 0, 0, 0, 1 ]
+      scale: [ 10, 1, 10 ]
+    mesh: ground.obj
+    material: 0
+  - name: cube
+    script: cube_animation.lua
+    type: mesh
+    transform:
+      position: [ 2, 2.3196, 0 ]
+      rotation: [ 0, 0.580628, 0, 0.814169 ]
+      scale: [ 1, 1, 1 ]
+    mesh: cube.obj
+    material: 1
+  - name: lighting_group
+    type: empty
+    transform:
+      position: [ -0.909, 5, 5 ]
+      rotation: [ -0.643505, 0.0327726, 0, 0.76474 ]
+      scale: [ 3.61, 1, 1 ]
+    children:
+    - name: sun
+      type: light
+      transform:
+        position: [ 0, 0, 0 ]
+        rotation: [ 0, 0, 0, 1 ]
+        scale: [ 1, 1, 1 ]
+      light_color: [ 1, 1, 1 ]
+      light_intensity: 1.5
+      light_type: 0
+      light_direction: [ 0, 0, -1 ]
+    - name: point_light
+      type: light
+      transform:
+        position: [ 0, 0, 0 ]
+        rotation: [ 0, 0, 0, 1 ]
+        scale: [ 1, 1, 1 ]
+      light_color: [ 0.729107, 0.518529, 0.275254 ]
+      light_intensity: 1.798
+      light_type: 1
+      light_radius: 19.074
+\end{lstlisting}
 
 \subsection{Editor de Scene}
 
@@ -286,7 +355,7 @@ Clientul include un editor vizual cu următoarele funcționalități:
     \item \textbf{Inspector de proprietăți:} Afișează detaliile entității selectate:
         \begin{itemize}
             \item \textbf{Transform Controls:} Câmpuri pentru poziție (X, Y, Z), pentru rotație Euler (pitch, yaw, roll) și pentru scalare. Schimbările sunt aplicate imediat.
-            \item \textbf{Material Properties:} Selectare de material dintr-o listă, ajustare a albedoului, roughness-ului, și metallic-ului. Texturile pot fi selectate dintr-o listă a fișierelor disponibile.
+            \item \textbf{Material Properties:} Selectare de material dintr-o listă, ajustare a albedoului, specular-ului, și shininess-ului. Texturile pot fi selectate dintr-o listă a fișierelor disponibile.
             \item \textbf{Light Properties:} Pentru entități light, oferă controale pentru culoare, direcție (la lumini direcționale), intensitate, și raza de influență (la lumini de tip punct).
             \item \textbf{Script Path:} Permite atribuirea unui script Lua unei entități.
         \end{itemize}
@@ -298,21 +367,372 @@ Clientul include un editor vizual cu următoarele funcționalități:
             \item Numărul de jucători conectați.
         \end{itemize}
 \end{itemize}
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, frame=single]
+// Exemplu: Editare proprietati material din GUI
+void ClientLayer::ImGuiRenderMaterialEditor(int matIdx)
+{
+    Material& mat = m_Scene.Materials[matIdx];
+    
+    // Albedo color picker
+    if (ImGui::ColorEdit3("Albedo##mat", 
+        glm::value_ptr(mat.Albedo)))
+        m_Renderer.InvalidateScene();
+    
+    // Shininess slider (1-512)
+    if (ImGui::DragFloat("Shininess##mat", 
+        &mat.Shininess, 1.0f, 1.0f, 512.0f))
+        m_Renderer.InvalidateScene();
+    
+    // Specular intensity
+    if (ImGui::ColorEdit3("Specular##mat", 
+        glm::value_ptr(mat.Specular)))
+        m_Renderer.InvalidateScene();
+    
+    // Texture tiling
+    if (ImGui::DragFloat("Tiling##mat", 
+        &mat.Tiling, 0.1f, 0.1f, 100.0f))
+        m_Renderer.InvalidateScene();
+}
+\end{lstlisting}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{scena.png}
+    \caption{Editor de scene \textbf{Vlkrt} - vizualizare 3D cu panourile de proprietăți și arborele de entități}
+    \label{fig:scene_editor}
+\end{figure}
+
+\section{Rendering}\label{sec:rendering}
+
+Nucleul grafic al proiectului este un motor de \textbf{Ray tracing} bazat pe API-ul Vulkan, implementat în clasa \texttt{Renderer}.
+Acesta gestionează complet propritățile pipeline-ului de Ray Tracing, inclusiv descriptor set-urile, shader binding table-ul (SBT) și bufferele de scenă.
+
+\subsection{Pipeline}\label{sec:pipeline}
+
+Spre deosebire de rasterizarea tradițională, \textbf{Vlkrt} folosește extensia de pipeline Vulkan \texttt{VK\_KHR\_ray\_tracing\_pipeline} pentru a implementa un pipeline de Ray tracing.
+\begin{itemize}
+    \item \textbf{Acceleration Structures (AS):} Geometria este organizată în două niveluri:
+        \begin{enumerate}
+            \item \textbf{Bottom-Level AS (BLAS):} Conține geometria brută a fiecărui mesh (buffere de vertex și index).
+            \item \textbf{Top-Level AS (TLAS):} Conține instanțe ale BLAS-urilor, fiecare cu propria matrice de transformare, permițând instanțierea eficientă a obiectelor.
+        \end{enumerate}
+    \item \textbf{Shader Binding Table (SBT):} O structură de date critică în Vulkan RT care face legătura între razele lansate și grupurile de shadere ce trebuie executate la impact.
+        De altfel, se definesc 3 diferite tipuri de shadere: \texttt{raygen}, \texttt{closesthit}, \texttt{miss}.
+\end{itemize}
+
+Un caveat al implementării este folosirea a 1 BLAS și 1 TLAS, ceea ce este în regulă pentru scene mici și statice, însă ar putea fi partiționat mai bine pe mesh-uri statice și dinamice. De altfel, implementarea de față reconstruiește aceste structuri cam la fiecare frame.
+
+\subsection{Arhitectura Renderer-ului}
+
+Clasa \texttt{Renderer} implementează logica de randare pas cu pas în funcția \texttt{Render()}:
+
+\begin{enumerate}
+    \item \textbf{Validarea Scenei:} La fiecare apel, se verifică dacă structura scenei s-a modificat (număr de mesh-uri, vertecși, materiale, lumini).
+        Dacă scena este invalidată (ex. s-a schimbat scena), \textbf{Renderer}-ul distruge bufferele vechi și realocă memorie GPU pentru noile date.
+        Nu este cel mai eficient proces, dar pentru o scenă mică sau cu modificări rare, este suficient.
+    \item \textbf{Managementul Bufferelor:} Datele scenei sunt încărcate în buffere dedicate Vulkan (\texttt{VkBuffer}):
+        \begin{itemize}
+            \item \texttt{m\_VertexBuffer} / \texttt{m\_IndexBuffer}: Geometria scenei.
+            \item \texttt{m\_MaterialBuffer}: Proprietățile materialelor (albedo, specular, shininess).
+            \item \texttt{m\_MaterialIndexBuffer}: Mapează fiecare triunghi la un index de material.
+            \item \texttt{m\_LightBuffer}: Structuri \texttt{GPULight} pentru iluminare.
+        \end{itemize}
+    \item \textbf{Descriptor Sets:} Imaginea finală (\texttt{m\_FinalImage}) este legată ca un \texttt{STORAGE\_IMAGE} în descriptor set, permițând shader-ului de Ray Generation să scrie direct pixelii rezultați.
+        La redimensionarea ferestrei (\texttt{OnResize()}), imaginea este recreată, iar descriptor set-ul este actualizat cu noul \texttt{VkImageView}.
+    \item \textbf{Corectitudine și Sincronizare:} Înainte de dispatch-ul razelor, imaginea de output trece printr-o barieră de memorie (\texttt{vkCmdPipelineBarrier}) pentru a tranziționa layout-ul de la \texttt{SHADER\_READ\_ONLY\_OPTIMAL} la \texttt{GENERAL}.
+\end{enumerate}
+
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, frame=single]
+// Exemplu: Creare buffer GPU si incarcare date
+void Renderer::CreateSceneBuffers()
+{
+    // Calculeaza numarul total de vertecsi si indecsi (static + dinamic)
+    size_t totalVertices = 0;
+    size_t totalIndices  = 0;
+    for (const auto& mesh : scene.StaticMeshes) {
+        totalVertices += mesh.Vertices.size();
+        totalIndices += mesh.Indices.size();
+    }
+    for (const auto& mesh : scene.DynamicMeshes) {
+        totalVertices += mesh.Vertices.size();
+        totalIndices += mesh.Indices.size();
+    }
+
+    // Creeaza vertex buffer
+    size_t vertexCount = std::max(totalVertices, (size_t) 1);
+    m_VertexBufferSize = sizeof(GPUVertex) * vertexCount;
+    m_VertexBuffer     = CreateBuffer(m_VertexBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_VertexMemory);
+
+    // Create index buffer
+    size_t indexCount = std::max(totalIndices, (size_t) 1);
+    m_IndexBufferSize = sizeof(uint32_t) * indexCount;
+    m_IndexBuffer     = CreateBuffer(m_IndexBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_IndexMemory);
+
+    // Creeaza material buffer
+    size_t materialCount = std::max(scene.Materials.size(), (size_t) 1);
+    m_MaterialBufferSize = sizeof(GPUMaterial) * materialCount;
+    m_MaterialBuffer     = CreateBuffer(m_MaterialBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_MaterialMemory);
+
+    // Creeaza material index buffer (1 uint32 per triunghi)
+    size_t triangleCount      = std::max(totalIndices / 3, (size_t) 1);
+    m_MaterialIndexBufferSize = sizeof(uint32_t) * triangleCount;
+    m_MaterialIndexBuffer     = CreateBuffer(m_MaterialIndexBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_MaterialIndexMemory);
+
+    // Creeaza light buffer
+    size_t lightCount = std::max(scene.Lights.size(), (size_t) 1);
+    m_LightBufferSize = sizeof(GPULight) * lightCount;
+    m_LightBuffer     = CreateBuffer(m_LightBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_LightMemory);
+}
+\end{lstlisting}
+
+Procesul de randare (în shadere) urmează fluxul standard de Ray tracing:
+\begin{enumerate}
+    \item \textbf{Ray Generation (\texttt{raygen.rgen}):} Calculează direcția razei primare pentru fiecare pixel de pe ecran, plecând din poziția camerei.
+    \item \textbf{Acceleration Structure Traversal:} GPU-ul parcurge TLAS și BLAS pentru a găsi cel mai apropiat punct de intersecție.
+    \item \textbf{Closest Hit (\texttt{closesthit.rchit}):} Se execută la intersecția cu geometria.
+        Aici se calculează modelul de iluminare Phong și se eșantionează texturile.
+        Pentru acestea din urmă, am folosit mipmap-uri cu calcul de LoD bazat pe \href{https://media.contentapi.ea.com/content/dam/ea/seed/presentations/2019-ray-tracing-gems-chapter-20-akenine-moller-et-al.pdf}{Ray Cones}.
+    \item \textbf{Miss (\texttt{miss.rmiss}):} Se execută dacă raza nu întâlnește niciun obiect, returnând culoarea \textit{skybox}-ului.
+\end{enumerate}
+
+\subsection{Implementarea Shaderelor}
+
+Deoarece Ray Tracing-ul nu beneficiază de hardware-ul de rasterizare pentru interpolarea atributelor și calculul LOD-ului (Level of Detail) pentru texturi, aceste funcționalități au fost implementate manual în shaderele GLSL.
+
+\subsubsection{Ray Generation (\texttt{raygen.rgen})}
+
+Acesta este punctul de intrare.
+Shader-ul:
+\begin{itemize}
+    \item Calculează coordonatele normale de ecran (NDC) pentru pixelul curent.
+    \item Reconstruiește direcția razei folosind inversul matricelor de Projection și View primite prin \textit{Push Constants} (\texttt{CameraData}).
+    \item Inițializează structura \texttt{RayPayload}. Aceasta conține:
+    \begin{itemize}
+        \item \texttt{hitValue}: Culoarea acumulată (output).
+        \item \texttt{coneWidth}: Lățimea conului razei la punctul curent (inițial 0).
+        \item \texttt{spreadAngle}: Unghiul de dispersie a pixelului, aproximat pe baza FOV-ului vertical și a înălțimii viewport-ului.
+    \end{itemize}
+    \item Apelează \texttt{traceRayEXT} pentru a lansa raza în scenă.
+\end{itemize}
+
+\subsubsection{Closest Hit (\texttt{closesthit.rchit})}
+
+Executat la intersecția cu geometria, acest shader realizează partea cea mai complexă a randării.
+
+\paragraph{Interpolarea Atributelor}
+Spre deosebire de pipeline-ul grafic clasic, aici avem acces doar la indecșii triunghiului lovit și coordonatele baricentrice.
+Shaderul accesează manual Buffer-ele (\textit{Structured Buffers}) de vertecși și indecși pentru a încărca datele celor 3 vârfuri și a interpola poziția, normala și coordonatele UV.
+
+\paragraph{Texture Sampling (Ray Cones)}
+Pentru a evita efectul de \textit{aliasing} pe texturi aflate la distanță sau la unghiuri mici, s-a implementat tehnica \textbf{Ray Cones}.
+Formula utilizată pentru calculul nivelului de detaliu (LOD) este adaptată din \href{https://media.contentapi.ea.com/content/dam/ea/seed/presentations/2019-ray-tracing-gems-chapter-20-akenine-moller-et-al.pdf}{\textit{Ray Tracing Gems, Chapter 20 (EA Seed)}}.
+Aceasta ia în considerare:
+\begin{enumerate}
+    \item Raportul dintre aria triunghiului în spațiul lumii și aria în spațiul UV.
+    \item Rezoluția texturii.
+    \item Lățimea conului razei la intersecție (\texttt{currentConeWidth = payload.coneWidth + payload.spreadAngle * gl\_HitTEXT}).
+    \item Unghiul de incidență al razei cu suprafața.
+\end{enumerate}
+Rezultatul este folosit în funcția \texttt{textureLod} pentru a eșantiona nivelul corect de mipmap.
+
+\paragraph{Modelul de Iluminare}
+Se utilizează un model clasic Blinn-Phong, fără componenta de emisie:
+\begin{itemize}
+    \item \textbf{Ambient:} Termen constant ($0.2 \times Albedo$).
+    \item \textbf{Difuz:} Lambertian standard ($N \cdot L$).
+    \item \textbf{Specular:} Blinn-Phong cu exponent controlabil ($shininess$).
+\end{itemize}
+
+\subsubsection{Miss Shader (\texttt{miss.rmiss})}
+
+Un shader minimal care returnează o culoare constantă (\texttt{vec3(0.6, 0.7, 0.9)}) reprezentând \textit{skybox}-ul, atunci când raza nu intersectează nicio geometrie.
+\begin{lstlisting}[language=C, basicstyle=\ttfamily\small, frame=single]
+#version 460
+#extension GL_EXT_ray_tracing : require
+
+struct RayPayload {
+    vec3 hitValue;
+    float coneWidth;
+    float spreadAngle;
+};
+
+layout(location = 0) rayPayloadInEXT RayPayload payload;
+
+void main()
+{
+    // Sky color
+    payload.hitValue = vec3(0.6, 0.7, 0.9);
+}
+\end{lstlisting}
+
+\subsubsection{Ray Cones}
+
+Este un algoritm pentru calculul LoD (Level of Detail) la eșantionarea texturilor în pipeline-ul Ray tracing.
+Acesta ia în calcul ariile triunghiului în spațiu lume și UV, pe unghiul de incidență al razei și pe rezoluția texturii de eșantionat.
+
+\begin{lstlisting}[language=C, basicstyle=\ttfamily\small, frame=single]
+// 1. Aria triunghiului (world + uv)
+vec3 edge1 = v1.position - v0.position;
+vec3 edge2 = v2.position - v0.position;
+float triArea = length(cross(edge1, edge2)); // 2 * Area_world
+
+vec2 texEdge1 = v1.texCoord - v0.texCoord;
+vec2 texEdge2 = v2.texCoord - v0.texCoord;
+float uvArea = abs(texEdge1.x * texEdge2.y - texEdge1.y * texEdge2.x); // 2 * Area_uv
+uvArea *= mat.tiling * mat.tiling;
+
+// 2. Constanta de LoD in functie de raportul celor 2 arii
+float lodConstant = 0.5 * log2(uvArea / max(triArea, 1e-10));
+
+// 3. Termen de rezolutie a texturii
+ivec2 texSize = textureSize(textures[mat.textureIndex], 0);
+float texScale = 0.5 * log2(float(texSize.x * texSize.y));
+
+// 4. Termen al unghiului de incidenta
+float cosTheta = abs(dot(normal, gl_WorldRayDirectionEXT));
+float rayTerm = log2(max(currentConeWidth, 1e-10) / max(cosTheta, 1e-10));
+
+// Calcul final
+// Bias cu -0.5 pentru sharpness
+float lod = lodConstant + rayTerm + texScale - 0.5;
+lod = max(0.0, lod);
+
+albedo *= textureLod(textures[mat.textureIndex], uv, lod).rgb;
+\end{lstlisting}
+\subsection{Camera}
+
+Sistemul de cameră este implementat în clasa \texttt{Camera}, oferind o proiecție perspectivă și control de tip \textit{first-person}.
+Utilizatorul poate naviga folosind tastele WASD pentru translație și mouse-ul pentru rotație (pitch/yaw).
+Rotația se realizează numai la apăsarea butonului de click dreapta.
+
+\begin{lstlisting}[language=C++, basicstyle=\ttfamily\small, frame=single]
+auto Camera::OnUpdate(float ts) -> bool
+{
+    glm::vec2 mousePos  = Input::GetMousePosition();
+    glm::vec2 delta     = (mousePos - m_LastMousePosition) * 0.002f;
+    m_LastMousePosition = mousePos;
+
+    // Miscam doar cand tinem apasat click dreapta
+    if (!Input::IsMouseButtonDown(MouseButton::Right)) {
+        Input::SetCursorMode(CursorMode::Normal);
+        return false;
+    }
+
+    Input::SetCursorMode(CursorMode::Locked);
+
+    bool moved = false;
+
+    constexpr glm::vec3 upDirection(0.0f, 1.0f, 0.0f);
+    glm::vec3 rightDirection = glm::cross(m_ForwardDirection, upDirection);
+
+    // Miscare
+    if (Input::IsKeyDown(KeyCode::W)) {
+        m_Position += m_ForwardDirection * m_MovementSpeed * ts;
+        moved = true;
+    }
+    else if (Input::IsKeyDown(KeyCode::S)) {
+        m_Position -= m_ForwardDirection * m_MovementSpeed * ts;
+        moved = true;
+    }
+    if (Input::IsKeyDown(KeyCode::A)) {
+        m_Position -= rightDirection * m_MovementSpeed * ts;
+        moved = true;
+    }
+    else if (Input::IsKeyDown(KeyCode::D)) {
+        m_Position += rightDirection * m_MovementSpeed * ts;
+        moved = true;
+    }
+    if (Input::IsKeyDown(KeyCode::Q)) {
+        m_Position -= upDirection * m_MovementSpeed * ts;
+        moved = true;
+    }
+    else if (Input::IsKeyDown(KeyCode::E)) {
+        m_Position += upDirection * m_MovementSpeed * ts;
+        moved = true;
+    }
+
+    // Rotatie
+    if (delta.x != 0.0f || delta.y != 0.0f) {
+        float pitchDelta = delta.y * m_RotationSpeed;
+        float yawDelta   = delta.x * m_RotationSpeed;
+
+        glm::quat q = glm::normalize(glm::cross(glm::angleAxis(-pitchDelta, rightDirection), glm::angleAxis(-yawDelta, glm::vec3(0.f, 1.0f, 0.0f))));
+
+        m_ForwardDirection = glm::rotate(q, m_ForwardDirection);
+        moved              = true;
+    }
+
+    if (moved) { RecalculateView(); }
+
+    return moved;
+}
+\end{lstlisting}
 
 
-\section{Hostarea serverului}
+\section{Scripting}\label{sec:scripting}
 
-TODO about UKC
+Pentru a oferi flexibilitate în simulare, a fost integrat motorul de scripting \textbf{Lua}.
+\begin{itemize}
+    \item \textbf{Sol2 + LuaJIT:} S-a utilizat biblioteca \texttt{sol2} ca wrapper C++ peste \texttt{LuaJIT}, oferind o performanță ridicată și o sintaxă clean pentru bind-uri.
+    \item \textbf{Expunerea API-ului:} Entitățile din scenă sunt expuse către scripturi, permițând modificarea transformărilor sau a proprietăților materialelor la runtime (ex. animația \texttt{cube\_animation.lua}).
+        Proprietățile expuse includ:
+        \begin{itemize}
+            \item \textbf{Transform:} Conține poziția (\texttt{vec3}), rotația (\texttt{quat}), și scalarea (\texttt{vec3}) a entității. Modificările sunt automat aplicate la entitate.
+            \item \textbf{Operatori glm:} Bindings pentru calcule cu vectori (operații de adunare, scădere, normalizare, produs scalar) și cuaternioni (rotații, interpolare).
+            \item \textbf{Input:} Funcții pentru polling-ul input-urilor utilizatorului.
+            \item \textbf{Funcții de bibliotecă standard:} Accesul la bibliotecile Lua standard (\texttt{math, os, table}) pentru logică complexă.
+            \item \textbf{Logging:} Binding către metoda de logging din \textbf{Walnut}, bazată pe \textbf{spdlog}.
+        \end{itemize}
+    \item \textbf{Ciclul de viață al scriptului:}
+        \begin{enumerate}
+            \item La prima actualizare a unei entități cu script, scriptul este încărcat din fișierul \texttt{.lua} și o funcție \texttt{OnUpdate(entity, dt)} este căutată.
+            \item La fiecare frame, această funcție este apelată cu entitatea și intervalul de timp \texttt{ts} ca parametri.
+            \item Scriptul poate modifica transformările sau alte proprietăți ale entității în mod direct.
+        \end{enumerate}
+\end{itemize}
 
-\section{TODO}
+\begin{lstlisting}[basicstyle=\ttfamily\small, frame=single]
+-- cube_animation.lua - Exemplu script de animatie
+-- Roteste cubul pe axa Y si aplica oscilatie verticala
+
+local startTime = os.clock()
+local initialPos = nil
+
+function OnUpdate(entity, dt)
+    local time = os.clock() - startTime
+
+    if initialPos == nil then
+        initialPos = vec3.new(entity.Transform.Position.x, entity.Transform.Position.y, entity.Transform.Position.z)
+    end
+
+    -- Rotation: rotate around Y axis (0, 1, 0)
+    local rotationSpeed = 1.0
+    entity.Transform.Rotation = AngleAxis(time * rotationSpeed, vec3.new(0, 1, 0))
+
+    -- Up and down movement: sine wave on Y axis
+    local bounceHeight = 1.0
+    local bounceSpeed = 2.0
+    entity.Transform.Position.y = initialPos.y + math.sin(time * bounceSpeed) * bounceHeight
+end
+\end{lstlisting}
+
+
+\section{Deploy}
+
+Se pot urmări instrucțiunile de \href{https://github.com/nurof3n/vlkrt/blob/main/README.md#getting-started}{aici}.
+Clientul se poate compila și rula pe local, în timp ce serverul se poate deploya ori pe local, ori direct în cloud.
+Instrucțiunile de mai sus arată cum se poate deploya pe \href{https://unikraft.com/}{Unikraft Cloud}.
+Astfel, clienți de pe mașini diferite pot interacționa cu serverul accesibil public.
+
+\section{Next steps}
 
 \begin{itemize}
-    \item Sincronizarea scenelor pe server
-    \item Rularea scripturilor server-side
-    \item Interpolarea update-urilor de transformare de la server
-    \item Customizarea caracterului
-    \item Pipeline îmbunătățit de Ray tracing (umbre, reflexii/refracții, Path tracing)
+    \item Sincronizarea scenelor pe server.
+    \item Rularea scripturilor server-side.
+    \item Interpolarea update-urilor de transformare de la server.
+    \item Customizarea caracterului.
+    \item Pipeline îmbunătățit de Ray tracing (umbre, reflexii/refracții, Path tracing).
+    \item Sistem PBR pentru materiale + texturi PBR.
 \end{itemize}
 
 \end{document}
-

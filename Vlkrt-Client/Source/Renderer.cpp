@@ -13,19 +13,6 @@
 
 namespace Vlkrt
 {
-    // GPU-side Material structure (must match shader layout)
-    struct GPUMaterial
-    {
-        glm::vec3 albedo;
-        float roughness;
-        float metallic;
-        int textureIndex;  // -1 if no texture
-        float tiling;
-        float _pad3;
-        glm::vec3 emissionColor;
-        float emissionPower;
-    };
-
     Renderer::Renderer()
     {
         m_Device                = Walnut::Application::GetDevice();
@@ -86,7 +73,7 @@ namespace Vlkrt
             m_FinalImage = std::make_shared<Walnut::Image>(width, height, Walnut::ImageFormat::RGBA);
         }
 
-        // Create or recreate RT pipeline and descriptor sets
+        // (Re)create RT pipeline and descriptor sets
         if (m_RTPipeline == VK_NULL_HANDLE) {
             CreateDescriptorSets();
             CreateRayTracingPipeline();
@@ -99,8 +86,7 @@ namespace Vlkrt
                 imageInfo.imageView             = m_FinalImage->GetVkImageView();
                 imageInfo.imageLayout           = VK_IMAGE_LAYOUT_GENERAL;
 
-                VkWriteDescriptorSet writeDescriptorSet = {};
-                writeDescriptorSet.sType                = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                VkWriteDescriptorSet writeDescriptorSet = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
                 writeDescriptorSet.dstSet               = m_DescriptorSet;
                 writeDescriptorSet.dstBinding           = 1;
                 writeDescriptorSet.dstArrayElement      = 0;
@@ -112,7 +98,7 @@ namespace Vlkrt
             }
         }
 
-        // Image layout is now UNDEFINED after resize
+        // Image layout is now undefined after resize
         m_FirstFrame = true;
     }
 
@@ -201,8 +187,7 @@ namespace Vlkrt
         VkCommandBuffer cmd = Walnut::Application::GetCommandBuffer(true);
 
         // Transition output image to GENERAL layout
-        VkImageMemoryBarrier barrier = {};
-        barrier.sType                = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        VkImageMemoryBarrier barrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
         barrier.image                = m_FinalImage->GetVkImage();
         barrier.oldLayout     = m_FirstFrame ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         barrier.newLayout     = VK_IMAGE_LAYOUT_GENERAL;
@@ -232,7 +217,7 @@ namespace Vlkrt
             glm::mat4 inverseView;
             glm::mat4 inverseProj;
             glm::vec3 position;
-        } cameraData;
+        } cameraData{};
 
         cameraData.inverseView = camera.GetInverseView();
         cameraData.inverseProj = camera.GetInverseProjection();
@@ -377,8 +362,7 @@ namespace Vlkrt
         vkUnmapMemory(m_Device, m_SBTMemory);
 
         // Get buffer device address
-        VkBufferDeviceAddressInfo addressInfo = {};
-        addressInfo.sType                     = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+        VkBufferDeviceAddressInfo addressInfo = { VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO };
         addressInfo.buffer                    = m_SBTBuffer;
         VkDeviceAddress sbtAddress            = pvkGetBufferDeviceAddressKHR(m_Device, &addressInfo);
 
@@ -451,8 +435,7 @@ namespace Vlkrt
         bindings[7].descriptorCount = 16;  // Up to 16 textures
         bindings[7].stageFlags      = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
 
-        VkDescriptorSetLayoutCreateInfo layoutInfo = {};
-        layoutInfo.sType                           = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        VkDescriptorSetLayoutCreateInfo layoutInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
         layoutInfo.bindingCount                    = 8;
         layoutInfo.pBindings                       = bindings;
 
@@ -469,8 +452,7 @@ namespace Vlkrt
         poolSizes[3].type                 = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         poolSizes[3].descriptorCount      = 16;
 
-        VkDescriptorPoolCreateInfo poolInfo = {};
-        poolInfo.sType                      = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        VkDescriptorPoolCreateInfo poolInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
         poolInfo.maxSets                    = 1;
         poolInfo.poolSizeCount              = 4;
         poolInfo.pPoolSizes                 = poolSizes;
@@ -478,8 +460,7 @@ namespace Vlkrt
         vkCreateDescriptorPool(m_Device, &poolInfo, nullptr, &m_DescriptorPool);
 
         // Allocate descriptor set
-        VkDescriptorSetAllocateInfo allocInfo = {};
-        allocInfo.sType                       = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        VkDescriptorSetAllocateInfo allocInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
         allocInfo.descriptorPool              = m_DescriptorPool;
         allocInfo.descriptorSetCount          = 1;
         allocInfo.pSetLayouts                 = &m_DescriptorSetLayout;
@@ -548,7 +529,7 @@ namespace Vlkrt
         for (const auto& mesh : scene.StaticMeshes) {
             // Copy vertices and apply mesh transform
             for (const auto& vertex : mesh.Vertices) {
-                GPUVertex gpuVert;
+                GPUVertex gpuVert{};
                 // Transform position
                 glm::vec4 transformedPos = mesh.Transform * glm::vec4(vertex.Position, 1.0f);
                 gpuVert.position         = glm::vec3(transformedPos);
@@ -575,7 +556,7 @@ namespace Vlkrt
         for (const auto& mesh : scene.DynamicMeshes) {
             // Copy vertices and apply mesh transform
             for (const auto& vertex : mesh.Vertices) {
-                GPUVertex gpuVert;
+                GPUVertex gpuVert{};
                 // Transform position
                 glm::vec4 transformedPos = mesh.Transform * glm::vec4(vertex.Position, 1.0f);
                 gpuVert.position         = glm::vec3(transformedPos);
@@ -616,13 +597,11 @@ namespace Vlkrt
         // Upload material data
         if (!scene.Materials.empty()) {
             std::vector<GPUMaterial> gpuMaterials(scene.Materials.size());
-            for (size_t i = 0; i < scene.Materials.size(); i++) {
-                gpuMaterials[i].albedo        = scene.Materials[i].Albedo;
-                gpuMaterials[i].roughness     = scene.Materials[i].Roughness;
-                gpuMaterials[i].metallic      = scene.Materials[i].Metallic;
-                gpuMaterials[i].emissionColor = scene.Materials[i].EmissionColor;
-                gpuMaterials[i].emissionPower = scene.Materials[i].EmissionPower;
-                gpuMaterials[i].tiling        = scene.Materials[i].Tiling;
+            for (size_t i = 0; i < scene.Materials.size(); ++i) {
+                gpuMaterials[i].albedo    = scene.Materials[i].Albedo;
+                gpuMaterials[i].shininess = scene.Materials[i].Shininess;
+                gpuMaterials[i].specular  = scene.Materials[i].Specular;
+                gpuMaterials[i].tiling    = scene.Materials[i].Tiling;
 
                 // Sync texture index
                 gpuMaterials[i].textureIndex = -1;
@@ -671,8 +650,8 @@ namespace Vlkrt
         m_AccelerationStructure->Rebuild(allMeshes, m_VertexBuffer, m_IndexBuffer);
 
         // Update descriptor sets
-        VkWriteDescriptorSetAccelerationStructureKHR asInfo = {};
-        asInfo.sType                      = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
+        VkWriteDescriptorSetAccelerationStructureKHR asInfo
+                = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR };
         asInfo.accelerationStructureCount = 1;
         VkAccelerationStructureKHR tlas   = m_AccelerationStructure->GetTLAS();
         asInfo.pAccelerationStructures    = &tlas;
@@ -723,12 +702,10 @@ namespace Vlkrt
         if (!scene.Materials.empty()) {
             std::vector<GPUMaterial> gpuMaterials(scene.Materials.size());
             for (size_t i = 0; i < scene.Materials.size(); i++) {
-                gpuMaterials[i].albedo        = scene.Materials[i].Albedo;
-                gpuMaterials[i].roughness     = scene.Materials[i].Roughness;
-                gpuMaterials[i].metallic      = scene.Materials[i].Metallic;
-                gpuMaterials[i].emissionColor = scene.Materials[i].EmissionColor;
-                gpuMaterials[i].emissionPower = scene.Materials[i].EmissionPower;
-                gpuMaterials[i].tiling        = scene.Materials[i].Tiling;
+                gpuMaterials[i].albedo    = scene.Materials[i].Albedo;
+                gpuMaterials[i].shininess = scene.Materials[i].Shininess;
+                gpuMaterials[i].specular  = scene.Materials[i].Specular;
+                gpuMaterials[i].tiling    = scene.Materials[i].Tiling;
 
                 auto it                      = textureToIndex.find(scene.Materials[i].TextureFilename);
                 gpuMaterials[i].textureIndex = (it != textureToIndex.end()) ? it->second : -1;
@@ -823,13 +800,12 @@ namespace Vlkrt
         vkUpdateDescriptorSets(m_Device, 8, writes, 0, nullptr);
     }
 
-    VkBuffer Renderer::CreateBuffer(
-            VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkDeviceMemory& bufferMemory)
+    auto Renderer::CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties,
+            VkDeviceMemory& bufferMemory) const -> VkBuffer
     {
         if (size == 0) size = 16;  // Minimum size to avoid Vulkan errors
 
-        VkBufferCreateInfo bufferInfo = {};
-        bufferInfo.sType              = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        VkBufferCreateInfo bufferInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
         bufferInfo.size               = size;
         bufferInfo.usage              = usage;
         bufferInfo.sharingMode        = VK_SHARING_MODE_EXCLUSIVE;
@@ -853,12 +829,10 @@ namespace Vlkrt
             }
         }
 
-        VkMemoryAllocateFlagsInfo allocFlagsInfo = {};
-        allocFlagsInfo.sType                     = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+        VkMemoryAllocateFlagsInfo allocFlagsInfo = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO };
         allocFlagsInfo.flags                     = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
 
-        VkMemoryAllocateInfo allocInfo = {};
-        allocInfo.sType                = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        VkMemoryAllocateInfo allocInfo = { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
         allocInfo.pNext           = (usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) ? &allocFlagsInfo : nullptr;
         allocInfo.allocationSize  = memRequirements.size;
         allocInfo.memoryTypeIndex = memoryTypeIndex;
@@ -874,7 +848,7 @@ namespace Vlkrt
         for (const auto& textureFilename : textureFilenames) { LoadOrGetTexture(textureFilename); }
     }
 
-    std::shared_ptr<Walnut::Image> Renderer::LoadOrGetTexture(const std::string& filename)
+    auto Renderer::LoadOrGetTexture(const std::string& filename) -> std::shared_ptr<Walnut::Image>
     {
         auto filepath = Vlkrt::TEXTURES_DIR + filename;
 

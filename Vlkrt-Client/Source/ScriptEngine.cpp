@@ -55,7 +55,7 @@ namespace Vlkrt
                 = [](int button) { return Walnut::Input::IsMouseButtonDown((Walnut::MouseButton) button); };
 
         // Global functions
-        lua["Log"] = [](const std::string& message) { std::cout << "[LUA]: " << message << std::endl; };
+        lua["Log"] = [](const std::string& message) { WL_INFO_TAG("LUA", message); };
     }
 
     void ScriptEngine::LoadScript(SceneEntity& entity)

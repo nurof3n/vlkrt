@@ -489,6 +489,14 @@ namespace Vlkrt
                     ImGui::Separator();
                     ImGui::Text("Material: %s", mat.Name.c_str());
 
+                    // Material properties
+                    if (ImGui::ColorEdit3(("Albedo##" + idStr).c_str(), glm::value_ptr(mat.Albedo)))
+                        m_Renderer.InvalidateScene();
+                    if (ImGui::ColorEdit3(("Specular##" + idStr).c_str(), glm::value_ptr(mat.Specular)))
+                        m_Renderer.InvalidateScene();
+                    if (ImGui::DragFloat(("Shininess##" + idStr).c_str(), &mat.Shininess, 1.0f, 1.0f, 512.0f))
+                        m_Renderer.InvalidateScene();
+
                     // Tiling factor
                     if (ImGui::DragFloat(("Tiling##" + idStr).c_str(), &mat.Tiling, 0.1f, 0.01f, 100.0f)) {
                         m_Renderer.InvalidateScene();

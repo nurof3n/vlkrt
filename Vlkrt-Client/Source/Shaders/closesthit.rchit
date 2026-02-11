@@ -12,13 +12,13 @@ struct Vertex {
 
 struct Material {
     vec3 albedo;
-    float roughness;
-    float metallic;
+    float shininess;
+    vec3 specular;
     int textureIndex;
     float tiling;
+    float _pad1;
+    float _pad2;
     float _pad3;
-    vec3 emissionColor;
-    float emissionPower;
 };
 
 struct Light {
@@ -102,7 +102,7 @@ void main()
         vec2 uv = (v0.texCoord * barycentrics.x + v1.texCoord * barycentrics.y + v2.texCoord * barycentrics.z) * mat.tiling;
         
         // EA Advanced Ray Cone LOD - https://media.contentapi.ea.com/content/dam/ea/seed/presentations/2019-ray-tracing-gems-chapter-20-akenine-moller-et-al.pdf
-        // 1. Compute Triangle Areas
+        // 1. Compute Triangle Area (world + uv)
         vec3 edge1 = v1.position - v0.position;
         vec3 edge2 = v2.position - v0.position;
         float triArea = length(cross(edge1, edge2)); // 2 * Area_world
@@ -110,7 +110,7 @@ void main()
         vec2 texEdge1 = v1.texCoord - v0.texCoord;
         vec2 texEdge2 = v2.texCoord - v0.texCoord;
         float uvArea = abs(texEdge1.x * texEdge2.y - texEdge1.y * texEdge2.x); // 2 * Area_uv
-        uvArea *= (mat.tiling * mat.tiling);
+        uvArea *= mat.tiling * mat.tiling;
 
         // 2. Calculate LOD constant based on geometry ratio
         float lodConstant = 0.5 * log2(uvArea / max(triArea, 1e-10));
@@ -124,7 +124,7 @@ void main()
         float rayTerm = log2(max(currentConeWidth, 1e-10) / max(cosTheta, 1e-10));
         
         // Final LOD calculation (EA Equation 34)
-        // Manual bias to fine-tune sharpness. -0.5 is usually a good balance.
+        // Manual bias to fine-tune sharpness
         float lod = lodConstant + rayTerm + texScale - 0.5;
         lod = max(0.0, lod);
         
@@ -136,7 +136,7 @@ void main()
     // Process all lights
     if (lights.length() > 0)
     {
-        for (uint i = 0; i < min(uint(lights.length()), 2u); i++)
+        for (uint i = 0; i < uint(lights.length()); i++)
         {
             Light light = lights[i];
             vec3 lightDir;
@@ -163,8 +163,8 @@ void main()
             // Specular (Blinn-Phong)
             vec3 viewDir = normalize(-gl_WorldRayDirectionEXT);
             vec3 halfDir = normalize(lightDir + viewDir);
-            float specular = pow(max(0.0, dot(normal, halfDir)), 32.0);
-            vec3 specularContrib = specular * 0.3 * light.color * light.intensity * attenuation;
+            float specularFactor = pow(max(0.0, dot(normal, halfDir)), mat.shininess);
+            vec3 specularContrib = specularFactor * mat.specular * light.color * light.intensity * attenuation;
 
             result += diffuseContrib + specularContrib;
         }

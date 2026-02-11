@@ -1,25 +1,18 @@
 materials:
 - name: bunny_white
   albedo: [ 0.95, 0.93, 0.88 ]
-  roughness: 0.4
-  metallic: 0.0
+  shininess: 128.0
+  specular: [ 0.8, 0.8, 0.8 ]
 
 - name: bunny_accent
   albedo: [ 0.8, 0.6, 0.9 ]
-  roughness: 0.3
-  metallic: 0.1
+  shininess: 200.0
+  specular: [ 1.0, 0.8, 1.0 ]
 
 - name: ground
-  albedo: [ 0.3, 0.3, 0.35 ]
-  roughness: 0.9
-  metallic: 0.0
-
-- name: environment
-  albedo: [ 0.2, 0.2, 0.25 ]
-  roughness: 0.95
-  metallic: 0.0
-  emission_color: [ 0.15, 0.15, 0.18 ]
-  emission_power: 0.3
+  albedo: [ 0.1, 0.1, 0.15 ]
+  shininess: 64.0
+  specular: [ 0.3, 0.3, 0.35 ]
 
 entities:
 - name: scene_root
@@ -45,9 +38,9 @@ entities:
     mesh: bunny.obj
     material: 0
     transform:
-      position: [ 0, 0, 0 ]
+      position: [ 0, -1, 0 ]
       rotation: [ 0, 0, 0, 1 ]
-      scale: [ 2.5, 2.5, 2.5 ]
+      scale: [ 10.0, 10.0, 10.0 ]
 
   # Lighting setup
   - name: lighting_rig
@@ -88,8 +81,8 @@ entities:
         position: [ 3, 3, -6 ]
         rotation: [ 0, 0, 0, 1 ]
         scale: [ 1, 1, 1 ]
-      light_color: [ 0.8, 0.6, 1.0 ]
-      light_intensity: 0.9
+      light_color: [ 0.9, 0.4, 1.0 ]
+      light_intensity: 4.0
       light_type: 1
       light_radius: 25.0
 

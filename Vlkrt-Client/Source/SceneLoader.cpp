@@ -22,7 +22,7 @@ namespace Vlkrt
         try {
             YAML::Node root = YAML::LoadFile(filepath);
 
-            Scene       scene;
+            Scene scene;
             SceneEntity sceneRoot;
             sceneRoot.Type = EntityType::Empty;
             sceneRoot.Name = "scene_root";
@@ -32,12 +32,10 @@ namespace Vlkrt
                 WL_INFO_TAG("SceneLoader", "Found materials section");
                 for (size_t idx = 0; idx < root["materials"].size(); ++idx) {
                     const auto& matNode = root["materials"][idx];
-                    Material    mat;
+                    Material mat;
 
                     // Set material name
-                    if (matNode["name"]) {
-                        mat.Name = matNode["name"].as<std::string>();
-                    }
+                    if (matNode["name"]) { mat.Name = matNode["name"].as<std::string>(); }
                     else {
                         mat.Name = "Material_" + std::to_string(idx);
                     }
@@ -47,30 +45,26 @@ namespace Vlkrt
                         mat.Albedo  = glm::vec3(albedo[0], albedo[1], albedo[2]);
                     }
 
-                    if (matNode["roughness"]) {
-                        mat.Roughness = matNode["roughness"].as<float>();
+                    if (matNode["shininess"]) { mat.Shininess = matNode["shininess"].as<float>(); }
+                    else if (matNode["roughness"]) {
+                        // Legacy
+                        float r       = matNode["roughness"].as<float>();
+                        mat.Shininess = (1.0f - r) * 128.0f;
                     }
 
-                    if (matNode["metallic"]) {
-                        mat.Metallic = matNode["metallic"].as<float>();
+                    if (matNode["specular"]) {
+                        auto spec    = matNode["specular"].as<std::vector<float>>();
+                        mat.Specular = glm::vec3(spec[0], spec[1], spec[2]);
+                    }
+                    else if (matNode["metallic"]) {
+                        // Legacy
+                        float m      = matNode["metallic"].as<float>();
+                        mat.Specular = glm::vec3(m);
                     }
 
-                    if (matNode["emission_color"]) {
-                        auto color        = matNode["emission_color"].as<std::vector<float>>();
-                        mat.EmissionColor = glm::vec3(color[0], color[1], color[2]);
-                    }
+                    if (matNode["texture"]) { mat.TextureFilename = matNode["texture"].as<std::string>(); }
 
-                    if (matNode["emission_power"]) {
-                        mat.EmissionPower = matNode["emission_power"].as<float>();
-                    }
-
-                    if (matNode["texture"]) {
-                        mat.TextureFilename = matNode["texture"].as<std::string>();
-                    }
-
-                    if (matNode["tiling"]) {
-                        mat.Tiling = matNode["tiling"].as<float>();
-                    }
+                    if (matNode["tiling"]) { mat.Tiling = matNode["tiling"].as<float>(); }
 
                     scene.Materials.push_back(mat);
                 }
@@ -80,7 +74,7 @@ namespace Vlkrt
             // Create material index map
             std::unordered_map<std::string, int> materialMap;
             for (size_t i = 0; i < scene.Materials.size(); i++) {
-                materialMap[std::to_string(i)] = i;
+                materialMap[std::to_string(i)] = static_cast<int>(i);
             }
 
             // Parse entities and build hierarchy
@@ -112,13 +106,9 @@ namespace Vlkrt
         entity.Parent         = parent;  // Set parent pointer
 
         // Parse name
-        if (entityNode["name"]) {
-            entity.Name = entityNode["name"].as<std::string>();
-        }
+        if (entityNode["name"]) { entity.Name = entityNode["name"].as<std::string>(); }
 
-        if (entityNode["script"]) {
-            entity.ScriptPath = entityNode["script"].as<std::string>();
-        }
+        if (entityNode["script"]) { entity.ScriptPath = entityNode["script"].as<std::string>(); }
 
         // Parse type
         if (entityNode["type"]) {
@@ -134,13 +124,9 @@ namespace Vlkrt
         }
 
         // Parse mesh-specific data
-        if (entityNode["mesh"]) {
-            entity.MeshData.Filename = entityNode["mesh"].as<std::string>();
-        }
+        if (entityNode["mesh"]) { entity.MeshData.Filename = entityNode["mesh"].as<std::string>(); }
 
-        if (entityNode["material"]) {
-            entity.MeshData.MaterialIndex = entityNode["material"].as<int>();
-        }
+        if (entityNode["material"]) { entity.MeshData.MaterialIndex = entityNode["material"].as<int>(); }
 
         // Parse light-specific data
         if (entityNode["light_color"]) {
@@ -148,32 +134,24 @@ namespace Vlkrt
             entity.LightData.Color = glm::vec3(color[0], color[1], color[2]);
         }
 
-        if (entityNode["light_intensity"]) {
-            entity.LightData.Intensity = entityNode["light_intensity"].as<float>();
-        }
+        if (entityNode["light_intensity"]) { entity.LightData.Intensity = entityNode["light_intensity"].as<float>(); }
 
-        if (entityNode["light_type"]) {
-            entity.LightData.Type = entityNode["light_type"].as<float>();
-        }
+        if (entityNode["light_type"]) { entity.LightData.Type = entityNode["light_type"].as<float>(); }
 
-        if (entityNode["light_radius"]) {
-            entity.LightData.Radius = entityNode["light_radius"].as<float>();
-        }
+        if (entityNode["light_radius"]) { entity.LightData.Radius = entityNode["light_radius"].as<float>(); }
 
         // Parse transform
-        if (entityNode["transform"]) {
-            entity.LocalTransform = ParseTransform(entityNode["transform"]);
-        }
+        if (entityNode["transform"]) { entity.LocalTransform = ParseTransform(entityNode["transform"]); }
 
         // For directional lights with explicit direction in YAML, rotate the transform to match
         if (entityNode["light_direction"]) {
-            auto      dirVec           = entityNode["light_direction"].as<std::vector<float>>();
+            auto dirVec                = entityNode["light_direction"].as<std::vector<float>>();
             glm::vec3 desiredDirection = glm::normalize(glm::vec3(dirVec[0], dirVec[1], dirVec[2]));
 
             // Create a rotation from default direction (0,0,-1) to the desired direction
             glm::vec3 defaultDirection = glm::vec3(0.0f, 0.0f, -1.0f);
             glm::vec3 axis             = glm::cross(defaultDirection, desiredDirection);
-            float     dot              = glm::dot(defaultDirection, desiredDirection);
+            float dot                  = glm::dot(defaultDirection, desiredDirection);
 
             if (glm::length(axis) > 0.001f) {  // Not parallel
                 float angle                    = glm::acos(glm::clamp(dot, -1.0f, 1.0f));
@@ -262,9 +240,7 @@ namespace Vlkrt
         // Empty and Camera types don't add to scene, just pass through to children
 
         // Recursively process children
-        for (const auto& child : entity.Children) {
-            FlattenEntity(child, worldTransform, outScene, materialMap);
-        }
+        for (const auto& child : entity.Children) { FlattenEntity(child, worldTransform, outScene, materialMap); }
     }
 
     void SceneLoader::SaveToYAML(const std::string& filename, const Scene& scene)
@@ -285,14 +261,9 @@ namespace Vlkrt
             for (const auto& mat : scene.Materials) {
                 file << "- name: " << mat.Name << "\n";
                 file << "  albedo: [ " << mat.Albedo.x << ", " << mat.Albedo.y << ", " << mat.Albedo.z << " ]\n";
-                file << "  roughness: " << mat.Roughness << "\n";
-                file << "  metallic: " << mat.Metallic << "\n";
-
-                if (mat.EmissionPower > 0.0f) {
-                    file << "  emission_color: [ " << mat.EmissionColor.x << ", " << mat.EmissionColor.y << ", "
-                         << mat.EmissionColor.z << " ]\n";
-                    file << "  emission_power: " << mat.EmissionPower << "\n";
-                }
+                file << "  shininess: " << mat.Shininess << "\n";
+                file << "  specular: [ " << mat.Specular.x << ", " << mat.Specular.y << ", " << mat.Specular.z
+                     << " ]\n";
             }
 
             // Write entities section with meshes and lights as children
@@ -364,8 +335,8 @@ namespace Vlkrt
     HierarchyMapping SceneLoader::CreateMapping(const SceneEntity& rootEntity, const Scene& scene)
     {
         HierarchyMapping mapping;
-        uint32_t         meshIndex  = 0;
-        uint32_t         lightIndex = 0;
+        uint32_t meshIndex  = 0;
+        uint32_t lightIndex = 0;
         PopulateMappingRecursive(rootEntity, scene, mapping, meshIndex, lightIndex);
         return mapping;
     }
@@ -452,14 +423,9 @@ namespace Vlkrt
             for (const auto& mat : scene.Materials) {
                 file << "- name: " << mat.Name << "\n";
                 file << "  albedo: [ " << mat.Albedo.x << ", " << mat.Albedo.y << ", " << mat.Albedo.z << " ]\n";
-                file << "  roughness: " << mat.Roughness << "\n";
-                file << "  metallic: " << mat.Metallic << "\n";
-
-                if (mat.EmissionPower > 0.0f) {
-                    file << "  emission_color: [ " << mat.EmissionColor.x << ", " << mat.EmissionColor.y << ", "
-                         << mat.EmissionColor.z << " ]\n";
-                    file << "  emission_power: " << mat.EmissionPower << "\n";
-                }
+                file << "  shininess: " << mat.Shininess << "\n";
+                file << "  specular: [ " << mat.Specular.x << ", " << mat.Specular.y << ", " << mat.Specular.z
+                     << " ]\n";
 
                 if (!mat.TextureFilename.empty()) {
                     file << "  texture: " << mat.TextureFilename << "\n";
@@ -469,9 +435,7 @@ namespace Vlkrt
 
             // Write entities section - save only the children of root (not the root wrapper itself)
             file << "\nentities:\n";
-            for (const auto& child : rootEntity.Children) {
-                SaveEntityToYAML(file, child, 0);
-            }
+            for (const auto& child : rootEntity.Children) { SaveEntityToYAML(file, child, 0); }
 
             file.close();
 
@@ -490,9 +454,7 @@ namespace Vlkrt
 
         file << indent << "- name: " << entity.Name << "\n";
 
-        if (!entity.ScriptPath.empty()) {
-            file << indent << "  script: " << entity.ScriptPath << "\n";
-        }
+        if (!entity.ScriptPath.empty()) { file << indent << "  script: " << entity.ScriptPath << "\n"; }
 
         // Write type
         std::string typeStr = "empty";
@@ -545,9 +507,7 @@ namespace Vlkrt
         // Write children recursively
         if (!entity.Children.empty()) {
             file << indent << "  children:\n";
-            for (const auto& child : entity.Children) {
-                SaveEntityToYAML(file, child, indentLevel + 2);
-            }
+            for (const auto& child : entity.Children) { SaveEntityToYAML(file, child, indentLevel + 2); }
         }
     }
 }  // namespace Vlkrt

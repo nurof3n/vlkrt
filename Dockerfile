@@ -43,4 +43,6 @@ COPY --from=deps /lib/x86_64-linux-gnu/libtinfo.so.6 /lib/x86_64-linux-gnu/libti
 COPY --from=deps /bin/sh /bin/sh
 COPY --from=deps /bin/bash /bin/bash
 
+ENV LD_LIBRARY_PATH=/app/lib
+
 CMD ["/app/Vlkrt-Server"]

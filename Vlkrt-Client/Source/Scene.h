@@ -9,22 +9,17 @@
 namespace Vlkrt
 {
     /**
-     * @brief CPU material definition for Phong shading.
+     * @brief CPU material definition for Phong illumination.
      */
     struct Material
     {
         std::string Name;
         glm::vec3 Albedo{ 1.0f };
-        float Roughness{ 1.0f };
-        float Metallic{};
-
-        glm::vec3 EmissionColor{};
-        float EmissionPower{};
+        glm::vec3 Specular{ 1.0f };
+        float Shininess{ 32.0f };
 
         std::string TextureFilename;  // Filename of diffuse texture (empty = use Albedo)
         float Tiling{ 1.0f };
-
-        auto GetEmission() const -> glm::vec3 { return EmissionColor * EmissionPower; }
     };
 
     /**
@@ -47,7 +42,7 @@ namespace Vlkrt
         std::vector<Vertex> Vertices;
         std::vector<uint32_t> Indices;
 
-        int MaterialIndex = 0;
+        int MaterialIndex{ 0 };
 
         glm::mat4 Transform = glm::mat4(1.0f);
     };
