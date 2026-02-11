@@ -59,10 +59,6 @@ imgui.ini
 # Log files
 *.log
 
-# Submodules
-Walnut/
-vendor/
-
 # Latex auxiliary files
 *.aux
 *.lof
