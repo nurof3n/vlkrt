@@ -93,8 +93,8 @@ namespace Vlkrt
             case PacketType::ClientUpdate: {
                 m_PlayerDataMutex.lock();
                 auto& playerData = m_PlayerData[clientInfo.ID];
-                stream.ReadRaw<glm::vec2>(playerData.Position);
-                stream.ReadRaw<glm::vec2>(playerData.Velocity);
+                stream.ReadRaw<glm::vec3>(playerData.Position);
+                stream.ReadRaw<glm::vec3>(playerData.Velocity);
                 m_PlayerDataMutex.unlock();
                 break;
             }

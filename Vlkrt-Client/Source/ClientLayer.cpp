@@ -87,12 +87,12 @@ namespace Vlkrt
         }
         else {
             // Only process WASD input if ImGui doesn't want keyboard focus
-            glm::vec2 dir{ 0.0f };
+            glm::vec3 dir{ 0.0f };
             if (!ImGui::GetIO().WantCaptureKeyboard) {
                 if (Walnut::Input::IsKeyDown(Walnut::KeyCode::W))
-                    dir.y = -1.0f;
+                    dir.z = -1.0f;
                 else if (Walnut::Input::IsKeyDown(Walnut::KeyCode::S))
-                    dir.y = 1.0f;
+                    dir.z = 1.0f;
 
                 if (Walnut::Input::IsKeyDown(Walnut::KeyCode::A))
                     dir.x = -1.0f;
@@ -100,7 +100,7 @@ namespace Vlkrt
                     dir.x = 1.0f;
             }
 
-            bool playerMoving = (dir.x != 0.0f || dir.y != 0.0f);
+            bool playerMoving = (dir.x != 0.0f || dir.z != 0.0f);
 
             if (playerMoving) {
                 dir              = glm::normalize(dir);
@@ -119,8 +119,8 @@ namespace Vlkrt
         if (m_Client.GetConnectionStatus() == Walnut::Client::ConnectionStatus::Connected) {
             Walnut::BufferStreamWriter stream(s_ScratchBuffer);
             stream.WriteRaw(PacketType::ClientUpdate);
-            stream.WriteRaw<glm::vec2>(m_PlayerPosition);
-            stream.WriteRaw<glm::vec2>(m_PlayerVelocity);
+            stream.WriteRaw<glm::vec3>(m_PlayerPosition);
+            stream.WriteRaw<glm::vec3>(m_PlayerVelocity);
             m_Client.SendBuffer(stream.GetBuffer());
         }
 
@@ -205,17 +205,12 @@ namespace Vlkrt
         // Clear only dynamic meshes
         m_Scene.DynamicMeshes.clear();
 
-        // Convert 2D positions to 3D world space for raytracing
-        // Map 2D game space (0-800 or similar) to 3D space
-        const float scale    = 0.01f;  // Scale down from screen space
-        const float cubeSize = 1.0f;
-
-        // Add current player as cube mesh (raised to sit on ground)
+        // Add current player as cube mesh
+        const float cubeSize     = 1.0f;
         Mesh playerMesh          = MeshLoader::GenerateCube(cubeSize);
         playerMesh.MaterialIndex = 0;
-        glm::vec3 playerPos
-                = { (m_PlayerPosition.x - 400.0f) * scale, cubeSize * 0.5f, (m_PlayerPosition.y - 300.0f) * scale };
-        playerMesh.Transform = glm::translate(glm::mat4(1.0f), playerPos);
+        glm::vec3 playerPos      = m_PlayerPosition + glm::vec3(0.0f, cubeSize * 0.5f, 0.0f);
+        playerMesh.Transform     = glm::translate(glm::mat4(1.0f), playerPos);
         m_Scene.DynamicMeshes.push_back(playerMesh);
 
         // Add other players as cube meshes
@@ -225,8 +220,7 @@ namespace Vlkrt
 
             Mesh otherPlayerMesh          = MeshLoader::GenerateCube(cubeSize);
             otherPlayerMesh.MaterialIndex = 1;
-            glm::vec3 otherPos            = { (playerData.Position.x - 400.0f) * scale, cubeSize * 0.5f,
-                           (playerData.Position.y - 300.0f) * scale };
+            glm::vec3 otherPos            = playerData.Position + glm::vec3(0.0f, cubeSize * 0.5f, 0.0f);
             otherPlayerMesh.Transform     = glm::translate(glm::mat4(1.0f), otherPos);
             m_Scene.DynamicMeshes.push_back(otherPlayerMesh);
         }

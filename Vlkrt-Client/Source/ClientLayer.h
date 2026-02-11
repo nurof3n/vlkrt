@@ -28,8 +28,8 @@ namespace Vlkrt
         // Struct to hold player data received from the server
         struct PlayerData
         {
-            glm::vec2 Position;
-            glm::vec2 Velocity;
+            glm::vec3 Position;
+            glm::vec3 Velocity;
         };
 
     public:
@@ -64,9 +64,9 @@ namespace Vlkrt
         bool m_TexturesLoaded{ false };
 
         // Client player data
-        const float m_Speed{ 100.0f };
-        glm::vec2 m_PlayerPosition{ 50.0f, 50.0f };
-        glm::vec2 m_PlayerVelocity{};
+        const float m_Speed{ 10.0f };
+        glm::vec3 m_PlayerPosition{};
+        glm::vec3 m_PlayerVelocity{};
 
         // Server player data
         std::mutex m_PlayerDataMutex;
@@ -96,7 +96,7 @@ namespace Vlkrt
         HierarchyMapping m_HierarchyMapping;
 
         // Scene change tracking
-        glm::vec2 m_LastPlayerPosition{};
+        glm::vec3 m_LastPlayerPosition{};
         size_t m_LastPlayerCount{ 0 };
 
         // Resource cache
