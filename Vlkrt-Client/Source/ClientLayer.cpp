@@ -333,9 +333,7 @@ namespace Vlkrt
     {
         // Hierarchy is already synced to flat arrays every frame in OnUpdate()
         // Just save to YAML
-        std::string scenePath = SCENES_DIR + m_CurrentScene + ".yaml";
-        SceneLoader::SaveToYAMLWithHierarchy(scenePath, m_Scene, m_SceneRoot);
-        WL_INFO_TAG("Client", "Scene saved to: {}", scenePath);
+        SceneLoader::SaveToYAMLWithHierarchy(m_CurrentScene + ".yaml", m_Scene, m_SceneRoot);
 
         // Reload scene from file to verify save
         LoadScene(m_CurrentScene);
