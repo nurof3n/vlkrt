@@ -68,21 +68,64 @@ Run the server first, then launch one or more clients to connect to it.
 
 ### Hosting the server in Unikraft Cloud
 
+> **Note**: The server needs to communicate with the clients over UDP.
+> Currently, UDP services are a preview feature and are NOT supported on public Unikraft Cloud metros.
+
 [Unikraft Cloud](https://unikraft.cloud/), codenamed "the millisecond platform", is a blazing-fast cloud platform.
 IT allows deploying applications inside microVMs that outperform containers in both security and performance, with boot times in the order of milliseconds.
 
 To deploy the server on Unikraft Cloud, you first need to create an account on the [console](https://console.unikraft.cloud/).
-Then, install the [kraft CLI](https://unikraft.com/docs/introduction) and make sure you have Docker Engine installed and running on your machine.
-Also, grab your token from the console, and you're ready to go:
+Then, install the [unikraft CLI](https://unikraft.com/docs/introduction) and make sure you have Docker installed and running on your machine.
+You also need a [BuildKit](https://github.com/moby/buildkit) builder, which usually comes bundled with Docker.
+
+First, ensure you are logged in to the CLI:
 
 ```bash
- kraft cloud deploy \
-    -M 128 \
-    -p 1337:1337/udp \
-    --scale-to-zero on \
-    --scale-to-zero-stateful \
-    --rootfs-type erofs \
-    .
+unikraft login
+```
+
+Then, build and push the server image to the Unikraft Cloud registry:
+
+```bash
+unikraft build . -o <my-org>/vlkrt-server:latest
+```
+
+To create a UDP service, you need to use the Unikraft Cloud API, as the CLI does not support it yet:
+
+```bash
+ curl --request POST \
+  --url "$UKC_METRO/services" \
+  --header 'Content-Type: application/json' \
+  --header "Authorization: Bearer $UKC_TOKEN" \
+  --data '
+{
+  "name": "vlkrt-server",
+  "services": [
+    {
+      "port": 1337,
+      "destination_port": 1337,
+      "protocol": "udp",
+      "ip": "<my-server-ip>"
+    }
+  ],
+  "domains": [
+    {
+      "name": "vlkrt-server",
+    }
+  ],
+}
+'
+```
+
+Finally, to deploy the server and attach it to the UDP service, run the following command:
+
+```bash
+unikraft run --metro <my-metro> \
+    --name vlkrt-server \
+    --memory 128M \
+    --service vlkrt-server \
+    --scale-to-zero policy=on,cooldown-time=1000,stateful=true \
+    --image <my-org>/vlkrt-server:latest
 ```
 
 You will get an output similar to this:

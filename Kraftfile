@@ -1,7 +1,7 @@
-spec: v0.6
+spec: v0.7
 
 runtime: base-compat:latest
 
-rootfs: ./Dockerfile
-
-cmd: [ "bash", "-c", "'export LD_LIBRARY_PATH=/app/lib; /app/Vlkrt-Server'" ]
+rootfs:
+  source: ./Dockerfile
+  format: erofs
