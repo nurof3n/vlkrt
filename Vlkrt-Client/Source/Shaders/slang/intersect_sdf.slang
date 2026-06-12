@@ -12,8 +12,14 @@ void SdfIntersectionMain() {
 
     // Transform ray to primitive local space
     Ray localRay;
-    localRay.origin    = mul(t.bottomLevelASToLocalSpace, float4(ObjectRayOrigin(),    1.0f)).xyz;
-    localRay.direction = mul(float3x3(t.bottomLevelASToLocalSpace), ObjectRayDirection());
+    localRay.origin = mul(t.bottomLevelASToLocalSpace, float4(ObjectRayOrigin(), 1.0f)).xyz;
+
+    // Sphere tracing assumes unit-length direction in the SDF's metric space.
+    // ObjectRayDirection transformed to local space is generally not unit-length
+    // (especially under non-uniform transforms), which causes stepped/ring artifacts.
+    float3 localDirRaw = mul(float3x3(t.bottomLevelASToLocalSpace), ObjectRayDirection());
+    float  localDirLen = max(length(localDirRaw), 1e-8f);
+    localRay.direction = localDirRaw / localDirLen;
 
     float stepScale = g_aabbMaterials[g_shaderRecord.instanceIndex].stepScale;
 
@@ -23,7 +29,10 @@ void SdfIntersectionMain() {
                     thit, localNormal))
         return;
 
-    if (!IsAValidHit(localRay, thit, localNormal))
+    // Convert local-distance parameter back to object-ray parameter expected by ReportHit.
+    float thitObj = thit / localDirLen;
+
+    if (!IsInRange(thitObj, RayTMin(), RayTCurrent()) || IsCulled(localRay, localNormal))
         return;
 
     // Transform normal: local → BLAS → world
@@ -32,5 +41,5 @@ void SdfIntersectionMain() {
 
     AabbHitAttr attr;
     attr.normal = worldNormal;
-    ReportHit(thit, 0u, attr);
+    ReportHit(thitObj, 0u, attr);
 }

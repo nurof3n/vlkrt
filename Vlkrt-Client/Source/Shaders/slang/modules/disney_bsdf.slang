@@ -211,9 +211,14 @@ struct DisneyBSDF : IBxDF {
         float pDiff, pSpecRefl, pClearcoat, pSpecRefr;
         _ComputePdfs(fMix, pSpecRefl, pDiff, pClearcoat, pSpecRefr);
 
+        // Draw lobe choice first — the first PCG output from nearby seeds
+        // can carry low-order correlation; using it for the scalar lobe
+        // selector (which doesn't drive spatial structure) and deferring
+        // the 2D VNDF pair to outputs 2+3 eliminates ring artefacts on
+        // specular surfaces.
+        float choice = Random(rng);
         float e0     = Random(rng);
         float e1     = Random(rng);
-        float choice = Random(rng);
 
         float3 H;
         float3 result = float3(0.0f);

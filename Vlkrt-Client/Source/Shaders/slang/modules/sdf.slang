@@ -181,16 +181,18 @@ float SDFDispatch(float3 pos, uint primitiveType) {
 }
 
 // ------------------------------------------------------------------ //
-// Normal estimation — tetrahedron FD
+// Normal estimation
 // ------------------------------------------------------------------ //
-float3 SDFNormal(float3 p, uint primitiveType) {
-    const float2 e = float2(0.0001f, -0.0001f);
-    return normalize(
-        e.xyy * SDFDispatch(p + e.xyy, primitiveType) +
-        e.yyx * SDFDispatch(p + e.yyx, primitiveType) +
-        e.yxy * SDFDispatch(p + e.yxy, primitiveType) +
-        e.xxx * SDFDispatch(p + e.xxx, primitiveType)
-    );
+float3 SDFNormalWithEpsilon(float3 p, uint primitiveType, float eps) {
+    // Central differences are more stable on high-curvature SDFs than tetrahedral
+    // offsets and reduce visible concentric banding from normal quantization.
+    float dx = SDFDispatch(p + float3(eps, 0.0f, 0.0f), primitiveType)
+             - SDFDispatch(p - float3(eps, 0.0f, 0.0f), primitiveType);
+    float dy = SDFDispatch(p + float3(0.0f, eps, 0.0f), primitiveType)
+             - SDFDispatch(p - float3(0.0f, eps, 0.0f), primitiveType);
+    float dz = SDFDispatch(p + float3(0.0f, 0.0f, eps), primitiveType)
+             - SDFDispatch(p - float3(0.0f, 0.0f, eps), primitiveType);
+    return normalize(float3(dx, dy, dz));
 }
 
 // ------------------------------------------------------------------ //
@@ -201,20 +203,51 @@ bool RaySDFTest(Ray localRay, uint primitiveType, float stepScale,
     thit = 0.0f; hitNormal = float3(0.0f, 1.0f, 0.0f);
     const float threshold = 0.0001f;
     const int   maxSteps  = 512;
+    const int   refineSteps = 6;
+    const int   projectSteps = 2;
+    const float normalEps = 0.0001f;
 
     float tMin = RayTMin();
     float tMax = RayTCurrent();
     float t    = tMin;
+    float prevT = t;
 
     for (int i = 0; i < maxSteps; i++) {
         float3 p = localRay.origin + t * localRay.direction;
         float  d = stepScale * SDFDispatch(p, primitiveType);
         if (d <= threshold) {
             if (!IsInRange(t, tMin, tMax)) return false;
-            thit      = t;
-            hitNormal = SDFNormal(p, primitiveType);
+
+            // Refine the root on the last segment to reduce shell/banding artifacts.
+            float lo = prevT;
+            float hi = t;
+            for (int r = 0; r < refineSteps; r++) {
+                float mid = 0.5f * (lo + hi);
+                float3 mp = localRay.origin + mid * localRay.direction;
+                float md = stepScale * SDFDispatch(mp, primitiveType);
+                if (md > threshold) lo = mid;
+                else hi = mid;
+            }
+
+            thit = hi;
+            float3 hitPos = localRay.origin + thit * localRay.direction;
+
+            // Project onto the zero-set to avoid returning shell-quantized distances.
+            for (int pstep = 0; pstep < projectSteps; pstep++) {
+                float sd = SDFDispatch(hitPos, primitiveType);
+                float3 n = SDFNormalWithEpsilon(hitPos, primitiveType, normalEps);
+                hitPos -= sd * n;
+            }
+
+            // localRay.direction is normalized in intersection shader.
+            thit = dot(hitPos - localRay.origin, localRay.direction);
+            if (!IsInRange(thit, tMin, tMax)) return false;
+
+            hitNormal = SDFNormalWithEpsilon(hitPos, primitiveType, normalEps);
             return true;
         }
+
+        prevT = t;
         t += d;
         if (t > tMax) break;
     }
