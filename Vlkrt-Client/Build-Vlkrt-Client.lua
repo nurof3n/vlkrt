@@ -39,6 +39,8 @@ project "Vlkrt-Client"
 
    links
    {
+      "Walnut",
+      "Walnut-Networking",
       "Vlkrt-Common",
       "yaml-cpp",
       "lua51"
