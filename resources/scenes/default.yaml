@@ -5,18 +5,21 @@ materials:
   metallic: 0.1
   texture: tiles.jpg
   tiling: 5
+  material_index: 0
 - name: metal
   albedo: [ 0.8, 0.8, 0.8 ]
   roughness: 0.2
   metallic: 1
   texture: wood.jpg
   tiling: 0.5
+  material_index: 0
 - name: bricks
   albedo: [ 0.9, 0.9, 0.9 ]
   roughness: 0.9375
   metallic: 0.1
   texture: brick.jpg
   tiling: 2
+  material_index: 0
 
 entities:
 - name: scene_root
@@ -26,47 +29,58 @@ entities:
     rotation: [ 0, 0, 0, 0 ]
     scale: [ 1, 1, 1 ]
   children:
-    - name: grounded
-      type: mesh
+  - name: grounded
+    type: mesh
+    transform:
+      position: [ 0, -1, 0 ]
+      rotation: [ 0, 0, 0, 1 ]
+      scale: [ 10, 1, 10 ]
+    mesh: ground.obj
+    material: 0
+  - name: cube
+    script: cube_animation.lua
+    type: mesh
+    transform:
+      position: [ 2, 0.537883, 0 ]
+      rotation: [ 0, -0.994962, 0, 0.100257 ]
+      scale: [ 1, 1, 1 ]
+    mesh: cube.obj
+    material: 1
+  - name: lighting_group
+    type: empty
+    transform:
+      position: [ -0.909, 5, 5 ]
+      rotation: [ -0.643505, 0.0327726, 0, 0.76474 ]
+      scale: [ 3.61, 1, 1 ]
+    children:
+    - name: point
+      type: light
       transform:
-        position: [ 0, -1, 0 ]
+        position: [ 2.9, 0, 0 ]
         rotation: [ 0, 0, 0, 1 ]
-        scale: [ 10, 1, 10 ]
-      mesh: ground.obj
-      material: 0
-    - name: cube
-      script: cube_animation.lua
-      type: mesh
-      transform:
-        position: [ 2, 1.46029, 0 ]
-        rotation: [ 0, 0.966779, 0, 0.255613 ]
         scale: [ 1, 1, 1 ]
-      mesh: cube.obj
-      material: 1
-    - name: lighting_group
-      type: empty
+      light_emission: [ 1, 1, 1 ]
+      light_intensity: 1.5
+      light_type: 0
+      light_direction: [ 0, 0, -1 ]
+      light_size: 1.825
+    - name: sun
+      type: light
       transform:
-        position: [ -0.909, 5, 5 ]
-        rotation: [ -0.643505, 0.0327726, 0, 0.76474 ]
-        scale: [ 3.61, 1, 1 ]
-      children:
-        - name: point
-          type: light
-          transform:
-            position: [ 0, 0, 0 ]
-            rotation: [ 0, 0, 0, 1 ]
-            scale: [ 1, 1, 1 ]
-          light_emission: [ 1, 1, 1 ]
-          light_intensity: 1.5
-          light_type: 0
-          light_size: 1.825
-        - name: sun
-          type: light
-          transform:
-            position: [ 0, 0, 0 ]
-            rotation: [ 0, 0, 0, 1 ]
-            scale: [ 1, 1, 1 ]
-          light_emission: [ 0.729107, 0.518529, 0.275254 ]
-          light_intensity: 1.798
-          light_type: 1
-          light_direction: [ 0, 0, -1 ]
+        position: [ 0, 0, 0 ]
+        rotation: [ 0.288279, -0.0836488, 0, 0.953886 ]
+        scale: [ 1, 1, 1 ]
+      light_emission: [ 0.729107, 0.518529, 0.275254 ]
+      light_intensity: 1.798
+      light_type: 1
+      light_direction: [ 0.159583, 0.54997, -0.819797 ]
+
+scene_settings:
+  background_color: [ 0, 0, 0 ]
+  scene_index: 0
+  max_recursion_depth: 4
+  max_shadow_recursion_depth: 4
+  path_sqrt_samples: 1
+  russian_roulette_depth: 3
+  apply_jitter: true
+  anisotropic_bsdf: true

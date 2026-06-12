@@ -1,129 +1,629 @@
-﻿materials:
+materials:
 - name: pbr_floor
   albedo: [ 0.75, 0.75, 0.75 ]
   roughness: 0.4
+  metallic: 0
   material_index: 0
-
-# â”€â”€ Row 0 (x=-4): Roughness gradient â€” gold metallic, roughness 0 â†’ 1 â”€â”€â”€â”€â”€â”€â”€â”€â”€
-- { name: rough_00, albedo: [ 0.944, 0.776, 0.373 ], metallic: 1.0, roughness: 0.0, material_index: 1 }
-- { name: rough_01, albedo: [ 0.944, 0.776, 0.373 ], metallic: 1.0, roughness: 0.143, material_index: 2 }
-- { name: rough_02, albedo: [ 0.944, 0.776, 0.373 ], metallic: 1.0, roughness: 0.286, material_index: 3 }
-- { name: rough_03, albedo: [ 0.944, 0.776, 0.373 ], metallic: 1.0, roughness: 0.429, material_index: 4 }
-- { name: rough_04, albedo: [ 0.944, 0.776, 0.373 ], metallic: 1.0, roughness: 0.571, material_index: 5 }
-- { name: rough_05, albedo: [ 0.944, 0.776, 0.373 ], metallic: 1.0, roughness: 0.714, material_index: 6 }
-- { name: rough_06, albedo: [ 0.944, 0.776, 0.373 ], metallic: 1.0, roughness: 0.857, material_index: 7 }
-- { name: rough_07, albedo: [ 0.944, 0.776, 0.373 ], metallic: 1.0, roughness: 1.0, material_index: 8 }
-
-# â”€â”€ Row 1 (x=-2): Emission â€” rainbow glow, red â†’ white â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-- { name: emit_red, albedo: [ 0.8, 0.15, 0.1 ], roughness: 0.1, emission: [ 5.0, 0.4, 0.1 ], material_index: 9 }
-- { name: emit_orange, albedo: [ 0.9, 0.5, 0.1 ], roughness: 0.1, emission: [ 5.0, 2.0, 0.1 ], material_index: 10 }
-- { name: emit_yellow, albedo: [ 0.9, 0.9, 0.2 ], roughness: 0.1, emission: [ 4.5, 4.5, 0.3 ], material_index: 11 }
-- { name: emit_green, albedo: [ 0.2, 0.9, 0.3 ], roughness: 0.1, emission: [ 0.2, 5.0, 0.4 ], material_index: 12 }
-- { name: emit_cyan, albedo: [ 0.2, 0.8, 0.9 ], roughness: 0.1, emission: [ 0.2, 3.5, 5.0 ], material_index: 13 }
-- { name: emit_blue, albedo: [ 0.3, 0.3, 0.9 ], roughness: 0.1, emission: [ 0.3, 0.3, 6.0 ], material_index: 14 }
-- { name: emit_purple, albedo: [ 0.65, 0.15, 0.9 ], roughness: 0.1, emission: [ 3.5, 0.2, 6.0 ], material_index: 15 }
-- { name: emit_white, albedo: [ 1.0, 1.0, 1.0 ], roughness: 0.1, emission: [ 5.0, 5.0, 5.0 ], material_index: 16 }
-
-# â”€â”€ Row 2 (x=0): Specular transmission â€” glass, crystal, refractive materials â”€â”€
-- { name: glass_clear, albedo: [ 1.0, 1.0, 1.0 ], roughness: 0.0, specular_transmission: 1.0, eta: 1.5, material_index: 17 }
-- { name: glass_blue, albedo: [ 0.65, 0.82, 1.0 ], roughness: 0.0, specular_transmission: 1.0, eta: 1.5, material_index: 18 }
-- { name: glass_green, albedo: [ 0.65, 1.0, 0.65 ], roughness: 0.0, specular_transmission: 1.0, eta: 1.5, material_index: 19 }
-- { name: glass_amber, albedo: [ 1.0, 0.72, 0.15 ], roughness: 0.0, specular_transmission: 1.0, eta: 1.65, material_index: 20 }
-- { name: glass_frosted, albedo: [ 0.95, 0.95, 0.95 ], roughness: 0.3, specular_transmission: 0.9, eta: 1.5, material_index: 21 }
-- { name: glass_diamond, albedo: [ 1.0, 1.0, 1.0 ], roughness: 0.0, specular_transmission: 1.0, eta: 2.42, material_index: 22 }
-- { name: glass_red, albedo: [ 1.0, 0.35, 0.35 ], roughness: 0.0, specular_transmission: 1.0, eta: 1.8, material_index: 23 }
-- { name: glass_dark, albedo: [ 0.15, 0.25, 0.35 ], roughness: 0.05, specular_transmission: 0.9, eta: 1.7, material_index: 24 }
-
-# â”€â”€ Row 3 (x=2): Clearcoat â€” paint and lacquered surfaces â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-- { name: coat_matte_red, albedo: [ 0.8, 0.12, 0.08 ], roughness: 0.75, clearcoat: 0.0, material_index: 25 }
-- { name: coat_satin_red, albedo: [ 0.8, 0.12, 0.08 ], roughness: 0.35, clearcoat: 0.4, clearcoat_gloss: 0.7, material_index: 26 }
-- { name: coat_gloss_red, albedo: [ 0.8, 0.12, 0.08 ], roughness: 0.15, clearcoat: 1.0, clearcoat_gloss: 1.0, material_index: 27 }
-- { name: coat_gloss_blue, albedo: [ 0.08, 0.18, 0.85 ], roughness: 0.1, clearcoat: 1.0, clearcoat_gloss: 1.0, material_index: 28 }
-- { name: coat_black_car, albedo: [ 0.02, 0.02, 0.02 ], roughness: 0.05, clearcoat: 1.0, clearcoat_gloss: 1.0, material_index: 29 }
-- { name: coat_gold_metal, albedo: [ 0.95, 0.78, 0.37 ], metallic: 0.8, roughness: 0.2, clearcoat: 0.9, clearcoat_gloss: 0.8, material_index: 30 }
-- { name: coat_lacq_wood, albedo: [ 0.18, 0.09, 0.04 ], roughness: 0.55, clearcoat: 1.0, clearcoat_gloss: 0.6, material_index: 31 }
-- { name: coat_pearl, albedo: [ 0.95, 0.93, 0.88 ], roughness: 0.15, clearcoat: 0.8, sheen: 0.6, sheen_tint: 0.6, material_index: 32 }
-
-# â”€â”€ Row 4 (x=4): Real-world metals + exotic â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-- { name: metal_aluminium, albedo: [ 0.913, 0.922, 0.924 ], metallic: 1.0, roughness: 0.3, anisotropic: 0.8, material_index: 33 }
-- { name: metal_copper, albedo: [ 0.955, 0.638, 0.538 ], metallic: 1.0, roughness: 0.1, material_index: 34 }
-- { name: metal_bronze, albedo: [ 0.804, 0.497, 0.237 ], metallic: 1.0, roughness: 0.25, material_index: 35 }
-- { name: metal_silver, albedo: [ 0.972, 0.960, 0.915 ], metallic: 1.0, roughness: 0.05, material_index: 36 }
-- { name: metal_iron, albedo: [ 0.562, 0.565, 0.578 ], metallic: 1.0, roughness: 0.6, material_index: 37 }
-- { name: metal_titanium, albedo: [ 0.542, 0.497, 0.449 ], metallic: 1.0, roughness: 0.3, material_index: 38 }
-- { name: exotic_sss, albedo: [ 0.95, 0.80, 0.65 ], roughness: 0.4, subsurface: 1.0, material_index: 39 }
-- { name: exotic_velvet, albedo: [ 0.55, 0.08, 0.12 ], roughness: 0.85, sheen: 1.0, sheen_tint: 1.0, material_index: 40 }
+- name: rough_00
+  albedo: [ 0.944, 0.776, 0.373 ]
+  roughness: 0
+  metallic: 1
+  material_index: 1
+- name: rough_01
+  albedo: [ 0.944, 0.776, 0.373 ]
+  roughness: 0.143
+  metallic: 1
+  material_index: 2
+- name: rough_02
+  albedo: [ 0.944, 0.776, 0.373 ]
+  roughness: 0.286
+  metallic: 1
+  material_index: 3
+- name: rough_03
+  albedo: [ 0.944, 0.776, 0.373 ]
+  roughness: 0.429
+  metallic: 1
+  material_index: 4
+- name: rough_04
+  albedo: [ 0.944, 0.776, 0.373 ]
+  roughness: 0.571
+  metallic: 1
+  material_index: 5
+- name: rough_05
+  albedo: [ 0.944, 0.776, 0.373 ]
+  roughness: 0.714
+  metallic: 1
+  material_index: 6
+- name: rough_06
+  albedo: [ 0.944, 0.776, 0.373 ]
+  roughness: 0.857
+  metallic: 1
+  material_index: 7
+- name: rough_07
+  albedo: [ 0.944, 0.776, 0.373 ]
+  roughness: 1
+  metallic: 1
+  material_index: 8
+- name: emit_red
+  albedo: [ 0.8, 0.15, 0.1 ]
+  roughness: 0.1
+  metallic: 0
+  emission: [ 5, 0.4, 0.1 ]
+  material_index: 9
+- name: emit_orange
+  albedo: [ 0.9, 0.5, 0.1 ]
+  roughness: 0.1
+  metallic: 0
+  emission: [ 5, 2, 0.1 ]
+  material_index: 10
+- name: emit_yellow
+  albedo: [ 0.9, 0.9, 0.2 ]
+  roughness: 0.1
+  metallic: 0
+  emission: [ 4.5, 4.5, 0.3 ]
+  material_index: 11
+- name: emit_green
+  albedo: [ 0.2, 0.9, 0.3 ]
+  roughness: 0.1
+  metallic: 0
+  emission: [ 0.2, 5, 0.4 ]
+  material_index: 12
+- name: emit_cyan
+  albedo: [ 0.2, 0.8, 0.9 ]
+  roughness: 0.1
+  metallic: 0
+  emission: [ 0.2, 3.5, 5 ]
+  material_index: 13
+- name: emit_blue
+  albedo: [ 0.3, 0.3, 0.9 ]
+  roughness: 0.1
+  metallic: 0
+  emission: [ 0.3, 0.3, 6 ]
+  material_index: 14
+- name: emit_purple
+  albedo: [ 0.65, 0.15, 0.9 ]
+  roughness: 0.1
+  metallic: 0
+  emission: [ 3.5, 0.2, 6 ]
+  material_index: 15
+- name: emit_white
+  albedo: [ 1, 1, 1 ]
+  roughness: 0.1
+  metallic: 0
+  emission: [ 5, 5, 5 ]
+  material_index: 16
+- name: glass_clear
+  albedo: [ 1, 1, 1 ]
+  roughness: 0
+  metallic: 0
+  specular_transmission: 1
+  material_index: 17
+- name: glass_blue
+  albedo: [ 0.65, 0.82, 1 ]
+  roughness: 0
+  metallic: 0
+  specular_transmission: 1
+  material_index: 18
+- name: glass_green
+  albedo: [ 0.65, 1, 0.65 ]
+  roughness: 0
+  metallic: 0
+  specular_transmission: 1
+  material_index: 19
+- name: glass_amber
+  albedo: [ 1, 0.72, 0.15 ]
+  roughness: 0
+  metallic: 0
+  specular_transmission: 1
+  eta: 1.65
+  material_index: 20
+- name: glass_frosted
+  albedo: [ 0.95, 0.95, 0.95 ]
+  roughness: 0.3
+  metallic: 0
+  specular_transmission: 0.9
+  material_index: 21
+- name: glass_diamond
+  albedo: [ 1, 1, 1 ]
+  roughness: 0
+  metallic: 0
+  specular_transmission: 1
+  eta: 2.42
+  material_index: 22
+- name: glass_red
+  albedo: [ 1, 0.35, 0.35 ]
+  roughness: 0
+  metallic: 0
+  specular_transmission: 1
+  eta: 1.8
+  material_index: 23
+- name: glass_dark
+  albedo: [ 0.15, 0.25, 0.35 ]
+  roughness: 0.05
+  metallic: 0
+  specular_transmission: 0.9
+  eta: 1.7
+  material_index: 24
+- name: coat_matte_red
+  albedo: [ 0.8, 0.12, 0.08 ]
+  roughness: 0.75
+  metallic: 0
+  material_index: 25
+- name: coat_satin_red
+  albedo: [ 0.8, 0.12, 0.08 ]
+  roughness: 0.35
+  metallic: 0
+  clearcoat: 0.4
+  material_index: 26
+- name: coat_gloss_red
+  albedo: [ 0.8, 0.12, 0.08 ]
+  roughness: 0.15
+  metallic: 0
+  clearcoat: 1
+  material_index: 27
+- name: coat_gloss_blue
+  albedo: [ 0.08, 0.18, 0.85 ]
+  roughness: 0.1
+  metallic: 0
+  clearcoat: 1
+  material_index: 28
+- name: coat_black_car
+  albedo: [ 0.02, 0.02, 0.02 ]
+  roughness: 0.05
+  metallic: 0
+  clearcoat: 1
+  material_index: 29
+- name: coat_gold_metal
+  albedo: [ 0.95, 0.78, 0.37 ]
+  roughness: 0.2
+  metallic: 0.8
+  clearcoat: 0.9
+  material_index: 30
+- name: coat_lacq_wood
+  albedo: [ 0.18, 0.09, 0.04 ]
+  roughness: 0.55
+  metallic: 0
+  clearcoat: 1
+  material_index: 31
+- name: coat_pearl
+  albedo: [ 0.95, 0.93, 0.88 ]
+  roughness: 0.15
+  metallic: 0
+  sheen: 0.6
+  clearcoat: 0.8
+  material_index: 32
+- name: metal_aluminium
+  albedo: [ 0.913, 0.922, 0.924 ]
+  roughness: 0.3
+  metallic: 1
+  anisotropic: 0.8
+  material_index: 33
+- name: metal_copper
+  albedo: [ 0.955, 0.638, 0.538 ]
+  roughness: 0.1
+  metallic: 1
+  material_index: 34
+- name: metal_bronze
+  albedo: [ 0.804, 0.497, 0.237 ]
+  roughness: 0.25
+  metallic: 1
+  material_index: 35
+- name: metal_silver
+  albedo: [ 0.972, 0.96, 0.915 ]
+  roughness: 0.05
+  metallic: 1
+  material_index: 36
+- name: metal_iron
+  albedo: [ 0.562, 0.565, 0.578 ]
+  roughness: 0.6
+  metallic: 1
+  material_index: 37
+- name: metal_titanium
+  albedo: [ 0.542, 0.497, 0.449 ]
+  roughness: 0.3
+  metallic: 1
+  material_index: 38
+- name: exotic_sss
+  albedo: [ 0.95, 0.8, 0.65 ]
+  roughness: 0.4
+  metallic: 0
+  subsurface: 1
+  material_index: 39
+- name: exotic_velvet
+  albedo: [ 0.55, 0.08, 0.12 ]
+  roughness: 0.85
+  metallic: 0
+  sheen: 1
+  material_index: 40
 
 entities:
 - name: floor
   type: mesh
+  transform:
+    position: [ 0, 0, 0 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 50, 1, 50 ]
   mesh: ground.obj
   material: 0
-  transform:
-    position: [ 0.0, 0.0, 0.0 ]
-    scale: [ 50.0, 1.0, 50.0 ]
 - name: sun
   type: light
-  light_emission: [ 0.8, 0.8, 0.65 ]
-  light_intensity: 1.0
-  light_type: 1
-  light_direction: [ 0.76, -0.196, 0.596 ]
   transform:
-    position: [ 0.0, 18.0, -20 ]
-
-# Row 0 (x=-4): Roughness gradient
-- { name: s00, type: procedural, procedural_analytic: true, procedural_type: 1, material: 1, transform: { position: [ -4, 0.8, -7 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s01, type: procedural, procedural_analytic: true, procedural_type: 1, material: 2, transform: { position: [ -4, 0.8, -5 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s02, type: procedural, procedural_analytic: true, procedural_type: 1, material: 3, transform: { position: [ -4, 0.8, -3 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s03, type: procedural, procedural_analytic: true, procedural_type: 1, material: 4, transform: { position: [ -4, 0.8, -1 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s04, type: procedural, procedural_analytic: true, procedural_type: 1, material: 5, transform: { position: [ -4, 0.8, 1.0 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s05, type: procedural, procedural_analytic: true, procedural_type: 1, material: 6, transform: { position: [ -4, 0.8, 3.0 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s06, type: procedural, procedural_analytic: true, procedural_type: 1, material: 7, transform: { position: [ -4, 0.8, 5.0 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s07, type: procedural, procedural_analytic: true, procedural_type: 1, material: 8, transform: { position: [ -4, 0.8, 7.0 ], scale: [ 1.0, 1.0, 1.0 ] } }
-# Row 1 (x=-2): Emission
-- { name: s10, type: procedural, procedural_analytic: true, procedural_type: 1, material: 9, transform: { position: [ -2, 0.8, -7 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s11, type: procedural, procedural_analytic: true, procedural_type: 1, material: 10, transform: { position: [ -2, 0.8, -5 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s12, type: procedural, procedural_analytic: true, procedural_type: 1, material: 11, transform: { position: [ -2, 0.8, -3 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s13, type: procedural, procedural_analytic: true, procedural_type: 1, material: 12, transform: { position: [ -2, 0.8, -1 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s14, type: procedural, procedural_analytic: true, procedural_type: 1, material: 13, transform: { position: [ -2, 0.8, 1.0 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s15, type: procedural, procedural_analytic: true, procedural_type: 1, material: 14, transform: { position: [ -2, 0.8, 3.0 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s16, type: procedural, procedural_analytic: true, procedural_type: 1, material: 15, transform: { position: [ -2, 0.8, 5.0 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s17, type: procedural, procedural_analytic: true, procedural_type: 1, material: 16, transform: { position: [ -2, 0.8, 7.0 ], scale: [ 1.0, 1.0, 1.0 ] } }
-# Row 2 (x=0): Specular transmission
-- { name: s20, type: procedural, procedural_analytic: true, procedural_type: 1, material: 17, transform: { position: [ 0.0, 0.8, -7 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s21, type: procedural, procedural_analytic: true, procedural_type: 1, material: 18, transform: { position: [ 0.0, 0.8, -5 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s22, type: procedural, procedural_analytic: true, procedural_type: 1, material: 19, transform: { position: [ 0.0, 0.8, -3 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s23, type: procedural, procedural_analytic: true, procedural_type: 1, material: 20, transform: { position: [ 0.0, 0.8, -1 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s24, type: procedural, procedural_analytic: true, procedural_type: 1, material: 21, transform: { position: [ 0.0, 0.8, 1.0 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s25, type: procedural, procedural_analytic: true, procedural_type: 1, material: 22, transform: { position: [ 0.0, 0.8, 3.0 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s26, type: procedural, procedural_analytic: true, procedural_type: 1, material: 23, transform: { position: [ 0.0, 0.8, 5.0 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s27, type: procedural, procedural_analytic: true, procedural_type: 1, material: 24, transform: { position: [ 0.0, 0.8, 7.0 ], scale: [ 1.0, 1.0, 1.0 ] } }
-# Row 3 (x=2): Clearcoat / paint
-- { name: s30, type: procedural, procedural_analytic: true, procedural_type: 1, material: 25, transform: { position: [ 2.0, 0.8, -7 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s31, type: procedural, procedural_analytic: true, procedural_type: 1, material: 26, transform: { position: [ 2.0, 0.8, -5 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s32, type: procedural, procedural_analytic: true, procedural_type: 1, material: 27, transform: { position: [ 2.0, 0.8, -3 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s33, type: procedural, procedural_analytic: true, procedural_type: 1, material: 28, transform: { position: [ 2.0, 0.8, -1 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s34, type: procedural, procedural_analytic: true, procedural_type: 1, material: 29, transform: { position: [ 2.0, 0.8, 1.0 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s35, type: procedural, procedural_analytic: true, procedural_type: 1, material: 30, transform: { position: [ 2.0, 0.8, 3.0 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s36, type: procedural, procedural_analytic: true, procedural_type: 1, material: 31, transform: { position: [ 2.0, 0.8, 5.0 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s37, type: procedural, procedural_analytic: true, procedural_type: 1, material: 32, transform: { position: [ 2.0, 0.8, 7.0 ], scale: [ 1.0, 1.0, 1.0 ] } }
-# Row 4 (x=4): Real-world metals + exotic
-- { name: s40, type: procedural, procedural_analytic: true, procedural_type: 1, material: 33, transform: { position: [ 4.0, 0.8, -7 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s41, type: procedural, procedural_analytic: true, procedural_type: 1, material: 34, transform: { position: [ 4.0, 0.8, -5 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s42, type: procedural, procedural_analytic: true, procedural_type: 1, material: 35, transform: { position: [ 4.0, 0.8, -3 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s43, type: procedural, procedural_analytic: true, procedural_type: 1, material: 36, transform: { position: [ 4.0, 0.8, -1 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s44, type: procedural, procedural_analytic: true, procedural_type: 1, material: 37, transform: { position: [ 4.0, 0.8, 1.0 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s45, type: procedural, procedural_analytic: true, procedural_type: 1, material: 38, transform: { position: [ 4.0, 0.8, 3.0 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s46, type: procedural, procedural_analytic: true, procedural_type: 1, material: 39, transform: { position: [ 4.0, 0.8, 5.0 ], scale: [ 1.0, 1.0, 1.0 ] } }
-- { name: s47, type: procedural, procedural_analytic: true, procedural_type: 1, material: 40, transform: { position: [ 4.0, 0.8, 7.0 ], scale: [ 1.0, 1.0, 1.0 ] } }
+    position: [ 0, 18, -20 ]
+    rotation: [ -0.328908, 0.476223, 0, 0.815495 ]
+    scale: [ 1, 1, 1 ]
+  light_emission: [ 0.8, 0.8, 0.65 ]
+  light_intensity: 1.221
+  light_type: 1
+  light_direction: [ -0.776714, -0.536446, -0.330063 ]
+- name: s00
+  type: procedural
+  transform:
+    position: [ -4, 0.8, -7 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 1
+- name: s01
+  type: procedural
+  transform:
+    position: [ -4, 0.8, -5 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 2
+- name: s02
+  type: procedural
+  transform:
+    position: [ -4, 0.8, -3 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 3
+- name: s03
+  type: procedural
+  transform:
+    position: [ -4, 0.8, -1 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 4
+- name: s04
+  type: procedural
+  transform:
+    position: [ -4, 0.8, 1 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 5
+- name: s05
+  type: procedural
+  transform:
+    position: [ -4, 0.8, 3 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 6
+- name: s06
+  type: procedural
+  transform:
+    position: [ -4, 0.8, 5 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 7
+- name: s07
+  type: procedural
+  transform:
+    position: [ -4, 0.8, 7 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 8
+- name: s10
+  type: procedural
+  transform:
+    position: [ -2, 0.8, -7 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 9
+- name: s11
+  type: procedural
+  transform:
+    position: [ -2, 0.8, -5 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 10
+- name: s12
+  type: procedural
+  transform:
+    position: [ -2, 0.8, -3 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 11
+- name: s13
+  type: procedural
+  transform:
+    position: [ -2, 0.8, -1 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 12
+- name: s14
+  type: procedural
+  transform:
+    position: [ -2, 0.8, 1 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 13
+- name: s15
+  type: procedural
+  transform:
+    position: [ -2, 0.8, 3 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 14
+- name: s16
+  type: procedural
+  transform:
+    position: [ -2, 0.8, 5 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 15
+- name: s17
+  type: procedural
+  transform:
+    position: [ -2, 0.8, 7 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 16
+- name: s20
+  type: procedural
+  transform:
+    position: [ 0, 0.8, -7 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 17
+- name: s21
+  type: procedural
+  transform:
+    position: [ 0, 0.8, -5 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 18
+- name: s22
+  type: procedural
+  transform:
+    position: [ 0, 0.8, -3 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 19
+- name: s23
+  type: procedural
+  transform:
+    position: [ 0, 0.8, -1 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 20
+- name: s24
+  type: procedural
+  transform:
+    position: [ 0, 0.8, 1 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 21
+- name: s25
+  type: procedural
+  transform:
+    position: [ 0, 0.8, 3 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 22
+- name: s26
+  type: procedural
+  transform:
+    position: [ 0, 0.8, 5 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 23
+- name: s27
+  type: procedural
+  transform:
+    position: [ 0, 0.8, 7 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 24
+- name: s30
+  type: procedural
+  transform:
+    position: [ 2, 0.8, -7 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 25
+- name: s31
+  type: procedural
+  transform:
+    position: [ 2, 0.8, -5 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 26
+- name: s32
+  type: procedural
+  transform:
+    position: [ 2, 0.8, -3 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 27
+- name: s33
+  type: procedural
+  transform:
+    position: [ 2, 0.8, -1 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 28
+- name: s34
+  type: procedural
+  transform:
+    position: [ 2, 0.8, 1 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 29
+- name: s35
+  type: procedural
+  transform:
+    position: [ 2, 0.8, 3 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 30
+- name: s36
+  type: procedural
+  transform:
+    position: [ 2, 0.8, 5 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 31
+- name: s37
+  type: procedural
+  transform:
+    position: [ 2, 0.8, 7 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 32
+- name: s40
+  type: procedural
+  transform:
+    position: [ 4, 0.8, -7 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 33
+- name: s41
+  type: procedural
+  transform:
+    position: [ 4, 0.8, -5 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 34
+- name: s42
+  type: procedural
+  transform:
+    position: [ 4, 0.8, -3 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 35
+- name: s43
+  type: procedural
+  transform:
+    position: [ 4, 0.8, -1 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 36
+- name: s44
+  type: procedural
+  transform:
+    position: [ 4, 0.8, 1 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 37
+- name: s45
+  type: procedural
+  transform:
+    position: [ 4, 0.8, 3 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 38
+- name: s46
+  type: procedural
+  transform:
+    position: [ 4, 0.8, 5 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 39
+- name: s47
+  type: procedural
+  transform:
+    position: [ 4, 0.8, 7 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 1
+  material: 40
 
 scene_settings:
-  background_color: [ 0.0, 0.0, 0.0 ]
+  background_color: [ 0, 0, 0 ]
   scene_index: 3
-  max_recursion_depth: 8
-  max_shadow_recursion_depth: 2
+  max_recursion_depth: 6
+  max_shadow_recursion_depth: 6
+  path_sqrt_samples: 1
   russian_roulette_depth: 3
   apply_jitter: true
   anisotropic_bsdf: true
-  camera_position: [ -15.63, 5.21, 0.0 ]
-  camera_target: [ 0.0, 0.0, 0.0 ]
+  camera_position: [ -15.63, 5.21, 0 ]
+  camera_target: [ 0, 0, 0 ]

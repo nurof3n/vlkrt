@@ -533,11 +533,32 @@ namespace Vlkrt
                     file << "  texture: " << mat.TextureFilename << "\n";
                     file << "  tiling: " << mat.Tiling << "\n";
                 }
+
+                // Keep explicit index for stable round-trips with existing scene files.
+                file << "  material_index: " << mat.MaterialIndex << "\n";
             }
 
             // Write entities section - save only the children of root (not the root wrapper itself)
             file << "\nentities:\n";
             for (const auto& child : rootEntity.Children) { SaveEntityToYAML(file, child, 0); }
+
+            // Preserve scene-wide render settings in YAML.
+            file << "\nscene_settings:\n";
+            file << "  background_color: [ " << scene.BackgroundColor.x << ", " << scene.BackgroundColor.y << ", "
+                 << scene.BackgroundColor.z << " ]\n";
+            file << "  scene_index: " << scene.SceneIndex << "\n";
+            file << "  max_recursion_depth: " << scene.MaxRecursionDepth << "\n";
+            file << "  max_shadow_recursion_depth: " << scene.MaxShadowRecursionDepth << "\n";
+            file << "  path_sqrt_samples: " << scene.PathSqrtSamplesPerPixel << "\n";
+            file << "  russian_roulette_depth: " << scene.RussianRouletteDepth << "\n";
+            file << "  apply_jitter: " << (scene.ApplyJitter ? "true" : "false") << "\n";
+            file << "  anisotropic_bsdf: " << (scene.AnisotropicBSDF ? "true" : "false") << "\n";
+            if (scene.HasCameraHint) {
+                file << "  camera_position: [ " << scene.CameraPosition.x << ", " << scene.CameraPosition.y << ", "
+                     << scene.CameraPosition.z << " ]\n";
+                file << "  camera_target: [ " << scene.CameraTarget.x << ", " << scene.CameraTarget.y << ", "
+                     << scene.CameraTarget.z << " ]\n";
+            }
 
             file.close();
 
@@ -552,8 +573,6 @@ namespace Vlkrt
     void SceneLoader::SaveEntityToYAML(std::ofstream& file, const SceneEntity& entity, int indentLevel)
     {
         std::string indent(indentLevel * 2, ' ');
-        std::string childIndent((indentLevel + 1) * 2, ' ');
-
         file << indent << "- name: " << entity.Name << "\n";
 
         if (!entity.ScriptPath.empty()) { file << indent << "  script: " << entity.ScriptPath << "\n"; }
@@ -564,6 +583,8 @@ namespace Vlkrt
             typeStr = "mesh";
         else if (entity.Type == EntityType::Light)
             typeStr = "light";
+        else if (entity.Type == EntityType::Procedural)
+            typeStr = "procedural";
         else if (entity.Type == EntityType::Camera)
             typeStr = "camera";
         file << indent << "  type: " << typeStr << "\n";
@@ -593,23 +614,29 @@ namespace Vlkrt
             file << indent << "  light_intensity: " << entity.LightData.Intensity << "\n";
             file << indent << "  light_type: " << static_cast<uint32_t>(entity.LightData.Type) << "\n";
 
-            // For directional lights, save the direction derived from rotation
-            if (entity.LightData.Type == LightType::Directional) {
-                glm::vec3 defaultDirection = glm::vec3(0.0f, 0.0f, -1.0f);
-                glm::vec3 direction        = glm::normalize(
-                        glm::vec3(glm::mat4_cast(entity.LocalTransform.Rotation) * glm::vec4(defaultDirection, 0.0f)));
-                file << indent << "  light_direction: [ " << direction.x << ", " << direction.y << ", " << direction.z
-                     << " ]\n";
-            }
-            else {  // Square area light
+            // Save direction for stable round-trips across light types.
+            glm::vec3 defaultDirection = glm::vec3(0.0f, 0.0f, -1.0f);
+            glm::vec3 direction        = glm::normalize(
+                    glm::vec3(glm::mat4_cast(entity.LocalTransform.Rotation) * glm::vec4(defaultDirection, 0.0f)));
+            file << indent << "  light_direction: [ " << direction.x << ", " << direction.y << ", " << direction.z
+                 << " ]\n";
+
+            if (entity.LightData.Type == LightType::Square) {
                 file << indent << "  light_size: " << entity.LightData.Size << "\n";
             }
+        }
+
+        // Write procedural-specific data
+        if (entity.Type == EntityType::Procedural) {
+            file << indent << "  procedural_analytic: " << (entity.ProceduralData.IsAnalytic ? "true" : "false") << "\n";
+            file << indent << "  procedural_type: " << entity.ProceduralData.PrimitiveType << "\n";
+            file << indent << "  material: " << entity.ProceduralData.MaterialIndex << "\n";
         }
 
         // Write children recursively
         if (!entity.Children.empty()) {
             file << indent << "  children:\n";
-            for (const auto& child : entity.Children) { SaveEntityToYAML(file, child, indentLevel + 2); }
+            for (const auto& child : entity.Children) { SaveEntityToYAML(file, child, indentLevel); }
         }
     }
 }  // namespace Vlkrt

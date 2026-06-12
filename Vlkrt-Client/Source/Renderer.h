@@ -108,6 +108,7 @@ namespace Vlkrt
         void Render(const Scene& scene, const Camera& camera);
 
         void InvalidateScene() { m_SceneValid = false; }
+        void InvalidateSceneStructure() { m_SceneValid = false; m_LastProceduralCount = UINT32_MAX; }
         void ResetAccumulation() { m_SceneValid = false; m_FrameIndex = 0; m_AccumFirstFrame = true; }
         uint32_t GetAccumulatedFrameCount() const { return m_FrameIndex; }
 

@@ -1,16 +1,19 @@
 materials:
 - name: bunny_white
   albedo: [ 0.619597, 0.457874, 0.0535674 ]
-  shininess: 128
-  specular: [ 0.8, 0.8, 0.8 ]
+  roughness: 0
+  metallic: 0.8
+  material_index: 0
 - name: bunny_accent
   albedo: [ 0.8, 0.6, 0.9 ]
-  shininess: 200
-  specular: [ 1, 0.8, 1 ]
+  roughness: 0
+  metallic: 0.933333
+  material_index: 0
 - name: ground
   albedo: [ 0.1, 0.1, 0.15 ]
-  shininess: 64
-  specular: [ 0.3, 0.3, 0.35 ]
+  roughness: 0.5
+  metallic: 0.316667
+  material_index: 0
 
 entities:
 - name: scene_root
@@ -49,37 +52,48 @@ entities:
             position: [ 5, 8, 5 ]
             rotation: [ -0.382707, 0, -0, 0.92387 ]
             scale: [ 1, 1, 1 ]
-          light_color: [ 1, 0.98, 0.95 ]
+          light_emission: [ 1, 0.98, 0.95 ]
           light_intensity: 1.8
           light_type: 0
           light_direction: [ 0, -0.707143, -0.707071 ]
+          light_size: 1.825
         - name: fill_light
           type: light
           transform:
             position: [ -4, 5, -3 ]
             rotation: [ 0, 0, 0, 1 ]
             scale: [ 1, 1, 1 ]
-          light_color: [ 0.7, 0.75, 0.85 ]
+          light_emission: [ 0.7, 0.75, 0.85 ]
           light_intensity: 1.2
           light_type: 1
-          light_radius: 30
+          light_direction: [ 0, 0, -1 ]
         - name: rim_light
           type: light
           transform:
             position: [ 3, 3, -6 ]
             rotation: [ 0, 0, 0, 1 ]
             scale: [ 1, 1, 1 ]
-          light_color: [ 0.9, 0.4, 1 ]
+          light_emission: [ 0.9, 0.4, 1 ]
           light_intensity: 4
           light_type: 1
-          light_radius: 25
+          light_direction: [ 0, 0, -1 ]
         - name: ambient_light
           type: light
           transform:
             position: [ 0, 10, 0 ]
             rotation: [ 0, 0, 0, 1 ]
             scale: [ 1, 1, 1 ]
-          light_color: [ 0.8, 0.8, 0.9 ]
+          light_emission: [ 0.8, 0.8, 0.9 ]
           light_intensity: 0.6
           light_type: 1
-          light_radius: 40
+          light_direction: [ 0, 0, -1 ]
+
+scene_settings:
+  background_color: [ 0, 0, 0 ]
+  scene_index: 0
+  max_recursion_depth: 4
+  max_shadow_recursion_depth: 4
+  path_sqrt_samples: 1
+  russian_roulette_depth: 3
+  apply_jitter: true
+  anisotropic_bsdf: true

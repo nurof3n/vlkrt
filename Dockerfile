@@ -2,7 +2,8 @@ FROM ubuntu:24.04 AS build
 
 WORKDIR /src
 
-RUN apt-get update \
+RUN set -eux; \
+        apt-get update \
         ; apt-get install -y --no-install-recommends \
                 build-essential \
                 ca-certificates \
@@ -13,7 +14,8 @@ RUN apt-get update \
 
 COPY . .
 
-RUN chmod +x ./Walnut/vendor/bin/premake/Linux/premake5 \
+RUN set -eux; \
+        chmod +x ./Walnut/vendor/bin/premake/Linux/premake5 \
         ; ./Walnut/vendor/bin/premake/Linux/premake5 --cc=gcc --file=Build-Server.lua gmake2 \
         ; make config=release -j"$(nproc)" \
         ; strip --strip-unneeded ./bin/Release-linux-x86_64/Vlkrt-Server/Vlkrt-Server \
@@ -22,7 +24,8 @@ RUN chmod +x ./Walnut/vendor/bin/premake/Linux/premake5 \
 
 FROM build AS deps
 
-RUN mkdir -p /deps/app/lib /deps/etc/ssl/certs \
+RUN set -eux; \
+        mkdir -p /deps/app/lib /deps/etc/ssl/certs \
         ; cp ./bin/Release-linux-x86_64/Vlkrt-Server/Vlkrt-Server /deps/app/ \
         ; cp ./Walnut/Walnut-Modules/Walnut-Networking/vendor/GameNetworkingSockets/bin/Linux/libGameNetworkingSockets.so /deps/app/lib/ \
         ; cp ./Walnut/Walnut-Modules/Walnut-Networking/vendor/GameNetworkingSockets/bin/Linux/libprotobuf.so.23 /deps/app/lib/ \

@@ -2,27 +2,30 @@ materials:
 - name: demo_floor
   albedo: [ 0.9, 0.9, 0.9 ]
   roughness: 0.4
+  metallic: 0
   material_index: 0
 - name: demo_aabb
-  albedo: [ 1.0, 0.647, 0.0 ]
+  albedo: [ 1, 0.647, 0 ]
   roughness: 0.2
   metallic: 0.8
   material_index: 1
 - name: demo_sphere
   albedo: [ 0.8, 0.1, 0.1 ]
   roughness: 0.1
-  metallic: 1.0
+  metallic: 1
   material_index: 2
 - name: demo_round_cube
   albedo: [ 0.2, 0.8, 0.2 ]
   roughness: 0.3
+  metallic: 0
   material_index: 3
 - name: demo_torus
-  albedo: [ 0.5, 0.0, 0.8 ]
+  albedo: [ 0.5, 0, 0.8 ]
   roughness: 0.5
+  metallic: 0
   material_index: 4
 - name: demo_cog
-  albedo: [ 1.0, 0.9, 0.0 ]
+  albedo: [ 1, 0.9, 0 ]
   roughness: 0.3
   metallic: 0.9
   material_index: 5
@@ -34,96 +37,110 @@ materials:
 - name: demo_solid_angle
   albedo: [ 0.72, 0.45, 0.2 ]
   roughness: 0.8
+  metallic: 0
   material_index: 7
 
 entities:
 - name: floor
   type: mesh
+  transform:
+    position: [ 0, 0, 0 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 30, 1, 30 ]
   mesh: ground.obj
   material: 0
-  transform:
-    position: [ 0.0, 0.0, 0.0 ]
-    scale: [ 30.0, 1.0, 30.0 ]
 - name: light_1
   type: light
+  transform:
+    position: [ -0.8, 3.882, 0.393 ]
+    rotation: [ -0.707107, 0, 0, 0.707107 ]
+    scale: [ 1, 1, 1 ]
   light_emission: [ 0.474, 0.376, 0.75 ]
   light_intensity: 5.885
   light_type: 0
+  light_direction: [ 0, -1, -5.96046e-8 ]
   light_size: 1.825
-  light_direction: [ 0.0, -1, 0.0 ]
-  transform:
-    position: [ -0.8, 3.882, 0.393 ]
 - name: light_2
   type: light
+  transform:
+    position: [ 2.4, 11.368, -1.275 ]
+    rotation: [ -0.707107, 0, 0, 0.707107 ]
+    scale: [ 1, 1, 1 ]
   light_emission: [ 0.78, 0.815, 0.65 ]
   light_intensity: 4.792
   light_type: 0
+  light_direction: [ 0, -1, -5.96046e-8 ]
   light_size: 5.468
-  light_direction: [ 0.0, -1, 0.0 ]
-  transform:
-    position: [ 2.4, 11.368, -1.275 ]
 - name: demo_aabb
   type: procedural
+  transform:
+    position: [ 4.8, 1.5, -5 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1.5, 1 ]
   procedural_analytic: true
   procedural_type: 0
   material: 1
-  transform:
-    position: [ 4.8, 1.5, -5 ]
-    scale: [ 1.0, 1.5, 1.0 ]
 - name: demo_sphere
   type: procedural
+  transform:
+    position: [ 2.5, 1.5, -0.9 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1.5, 1.5, 1.5 ]
   procedural_analytic: true
   procedural_type: 1
   material: 2
-  transform:
-    position: [ 2.5, 1.5, -0.9 ]
-    scale: [ 1.5, 1.5, 1.5 ]
 - name: demo_round_cube
   type: procedural
+  transform:
+    position: [ -2, 1, -1 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
   procedural_analytic: false
   procedural_type: 0
   material: 3
-  transform:
-    position: [ -2, 1.0, -1 ]
-    scale: [ 1.0, 1.0, 1.0 ]
 - name: demo_torus
   type: procedural
+  transform:
+    position: [ 1.5, 1.1, 3.5 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1.5, 1.5, 1.5 ]
   procedural_analytic: false
   procedural_type: 1
   material: 4
-  transform:
-    position: [ 1.5, 1.1, 3.5 ]
-    scale: [ 1.5, 1.5, 1.5 ]
 - name: demo_cog
   type: procedural
-  procedural_analytic: false
-  procedural_type: 2
-  material: 5
   transform:
-    position: [ 0.0, 1.0, -5 ]
-    scale: [ 1.0, 1.0, 1.0 ]
+    position: [ 0, 1, -5 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  procedural_analytic: true
+  procedural_type: 8
+  material: 5
 - name: demo_cylinder
   type: procedural
+  transform:
+    position: [ -2, 1.5, 3 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1.5, 1 ]
   procedural_analytic: false
   procedural_type: 3
   material: 6
-  transform:
-    position: [ -2, 1.5, 3.0 ]
-    scale: [ 1.0, 1.5, 1.0 ]
 - name: demo_solid_angle
   type: procedural
+  transform:
+    position: [ 6, 5, 3 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 5, 5, 5 ]
   procedural_analytic: false
   procedural_type: 4
   material: 7
-  transform:
-    position: [ 6.0, 5.0, 3.0 ]
-    scale: [ 5.0, 5.0, 5.0 ]
 
 scene_settings:
-  background_color: [ 0.0, 0.0, 0.0 ]
+  background_color: [ 0, 0, 0 ]
   scene_index: 2
-  max_recursion_depth: 8
-  max_shadow_recursion_depth: 2
+  max_recursion_depth: 6
+  max_shadow_recursion_depth: 6
+  path_sqrt_samples: 1
   russian_roulette_depth: 3
   apply_jitter: true
   anisotropic_bsdf: false

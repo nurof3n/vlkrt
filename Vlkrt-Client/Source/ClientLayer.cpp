@@ -248,14 +248,52 @@ namespace Vlkrt
                     if (sunChanged) {
                         float el = glm::radians(elevation);
                         float az = glm::radians(azimuth);
-                        sunDir = glm::normalize(glm::vec3(
+                        glm::vec3 newWorldDir = glm::normalize(glm::vec3(
                             glm::cos(el) * glm::cos(az),
                             -glm::sin(el),
                             glm::cos(el) * glm::sin(az)));
+
+                        // Keep flat light data updated immediately for rendering.
+                        sunDir = newWorldDir;
+
+                        // Also update hierarchy transform so FlattenHierarchyToScene does not overwrite on next frame.
+                        if (!m_HierarchyMapping.LightIndexToEntity.empty() && m_HierarchyMapping.LightIndexToEntity[0]) {
+                            SceneEntity* sunEntity = m_HierarchyMapping.LightIndexToEntity[0];
+
+                            glm::mat4 parentWorld = glm::mat4(1.0f);
+                            if (sunEntity->Parent) {
+                                std::vector<SceneEntity*> chain;
+                                for (SceneEntity* p = sunEntity->Parent; p; p = p->Parent)
+                                    chain.push_back(p);
+                                for (auto it = chain.rbegin(); it != chain.rend(); ++it)
+                                    parentWorld = (*it)->LocalTransform.GetWorldMatrix(parentWorld);
+                            }
+
+                            glm::vec3 localDir = glm::normalize(glm::inverse(glm::mat3(parentWorld)) * newWorldDir);
+                            glm::vec3 defaultDirection = glm::vec3(0.0f, 0.0f, -1.0f);
+                            glm::vec3 axis = glm::cross(defaultDirection, localDir);
+                            float dot = glm::dot(defaultDirection, localDir);
+
+                            if (glm::length(axis) > 0.001f) {
+                                float angle = glm::acos(glm::clamp(dot, -1.0f, 1.0f));
+                                sunEntity->LocalTransform.Rotation = glm::angleAxis(angle, glm::normalize(axis));
+                            }
+                            else if (dot < 0.0f) {
+                                sunEntity->LocalTransform.Rotation = glm::angleAxis(glm::pi<float>(), glm::vec3(0.0f, 1.0f, 0.0f));
+                            }
+                            else {
+                                sunEntity->LocalTransform.Rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+                            }
+                        }
+
                         m_Renderer.ResetAccumulation();
                     }
-                    if (ImGui::SliderFloat("Sun Intensity", &m_Scene.Lights[0].Intensity, 0.0f, 10.0f))
+                    if (ImGui::SliderFloat("Sun Intensity", &m_Scene.Lights[0].Intensity, 0.0f, 10.0f)) {
+                        // Persist intensity via hierarchy data too; otherwise flattening overwrites it next frame.
+                        if (!m_HierarchyMapping.LightIndexToEntity.empty() && m_HierarchyMapping.LightIndexToEntity[0])
+                            m_HierarchyMapping.LightIndexToEntity[0]->LightData.Intensity = m_Scene.Lights[0].Intensity;
                         m_Renderer.ResetAccumulation();
+                    }
                     ImGui::Separator();
                 }
 
@@ -354,6 +392,19 @@ namespace Vlkrt
         auto [scene, root] = SceneLoader::LoadFromYAMLWithHierarchy(sceneName + ".yaml");
         m_Scene            = scene;
         m_SceneRoot        = root;
+
+        // Re-link parent pointers after copy assignment.
+        // LoadFromYAMLWithHierarchy builds pointers in a temporary hierarchy; once copied,
+        // those addresses are stale and must be rebuilt for runtime editing logic.
+        m_SceneRoot.Parent = nullptr;
+        auto relinkParents = [&](auto&& self, SceneEntity& entity, SceneEntity* parent) -> void {
+            entity.Parent = parent;
+            for (auto& child : entity.Children)
+                self(self, child, &entity);
+        };
+        for (auto& child : m_SceneRoot.Children)
+            relinkParents(relinkParents, child, &m_SceneRoot);
+
         m_CurrentScene     = sceneName;
         m_SelectedScene    = sceneName;
 
@@ -364,6 +415,8 @@ namespace Vlkrt
         }
 
         m_HierarchyMapping = SceneLoader::CreateMapping(m_SceneRoot, m_Scene);
+        SyncSceneToHierarchy();
+        m_Renderer.InvalidateSceneStructure();
         m_Renderer.ResetAccumulation();
     }
 
@@ -388,6 +441,7 @@ namespace Vlkrt
         // Clear hierarchy — factory scenes have no YAML hierarchy
         m_SceneRoot = SceneEntity{};
         m_HierarchyMapping = HierarchyMapping{};
+        m_Renderer.InvalidateSceneStructure();
         m_Renderer.ResetAccumulation();
     }
 
@@ -425,41 +479,15 @@ namespace Vlkrt
 
     void ClientLayer::SyncSceneToHierarchy()
     {
-        // Copy light properties from flat array back to hierarchy
-        // NOTE: We only sync properties (color, intensity, radius, direction), NOT position
-        // Position is determined by the hierarchy structure and is updated via FlattenEntity
-        for (size_t i = 0; i < m_Scene.Lights.size(); ++i) {
-            if (i < m_HierarchyMapping.LightIndexToEntity.size()) {
-                SceneEntity* lightEntity = m_HierarchyMapping.LightIndexToEntity[i];
-                if (lightEntity) {
-                    // Sync editable light properties from flat array to hierarchy
-                    lightEntity->LightData.Emission  = m_Scene.Lights[i].Emission;
-                    lightEntity->LightData.Intensity = m_Scene.Lights[i].Intensity;
-                    lightEntity->LightData.Type      = m_Scene.Lights[i].Type;
-                    lightEntity->LightData.Size      = m_Scene.Lights[i].Size;
-
-                    // For directional lights, convert direction back to rotation quaternion
-                    // (Position is not used for directional lights)
-                    if (m_Scene.Lights[i].Type == LightType::Directional) {
-                        glm::vec3 desiredDirection = glm::normalize(m_Scene.Lights[i].Direction);
-                        glm::vec3 defaultDirection = glm::vec3(0.0f, 0.0f, -1.0f);
-                        glm::vec3 axis             = glm::cross(defaultDirection, desiredDirection);
-                        float dot                  = glm::dot(defaultDirection, desiredDirection);
-
-                        if (glm::length(axis) > 0.001f) {  // Not parallel
-                            float angle                          = glm::acos(glm::clamp(dot, -1.0f, 1.0f));
-                            lightEntity->LocalTransform.Rotation = glm::angleAxis(angle, glm::normalize(axis));
-                        }
-                        else if (dot < 0.0f) {  // Directly opposite
-                            lightEntity->LocalTransform.Rotation
-                                    = glm::angleAxis(glm::pi<float>(), glm::vec3(0.0f, 1.0f, 0.0f));
-                        }
-                        else {
-                            lightEntity->LocalTransform.Rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);  // Identity
-                        }
-                    }
-                    // For point lights: position is determined by hierarchy structure, not synced here
-                    // To move a point light, edit the lighting_group position or light local position in hierarchy
+        // Keep hierarchy transform/light orientation as authored in YAML. We only sync
+        // procedural properties needed by the inspector from the loaded flat scene data.
+        for (size_t i = 0; i < m_Scene.ProceduralEntities.size(); ++i) {
+            if (i < m_HierarchyMapping.ProceduralIndexToEntity.size()) {
+                SceneEntity* procEntity = m_HierarchyMapping.ProceduralIndexToEntity[i];
+                if (procEntity) {
+                    procEntity->ProceduralData.MaterialIndex = m_Scene.ProceduralEntities[i].MaterialIndex;
+                    procEntity->ProceduralData.IsAnalytic    = m_Scene.ProceduralEntities[i].IsAnalytic;
+                    procEntity->ProceduralData.PrimitiveType = m_Scene.ProceduralEntities[i].PrimitiveType;
                 }
             }
         }
@@ -492,6 +520,7 @@ namespace Vlkrt
         }
 
         if (ImGui::Button("Save Scene", ImVec2(-1, 0))) { SaveScene(); }
+        if (ImGui::Button("Reload Scene", ImVec2(-1, 0))) { LoadScene(m_CurrentScene); }
 
         ImGui::Separator();
         for (auto& child : m_SceneRoot.Children) { ImGuiRenderEntity(child, glm::mat4(1.0f)); }
@@ -815,6 +844,8 @@ namespace Vlkrt
                 uint32_t procIdx = it->second;
                 if (procIdx < m_Scene.ProceduralEntities.size()) {
                     ProceduralEntity& pe = m_Scene.ProceduralEntities[procIdx];
+                    bool structureChanged = (pe.IsAnalytic != entity.ProceduralData.IsAnalytic)
+                                         || (pe.PrimitiveType != entity.ProceduralData.PrimitiveType);
                     if (pe.Transform     != worldTransform
                      || pe.MaterialIndex != entity.ProceduralData.MaterialIndex
                      || pe.IsAnalytic    != entity.ProceduralData.IsAnalytic
@@ -824,6 +855,7 @@ namespace Vlkrt
                         pe.IsAnalytic    = entity.ProceduralData.IsAnalytic;
                         pe.PrimitiveType = entity.ProceduralData.PrimitiveType;
                         m_SceneDirty     = true;
+                        if (structureChanged) m_Renderer.InvalidateSceneStructure();
                     }
                 }
             }

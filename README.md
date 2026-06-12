@@ -83,6 +83,8 @@ After the image is built, you can run the server container:
 docker run --rm -p 1337:1337/udp vlkrt-server
 ```
 
+You can then connect to it on `localhost:1337`.
+
 #### Unikraft Cloud
 
 > **Note**: The server needs to communicate with the clients over UDP.
@@ -113,14 +115,14 @@ Next, create the server and attach it to a UDP service:
 unikraft api /v1/instances -d '
 {
   "name": "vlkrt-server",
-  "image": "acioc/vlkrt-server:latest",
+  "image": "<my-org>/vlkrt-server:latest",
   "service_group": {
     "services": [
       {
         "port": 1337,
         "destination_port": 1337,
         "protocol": "udp",
-        "ip": "178.63.21.33"
+        "ip": "<user-ip>"
       }
     ],
     "domains": [
@@ -139,45 +141,7 @@ unikraft api /v1/instances -d '
 }'
 ```
 
-Finally, to deploy the server and attach it to the UDP service, run the following command:
-
-```bash
-unikraft run --metro <my-metro> \
-    --name vlkrt-server \
-    --memory 128M \
-    --service vlkrt-server \
-    --scale-to-zero policy=on,cooldown-time=1000,stateful=true \
-    --image <my-org>/vlkrt-server:latest
-```
-
-You will get an output similar to this:
-
-```ansi
-metro:           fra
-name:            vlkrt-server
-uuid:            c7f80409-0558-47ff-9156-bc10537e6567
-state:           starting
-image:           <my-org>/vlkrt-server
-resources:
-  memory:        128MiB
-  vcpus:         1
-service:
-  name:          vlkrt-server
-  uuid:          f2a1d898-5931-430c-beef-85aa3d1737b7
-  domains:
-  - fqdn:        vlkrt-server.fra.unikraft.app
-networks:
-- uuid:          c3e87cc2-3c9f-4281-a793-f08c7b33e581
-  private-ip:    10.0.0.29
-  mac:           12:b0:0a:00:00:1d
-timestamps:
-  created:       just now
-scale-to-zero:
-  enabled:       true
-  policy:        on
-  stateful:      true
-  cooldown-time: 1s
-```
+The `<user-ip>` field should be replaced with an IP address leased to your Unikraft Cloud user.
 
 Grab the FQDN from the output, and use it to connect to the server from the client.
-The server will automatically scale down to zero when not in use, and scale up again when a client tries to connect, saving on resources and costs.
+The server will automatically scale down to zero when not in use (i.e., after all the clients have disconnected), and scale up again in **milliseconds** when a client tries to connect, saving on resources and costs.
