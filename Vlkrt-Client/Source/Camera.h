@@ -25,6 +25,12 @@ namespace Vlkrt
         const auto& GetPosition() const { return m_Position; }
         const auto& GetDirection() const { return m_ForwardDirection; }
 
+        void SetPosition(const glm::vec3& pos) { m_Position = pos; RecalculateView(); }
+        void SetTarget(const glm::vec3& target) {
+            glm::vec3 dir = target - m_Position;
+            if (glm::length(dir) > 1e-6f) { m_ForwardDirection = glm::normalize(dir); RecalculateView(); }
+        }
+
     private:
         void RecalculateProjection();
         void RecalculateView();

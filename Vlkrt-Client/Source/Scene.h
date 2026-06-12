@@ -8,18 +8,88 @@
 
 namespace Vlkrt
 {
-    /**
-     * @brief CPU material definition for Phong illumination.
-     */
+    // -------------------------------------------------------------------------
+    // Enumerations
+    // -------------------------------------------------------------------------
+
+    enum class LightType : uint32_t
+    {
+        Square      = 0,
+        Directional = 1,
+    };
+
+    enum class AnalyticPrimitiveType : uint32_t
+    {
+        AABB   = 0,
+        Sphere = 1,
+    };
+
+    enum class SDFPrimitiveType : uint32_t
+    {
+        IntersectedRoundCube = 0,
+        SquareTorus          = 1,
+        Cog                  = 2,
+        Cylinder             = 3,
+        SolidAngle           = 4,
+    };
+
+    enum class RaytracingMode : uint32_t
+    {
+        PathTracing         = 1,
+        PathTracingTemporal = 2,
+    };
+
+    enum class ImportanceSamplingMode : uint32_t
+    {
+        Uniform = 0,
+        Cosine  = 1,
+        BSDF    = 2,
+    };
+
+    // -------------------------------------------------------------------------
+    // CPU material — Disney BSDF parameters.
+    // Old YAML files that supply only albedo/shininess/specular are auto-converted
+    // on load: Phong shininess drives roughness, specular drives metallic.
+    // -------------------------------------------------------------------------
     struct Material
     {
         std::string Name;
-        glm::vec3 Albedo{ 1.0f };
-        glm::vec3 Specular{ 1.0f };
-        float Shininess{ 32.0f };
 
-        std::string TextureFilename;  // Filename of diffuse texture (empty = use Albedo)
-        float Tiling{ 1.0f };
+        // Base colour
+        glm::vec3 Albedo{ 1.0f };
+
+        // Emission (for emissive / light-mesh materials)
+        glm::vec3 Emission{ 0.0f };
+
+        // Volume
+        glm::vec3 Extinction{ 1.0f };
+        float     AtDistance{ 1.0f };
+
+        // Disney BSDF lobes
+        float Roughness            { 0.5f };
+        float Metallic             { 0.0f };
+        float Subsurface           { 0.0f };
+        float Anisotropic          { 0.0f };
+        float Sheen                { 0.0f };
+        float SheenTint            { 0.5f };
+        float Clearcoat            { 0.0f };
+        float ClearcoatGloss       { 1.0f };
+        float SpecularTint         { 0.0f };
+        float SpecularTransmission { 0.0f };
+        float Eta                  { 1.5f };
+
+        // Procedural-primitive step scale (SDF ray march)
+        float StepScale{ 1.0f };
+
+        // Internal classification (0 = regular, matches GLSL materialIndex)
+        uint32_t MaterialIndex{ 0 };
+
+        // >=0 when this material belongs to a light mesh; index into g_lights
+        int32_t LightIndex{ -1 };
+
+        // Texture
+        std::string TextureFilename;  // empty = use Albedo
+        float       Tiling{ 1.0f };
     };
 
     /**
@@ -48,16 +118,18 @@ namespace Vlkrt
     };
 
     /**
-     * @brief CPU light definition for both directional and point lights.
+     * @brief CPU light definition matching the GLSL GPULight layout.
+     *  Type 0 = Square area light (has Position + Size)
+     *  Type 1 = Directional light (has Direction + Intensity)
      */
     struct Light
     {
-        glm::vec3 Position{};     // World position
-        float Intensity{ 1.0f };  // Brightness 0-2
-        glm::vec3 Color{ 1.0f };
-        float Type{ 0.0f };           // 0=Directional, 1=Point
-        glm::vec3 Direction{ 0.0f };  // For directional lights (normalized)
-        float Radius{ 10.0f };        // Falloff radius for point lights
+        glm::vec3 Position{};        // World position
+        float     Intensity{ 1.0f }; // Brightness
+        glm::vec3 Emission{ 1.0f };  // Colour/radiance (was Color)
+        float     Size{ 1.825f };    // Area light half-size (was Radius)
+        glm::vec3 Direction{ 0.0f }; // For directional lights (normalised)
+        LightType Type{ LightType::Square };
     };
 
     /**
@@ -80,15 +152,28 @@ namespace Vlkrt
         auto GetWorldMatrix(const glm::mat4& parentWorld) const -> glm::mat4 { return parentWorld * GetLocalMatrix(); }
     };
 
+    // -------------------------------------------------------------------------
+    // Procedural geometry entity (AABB-based, analytic or SDF)
+    // -------------------------------------------------------------------------
+    struct ProceduralEntity
+    {
+        std::string Name;
+        glm::mat4   Transform{ 1.0f };  // Local-to-world
+        bool        IsAnalytic{ true }; // true=analytic BLAS, false=SDF BLAS
+        uint32_t    PrimitiveType{ 0 }; // AnalyticPrimitiveType or SDFPrimitiveType
+        int         MaterialIndex{ 0 }; // Index into Scene::Materials
+    };
+
     /**
      * @brief Type of scene entity, used for determining how to render and update each node in the hierarchy.
      */
     enum class EntityType
     {
-        Empty,  // Transform-only, used for grouping
-        Mesh,   // Mesh with material
-        Light,  // Light source
-        Camera  // Camera
+        Empty,      // Transform-only, used for grouping
+        Mesh,       // Mesh with material
+        Light,      // Light source
+        Camera,     // Camera
+        Procedural  // Analytic/SDF procedural shape
     };
 
     /**
@@ -117,10 +202,10 @@ namespace Vlkrt
 
         struct LightData
         {
-            glm::vec3 Color{ 1.0f };
-            float Intensity{ 1.0f };
-            float Type{ 0.0f };  // 0=Directional, 1=Point
-            float Radius{ 10.0f };
+            glm::vec3 Emission{ 1.0f };
+            float     Intensity{ 1.0f };
+            LightType Type{ LightType::Square };
+            float     Size{ 1.825f };
         } LightData;
 
         struct CameraData
@@ -129,6 +214,13 @@ namespace Vlkrt
             float Near{ 0.1f };
             float Far{ 100.0f };
         } CameraData;
+
+        struct ProceduralData
+        {
+            bool     IsAnalytic{ true };   // true=analytic BLAS, false=SDF BLAS
+            uint32_t PrimitiveType{ 0 };   // AnalyticPrimitiveType or SDFPrimitiveType
+            int      MaterialIndex{ 0 };   // Index into Scene::Materials
+        } ProceduralData;
 
         void MarkDirtyRecursive()
         {
@@ -148,10 +240,29 @@ namespace Vlkrt
      */
     struct Scene
     {
-        std::vector<Mesh> StaticMeshes;
-        std::vector<Mesh> DynamicMeshes;
-        std::vector<Material> Materials;
-        std::vector<Light> Lights;
+        std::vector<Mesh>              StaticMeshes;
+        std::vector<Mesh>              DynamicMeshes;
+        std::vector<Material>          Materials;
+        std::vector<Light>             Lights;
+        std::vector<ProceduralEntity>  ProceduralEntities;
+
+        // ---- Rendering parameters (written into SceneUBO each frame) ----
+        RaytracingMode        RaytracingType             { RaytracingMode::PathTracing };
+        ImportanceSamplingMode ImportanceSampling        { ImportanceSamplingMode::BSDF };
+        uint32_t              MaxRecursionDepth          { 8 };   // hard cap enforced by UI: 12
+        uint32_t              MaxShadowRecursionDepth    { 8 };   // default = MaxRecursionDepth
+        uint32_t              PathSqrtSamplesPerPixel    { 1 };
+        bool                  ApplyJitter                { true };
+        bool                  OnlyOneLightSample         { false };
+        uint32_t              RussianRouletteDepth       { 3 };
+        bool                  AnisotropicBSDF            { true };
+        uint32_t              SceneIndex                 { 0 };  // 0=Custom,1=Demo,2=Cornell,3=PbrShowcase
+        glm::vec3             BackgroundColor            { 0.0f };
+
+        // Optional camera hint loaded from YAML scene_settings
+        bool      HasCameraHint   { false };
+        glm::vec3 CameraPosition  { 0.0f, 3.0f, 10.0f };
+        glm::vec3 CameraTarget    { 0.0f, 0.0f, 0.0f };
     };
 
     /**

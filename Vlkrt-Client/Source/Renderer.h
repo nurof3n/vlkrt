@@ -16,7 +16,7 @@ namespace Vlkrt
     class Camera;
     struct Scene;
 
-    // GPU-aligned vertex structure
+    // GPU-aligned vertex structure (48 bytes, matches GLSL GPUVertex)
     struct GPUVertex
     {
         glm::vec3 position;
@@ -27,29 +27,76 @@ namespace Vlkrt
         glm::vec2 _pad3;
     };
 
-    // GPU-aligned light structure
+    // GPU-aligned light structure (48 bytes, matches GLSL GPULight std430)
     struct GPULight
     {
-        glm::vec3 position;
-        float intensity;
-        glm::vec3 color;
-        float type;  // 0=Directional, 1=Point
-        glm::vec3 direction;
-        float radius;
+        glm::vec3 position;    // offset  0
+        float     intensity;   // offset 12
+        glm::vec3 emission;    // offset 16  (was color)
+        float     size;        // offset 28  (was radius)
+        glm::vec3 direction;   // offset 32
+        uint32_t  type;        // offset 44  [0=Square, 1=Directional]
     };
 
-    // GPU-side material structure
-    struct GPUMaterial
+    // Disney-BSDF material on the GPU (112 bytes, matches GLSL GPUPBRMaterial std430)
+    struct GPUPBRMaterial
     {
-        glm::vec3 albedo;         // 0
-        float shininess;          // 12
-        glm::vec3 specular;       // 16
-        int textureIndex;         // 28
-        float tiling;             // 32
-        float _pad1;              // 36
-        float _pad2;              // 40
-        float _pad3;              // 44 -> 48
+        glm::vec3 albedo;                //   0
+        int32_t   textureIndex;          //  12  [-1 = no texture]
+        glm::vec3 emission;              //  16
+        float     tiling;                //  28
+        glm::vec3 extinction;            //  32
+        uint32_t  materialIndex;         //  44  [0 = floor/ground]
+        float     stepScale;             //  48
+        float     sheen;                 //  52
+        float     sheenTint;             //  56
+        float     clearcoat;             //  60
+        float     clearcoatGloss;        //  64
+        float     roughness;             //  68
+        float     subsurface;            //  72
+        float     anisotropic;           //  76
+        float     metallic;              //  80
+        float     specularTint;          //  84
+        float     specularTransmission;  //  88
+        float     eta;                   //  92
+        float     atDistance;            //  96
+        int32_t   lightIndex;            // 100  [>=0 if light mesh]
+        float     _pad1;                 // 104
+        float     _pad2;                 // 108
+        //                              // 112 total
     };
+
+    // AABB primitive transform pair (128 bytes, matches GLSL AABBTransform std430)
+    struct AABBTransform
+    {
+        glm::mat4 localSpaceToBottomLevelAS;  // offset  0  (local → BLAS)
+        glm::mat4 bottomLevelASToLocalSpace;  // offset 64  (BLAS → local)
+    };
+
+    // Scene UBO sent to shaders every frame (176 bytes, matches GLSL SceneUBO std140)
+    struct SceneUBOData
+    {
+        glm::mat4  projectionToWorld;          //   0 (64)
+        glm::vec4  cameraPosition;             //  64 (16)
+        glm::vec4  backgroundColor;            //  80 (16)
+        uint32_t   numLights;                  //  96
+        float      elapsedTime;                // 100
+        uint32_t   elapsedTicks;               // 104
+        uint32_t   raytracingType;             // 108
+        uint32_t   importanceSamplingType;     // 112
+        uint32_t   maxRecursionDepth;          // 116
+        uint32_t   maxShadowRecursionDepth;    // 120
+        uint32_t   pathSqrtSamplesPerPixel;    // 124
+        uint32_t   pathFrameCacheIndex;        // 128
+        uint32_t   applyJitter;                // 132
+        uint32_t   onlyOneLightSample;         // 136
+        uint32_t   russianRouletteDepth;       // 140
+        uint32_t   anisotropicBSDF;            // 144
+        uint32_t   sceneIndex;                 // 148
+        float      _pad[6];                    // 152..175 (24 bytes)
+        //                                     // 176 total
+    };
+    static_assert(sizeof(SceneUBOData) == 176, "SceneUBOData size mismatch");
 
     class Renderer
     {
@@ -61,6 +108,8 @@ namespace Vlkrt
         void Render(const Scene& scene, const Camera& camera);
 
         void InvalidateScene() { m_SceneValid = false; }
+        void ResetAccumulation() { m_SceneValid = false; m_FrameIndex = 0; m_AccumFirstFrame = true; }
+        uint32_t GetAccumulatedFrameCount() const { return m_FrameIndex; }
 
         void MarkDirtyMeshes(const std::vector<uint32_t>& meshIndices)
         {
@@ -80,10 +129,12 @@ namespace Vlkrt
         auto LoadOrGetTexture(const std::string& filename) -> std::shared_ptr<Walnut::Image>;
 
         void CreateRayTracingPipeline();
-        void CreateShaderBindingTable();
+        void DestroyPipelineObjects();
+        void CreateShaderBindingTable(const Scene& scene);
         void CreateDescriptorSets();
         void CreateSceneBuffers(const Scene& scene);
         void UpdateSceneData(const Scene& scene);
+        void UpdateSceneUBO(const Scene& scene, const Camera& camera);
         auto CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties,
                 VkDeviceMemory& bufferMemory) const -> VkBuffer;
 
@@ -98,9 +149,14 @@ namespace Vlkrt
         VkPipelineLayout m_RTPipelineLayout{ VK_NULL_HANDLE };
 
         // Shader modules
-        VkShaderModule m_RaygenShader{ VK_NULL_HANDLE };
-        VkShaderModule m_MissShader{ VK_NULL_HANDLE };
-        VkShaderModule m_ClosestHitShader{ VK_NULL_HANDLE };
+        VkShaderModule m_RaygenShader          { VK_NULL_HANDLE };
+        VkShaderModule m_RaygenTemporalShader  { VK_NULL_HANDLE };
+        VkShaderModule m_MissShader            { VK_NULL_HANDLE };
+        VkShaderModule m_ShadowMissShader      { VK_NULL_HANDLE };
+        VkShaderModule m_ClosestHitShader      { VK_NULL_HANDLE };
+        VkShaderModule m_ClosestHitAABBShader  { VK_NULL_HANDLE };
+        VkShaderModule m_IntersectAnalyticShader { VK_NULL_HANDLE };
+        VkShaderModule m_IntersectSDFShader    { VK_NULL_HANDLE };
 
         // Shader binding table
         VkBuffer m_SBTBuffer{ VK_NULL_HANDLE };
@@ -115,7 +171,7 @@ namespace Vlkrt
         VkDescriptorPool m_DescriptorPool{ VK_NULL_HANDLE };
         VkDescriptorSet m_DescriptorSet{ VK_NULL_HANDLE };
 
-        // Scene buffers
+        // Scene buffers (triangle geometry)
         VkBuffer m_VertexBuffer{ VK_NULL_HANDLE };
         VkDeviceMemory m_VertexMemory{ VK_NULL_HANDLE };
         VkDeviceSize m_VertexBufferSize{ 0 };
@@ -138,6 +194,27 @@ namespace Vlkrt
         VkDeviceMemory m_LightMemory{ VK_NULL_HANDLE };
         VkDeviceSize m_LightBufferSize{ 0 };
 
+        // AABB procedural geometry buffers
+        VkBuffer m_AABBTransformBuffer{ VK_NULL_HANDLE };
+        VkDeviceMemory m_AABBTransformMemory{ VK_NULL_HANDLE };
+        VkDeviceSize m_AABBTransformBufferSize{ 0 };
+
+        VkBuffer m_AABBMaterialBuffer{ VK_NULL_HANDLE };
+        VkDeviceMemory m_AABBMaterialMemory{ VK_NULL_HANDLE };
+        VkDeviceSize m_AABBMaterialBufferSize{ 0 };
+
+        // Scene UBO (binding 11 — replaces push constants)
+        VkBuffer m_SceneUBOBuffer{ VK_NULL_HANDLE };
+        VkDeviceMemory m_SceneUBOMemory{ VK_NULL_HANDLE };
+
+        // Temporal accumulation image (binding 10, rgba32f)
+        std::shared_ptr<Walnut::Image> m_AccumImage;
+
+        // Frame counter for temporal accumulation (resets on scene change)
+        uint32_t m_FrameIndex{ 0 };
+        // Global tick counter for PRNG seeds (never resets)
+        uint32_t m_GlobalTick{ 0 };
+
         // Dirty tracking for incremental GPU updates
         std::vector<uint32_t> m_DirtyMeshIndices;   // Mesh indices that changed
         std::vector<uint32_t> m_DirtyLightIndices;  // Light indices that changed
@@ -154,8 +231,12 @@ namespace Vlkrt
         size_t m_LastIndexCount{ 0 };
         size_t m_LastMaterialCount{ 0 };
         size_t m_LastLightCount{ 0 };
+        uint32_t m_LastProceduralCount{ UINT32_MAX };  // UINT32_MAX forces initial creation
         bool m_SceneValid{ false };
         bool m_FirstFrame{ true };
+        bool m_AccumFirstFrame{ true };
+        glm::mat4 m_LastCameraView{ glm::mat4(0.0f) }; // for temporal accumulation reset on camera move
+        float m_ElapsedTime{ 0.0f };
 
         // Texture cache
         std::unordered_map<std::string, std::shared_ptr<Walnut::Image>> m_TextureCache;

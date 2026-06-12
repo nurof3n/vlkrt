@@ -20,8 +20,10 @@ namespace Vlkrt
     {
         std::unordered_map<SceneEntity*, uint32_t> EntityToMeshIdx;
         std::unordered_map<SceneEntity*, uint32_t> EntityToLightIdx;
+        std::unordered_map<SceneEntity*, uint32_t> EntityToProceduralIdx;
         std::vector<SceneEntity*>                  MeshIndexToEntity;
         std::vector<SceneEntity*>                  LightIndexToEntity;
+        std::vector<SceneEntity*>                  ProceduralIndexToEntity;
     };
 
     /**
@@ -50,7 +52,7 @@ namespace Vlkrt
         static void FlattenEntity(const SceneEntity& entity, const glm::mat4& parentWorldTransform, Scene& outScene,
                 const std::unordered_map<std::string, int>& materialMap);
         static void PopulateMappingRecursive(const SceneEntity& entity, const Scene& scene, HierarchyMapping& mapping,
-                uint32_t& meshIndex, uint32_t& lightIndex);
+                uint32_t& meshIndex, uint32_t& lightIndex, uint32_t& proceduralIndex);
 
         static void SaveEntityToYAML(std::ofstream& file, const SceneEntity& entity, int indentLevel);
     };

@@ -45,22 +45,43 @@ namespace Vlkrt
                         mat.Albedo  = glm::vec3(albedo[0], albedo[1], albedo[2]);
                     }
 
-                    if (matNode["shininess"]) { mat.Shininess = matNode["shininess"].as<float>(); }
-                    else if (matNode["roughness"]) {
-                        // Legacy
-                        float r       = matNode["roughness"].as<float>();
-                        mat.Shininess = (1.0f - r) * 128.0f;
+                    // Disney BSDF parameters (with Phong fallback for old YAML files)
+                    if (matNode["roughness"]) { mat.Roughness = matNode["roughness"].as<float>(); }
+                    else if (matNode["shininess"]) {
+                        float s       = matNode["shininess"].as<float>();
+                        mat.Roughness = 1.0f - glm::clamp(s / 128.0f, 0.0f, 1.0f);
                     }
 
-                    if (matNode["specular"]) {
-                        auto spec    = matNode["specular"].as<std::vector<float>>();
-                        mat.Specular = glm::vec3(spec[0], spec[1], spec[2]);
+                    if (matNode["metallic"]) { mat.Metallic = matNode["metallic"].as<float>(); }
+                    else if (matNode["specular"]) {
+                        // Legacy: convert greyscale specular to metallic
+                        auto spec  = matNode["specular"].as<std::vector<float>>();
+                        mat.Metallic = (spec[0] + spec[1] + spec[2]) / 3.0f;
                     }
-                    else if (matNode["metallic"]) {
-                        // Legacy
-                        float m      = matNode["metallic"].as<float>();
-                        mat.Specular = glm::vec3(m);
+
+                    if (matNode["subsurface"])            { mat.Subsurface           = matNode["subsurface"].as<float>(); }
+                    if (matNode["anisotropic"])           { mat.Anisotropic          = matNode["anisotropic"].as<float>(); }
+                    if (matNode["sheen"])                 { mat.Sheen                = matNode["sheen"].as<float>(); }
+                    if (matNode["sheen_tint"])            { mat.SheenTint            = matNode["sheen_tint"].as<float>(); }
+                    if (matNode["clearcoat"])             { mat.Clearcoat            = matNode["clearcoat"].as<float>(); }
+                    if (matNode["clearcoat_gloss"])       { mat.ClearcoatGloss       = matNode["clearcoat_gloss"].as<float>(); }
+                    if (matNode["specular_tint"])         { mat.SpecularTint         = matNode["specular_tint"].as<float>(); }
+                    if (matNode["specular_transmission"]) { mat.SpecularTransmission = matNode["specular_transmission"].as<float>(); }
+                    if (matNode["eta"])                   { mat.Eta                  = matNode["eta"].as<float>(); }
+                    if (matNode["at_distance"])           { mat.AtDistance           = matNode["at_distance"].as<float>(); }
+                    if (matNode["step_scale"])            { mat.StepScale            = matNode["step_scale"].as<float>(); }
+
+                    if (matNode["emission"]) {
+                        auto em     = matNode["emission"].as<std::vector<float>>();
+                        mat.Emission = glm::vec3(em[0], em[1], em[2]);
                     }
+                    if (matNode["extinction"]) {
+                        auto ex      = matNode["extinction"].as<std::vector<float>>();
+                        mat.Extinction = glm::vec3(ex[0], ex[1], ex[2]);
+                    }
+                    if (matNode["at_distance"])  { mat.AtDistance    = matNode["at_distance"].as<float>(); }
+                    if (matNode["light_index"])  { mat.LightIndex     = matNode["light_index"].as<int32_t>(); }
+                    if (matNode["material_index"]) { mat.MaterialIndex = matNode["material_index"].as<uint32_t>(); }
 
                     if (matNode["texture"]) { mat.TextureFilename = matNode["texture"].as<std::string>(); }
 
@@ -87,8 +108,34 @@ namespace Vlkrt
                 }
             }
 
-            WL_INFO_TAG("SceneLoader", "Scene loaded - Materials: {}, Meshes: {}, Lights: {}", scene.Materials.size(),
-                    scene.StaticMeshes.size(), scene.Lights.size());
+            // Parse optional scene settings
+            if (root["scene_settings"]) {
+                const auto& ss = root["scene_settings"];
+                if (ss["background_color"]) {
+                    auto bg = ss["background_color"].as<std::vector<float>>();
+                    scene.BackgroundColor = glm::vec3(bg[0], bg[1], bg[2]);
+                }
+                if (ss["max_recursion_depth"])        { scene.MaxRecursionDepth          = ss["max_recursion_depth"].as<uint32_t>(); }
+                if (ss["max_shadow_recursion_depth"])  { scene.MaxShadowRecursionDepth    = ss["max_shadow_recursion_depth"].as<uint32_t>(); }
+                if (ss["path_sqrt_samples"])           { scene.PathSqrtSamplesPerPixel    = ss["path_sqrt_samples"].as<uint32_t>(); }
+                if (ss["russian_roulette_depth"])      { scene.RussianRouletteDepth       = ss["russian_roulette_depth"].as<uint32_t>(); }
+                if (ss["apply_jitter"])                { scene.ApplyJitter                = ss["apply_jitter"].as<bool>(); }
+                if (ss["anisotropic_bsdf"])            { scene.AnisotropicBSDF            = ss["anisotropic_bsdf"].as<bool>(); }
+                if (ss["scene_index"])                 { scene.SceneIndex                 = ss["scene_index"].as<uint32_t>(); }
+                if (ss["camera_position"]) {
+                    auto cp = ss["camera_position"].as<std::vector<float>>();
+                    scene.CameraPosition = glm::vec3(cp[0], cp[1], cp[2]);
+                    scene.HasCameraHint  = true;
+                }
+                if (ss["camera_target"]) {
+                    auto ct = ss["camera_target"].as<std::vector<float>>();
+                    scene.CameraTarget  = glm::vec3(ct[0], ct[1], ct[2]);
+                    scene.HasCameraHint = true;
+                }
+            }
+
+            WL_INFO_TAG("SceneLoader", "Scene loaded - Materials: {}, Meshes: {}, Lights: {}, Procedurals: {}",
+                    scene.Materials.size(), scene.StaticMeshes.size(), scene.Lights.size(), scene.ProceduralEntities.size());
 
             return { scene, sceneRoot };
         }
@@ -121,6 +168,8 @@ namespace Vlkrt
                 entity.Type = EntityType::Light;
             else if (typeStr == "camera")
                 entity.Type = EntityType::Camera;
+            else if (typeStr == "procedural")
+                entity.Type = EntityType::Procedural;
         }
 
         // Parse mesh-specific data
@@ -128,17 +177,35 @@ namespace Vlkrt
 
         if (entityNode["material"]) { entity.MeshData.MaterialIndex = entityNode["material"].as<int>(); }
 
+        // Parse procedural-specific data
+        if (entity.Type == EntityType::Procedural) {
+            if (entityNode["material"])
+                entity.ProceduralData.MaterialIndex = entityNode["material"].as<int>();
+            if (entityNode["procedural_analytic"])
+                entity.ProceduralData.IsAnalytic = entityNode["procedural_analytic"].as<bool>();
+            if (entityNode["procedural_type"])
+                entity.ProceduralData.PrimitiveType = entityNode["procedural_type"].as<uint32_t>();
+        }
+
         // Parse light-specific data
-        if (entityNode["light_color"]) {
-            auto color             = entityNode["light_color"].as<std::vector<float>>();
-            entity.LightData.Color = glm::vec3(color[0], color[1], color[2]);
+        if (entityNode["light_emission"]) {
+            auto em                  = entityNode["light_emission"].as<std::vector<float>>();
+            entity.LightData.Emission = glm::vec3(em[0], em[1], em[2]);
+        }
+        else if (entityNode["light_color"]) {
+            // backward compat
+            auto color               = entityNode["light_color"].as<std::vector<float>>();
+            entity.LightData.Emission = glm::vec3(color[0], color[1], color[2]);
         }
 
         if (entityNode["light_intensity"]) { entity.LightData.Intensity = entityNode["light_intensity"].as<float>(); }
 
-        if (entityNode["light_type"]) { entity.LightData.Type = entityNode["light_type"].as<float>(); }
+        if (entityNode["light_type"]) {
+            entity.LightData.Type = static_cast<LightType>(entityNode["light_type"].as<uint32_t>());
+        }
 
-        if (entityNode["light_radius"]) { entity.LightData.Radius = entityNode["light_radius"].as<float>(); }
+        if (entityNode["light_size"]) { entity.LightData.Size = entityNode["light_size"].as<float>(); }
+        else if (entityNode["light_radius"]) { entity.LightData.Size = entityNode["light_radius"].as<float>(); }
 
         // Parse transform
         if (entityNode["transform"]) { entity.LocalTransform = ParseTransform(entityNode["transform"]); }
@@ -223,10 +290,10 @@ namespace Vlkrt
         else if (entity.Type == EntityType::Light) {
             // Add light to scene
             Light light;
-            light.Color     = entity.LightData.Color;
+            light.Emission  = entity.LightData.Emission;
             light.Intensity = entity.LightData.Intensity;
             light.Type      = entity.LightData.Type;
-            light.Radius    = entity.LightData.Radius;
+            light.Size      = entity.LightData.Size;
 
             // Compute world position and direction
             light.Position = glm::vec3(worldTransform[3]);  // Translation component
@@ -236,6 +303,15 @@ namespace Vlkrt
             light.Direction            = glm::normalize(glm::vec3(worldTransform * glm::vec4(defaultDirection, 0.0f)));
 
             outScene.Lights.push_back(light);
+        }
+        else if (entity.Type == EntityType::Procedural) {
+            ProceduralEntity pe;
+            pe.Name          = entity.Name;
+            pe.Transform     = worldTransform;
+            pe.IsAnalytic    = entity.ProceduralData.IsAnalytic;
+            pe.PrimitiveType = entity.ProceduralData.PrimitiveType;
+            pe.MaterialIndex = entity.ProceduralData.MaterialIndex;
+            outScene.ProceduralEntities.push_back(pe);
         }
         // Empty and Camera types don't add to scene, just pass through to children
 
@@ -261,9 +337,19 @@ namespace Vlkrt
             for (const auto& mat : scene.Materials) {
                 file << "- name: " << mat.Name << "\n";
                 file << "  albedo: [ " << mat.Albedo.x << ", " << mat.Albedo.y << ", " << mat.Albedo.z << " ]\n";
-                file << "  shininess: " << mat.Shininess << "\n";
-                file << "  specular: [ " << mat.Specular.x << ", " << mat.Specular.y << ", " << mat.Specular.z
-                     << " ]\n";
+                file << "  roughness: " << mat.Roughness << "\n";
+                file << "  metallic: " << mat.Metallic << "\n";
+                if (mat.Subsurface > 0.0f)            file << "  subsurface: " << mat.Subsurface << "\n";
+                if (mat.Anisotropic > 0.0f)           file << "  anisotropic: " << mat.Anisotropic << "\n";
+                if (mat.Sheen > 0.0f)                 file << "  sheen: " << mat.Sheen << "\n";
+                if (mat.Clearcoat > 0.0f)             file << "  clearcoat: " << mat.Clearcoat << "\n";
+                if (mat.SpecularTransmission > 0.0f)  file << "  specular_transmission: " << mat.SpecularTransmission << "\n";
+                if (mat.Eta != 1.5f)                  file << "  eta: " << mat.Eta << "\n";
+                glm::vec3 em = mat.Emission;
+                if (em.x > 0 || em.y > 0 || em.z > 0)
+                    file << "  emission: [ " << em.x << ", " << em.y << ", " << em.z << " ]\n";
+                if (!mat.TextureFilename.empty())      file << "  texture: " << mat.TextureFilename << "\n";
+                if (mat.Tiling != 1.0f)               file << "  tiling: " << mat.Tiling << "\n";
             }
 
             // Write entities section with meshes and lights as children
@@ -315,11 +401,11 @@ namespace Vlkrt
                      << " ]\n";
                 file << "      rotation: [ 0, 0, 0, 1 ]\n";
                 file << "      scale: [ 1, 1, 1 ]\n";
-                file << "    light_color: [ " << light.Color.x << ", " << light.Color.y << ", " << light.Color.z
+                file << "    light_emission: [ " << light.Emission.x << ", " << light.Emission.y << ", " << light.Emission.z
                      << " ]\n";
                 file << "    light_intensity: " << light.Intensity << "\n";
-                file << "    light_type: " << (int) light.Type << "\n";
-                file << "    light_radius: " << light.Radius << "\n";
+                file << "    light_type: " << static_cast<uint32_t>(light.Type) << "\n";
+                file << "    light_size: " << light.Size << "\n";
             }
 
             file.close();
@@ -335,14 +421,15 @@ namespace Vlkrt
     HierarchyMapping SceneLoader::CreateMapping(const SceneEntity& rootEntity, const Scene& scene)
     {
         HierarchyMapping mapping;
-        uint32_t meshIndex  = 0;
-        uint32_t lightIndex = 0;
-        PopulateMappingRecursive(rootEntity, scene, mapping, meshIndex, lightIndex);
+        uint32_t meshIndex       = 0;
+        uint32_t lightIndex      = 0;
+        uint32_t proceduralIndex = 0;
+        PopulateMappingRecursive(rootEntity, scene, mapping, meshIndex, lightIndex, proceduralIndex);
         return mapping;
     }
 
     void SceneLoader::PopulateMappingRecursive(const SceneEntity& entity, const Scene& scene, HierarchyMapping& mapping,
-            uint32_t& meshIndex, uint32_t& lightIndex)
+            uint32_t& meshIndex, uint32_t& lightIndex, uint32_t& proceduralIndex)
     {
         // Map this entity to its index in the flat arrays
         if (entity.Type == EntityType::Mesh) {
@@ -359,10 +446,17 @@ namespace Vlkrt
                 lightIndex++;
             }
         }
+        else if (entity.Type == EntityType::Procedural) {
+            if (proceduralIndex < scene.ProceduralEntities.size()) {
+                mapping.EntityToProceduralIdx[const_cast<SceneEntity*>(&entity)] = proceduralIndex;
+                mapping.ProceduralIndexToEntity.push_back(const_cast<SceneEntity*>(&entity));
+                proceduralIndex++;
+            }
+        }
 
         // Recursively map children
         for (const auto& child : entity.Children) {
-            PopulateMappingRecursive(child, scene, mapping, meshIndex, lightIndex);
+            PopulateMappingRecursive(child, scene, mapping, meshIndex, lightIndex, proceduralIndex);
         }
     }
 
@@ -423,9 +517,17 @@ namespace Vlkrt
             for (const auto& mat : scene.Materials) {
                 file << "- name: " << mat.Name << "\n";
                 file << "  albedo: [ " << mat.Albedo.x << ", " << mat.Albedo.y << ", " << mat.Albedo.z << " ]\n";
-                file << "  shininess: " << mat.Shininess << "\n";
-                file << "  specular: [ " << mat.Specular.x << ", " << mat.Specular.y << ", " << mat.Specular.z
-                     << " ]\n";
+                file << "  roughness: " << mat.Roughness << "\n";
+                file << "  metallic: " << mat.Metallic << "\n";
+                if (mat.Subsurface > 0.0f)           file << "  subsurface: " << mat.Subsurface << "\n";
+                if (mat.Anisotropic > 0.0f)          file << "  anisotropic: " << mat.Anisotropic << "\n";
+                if (mat.Sheen > 0.0f)                file << "  sheen: " << mat.Sheen << "\n";
+                if (mat.Clearcoat > 0.0f)            file << "  clearcoat: " << mat.Clearcoat << "\n";
+                if (mat.SpecularTransmission > 0.0f) file << "  specular_transmission: " << mat.SpecularTransmission << "\n";
+                if (mat.Eta != 1.5f)                 file << "  eta: " << mat.Eta << "\n";
+                glm::vec3 em = mat.Emission;
+                if (em.x > 0 || em.y > 0 || em.z > 0)
+                    file << "  emission: [ " << em.x << ", " << em.y << ", " << em.z << " ]\n";
 
                 if (!mat.TextureFilename.empty()) {
                     file << "  texture: " << mat.TextureFilename << "\n";
@@ -486,21 +588,21 @@ namespace Vlkrt
 
         // Write light-specific data
         if (entity.Type == EntityType::Light) {
-            file << indent << "  light_color: [ " << entity.LightData.Color.x << ", " << entity.LightData.Color.y
-                 << ", " << entity.LightData.Color.z << " ]\n";
+            file << indent << "  light_emission: [ " << entity.LightData.Emission.x << ", " << entity.LightData.Emission.y
+                 << ", " << entity.LightData.Emission.z << " ]\n";
             file << indent << "  light_intensity: " << entity.LightData.Intensity << "\n";
-            file << indent << "  light_type: " << (int) entity.LightData.Type << "\n";
+            file << indent << "  light_type: " << static_cast<uint32_t>(entity.LightData.Type) << "\n";
 
             // For directional lights, save the direction derived from rotation
-            if (entity.LightData.Type < 0.5f) {  // Directional light
+            if (entity.LightData.Type == LightType::Directional) {
                 glm::vec3 defaultDirection = glm::vec3(0.0f, 0.0f, -1.0f);
                 glm::vec3 direction        = glm::normalize(
                         glm::vec3(glm::mat4_cast(entity.LocalTransform.Rotation) * glm::vec4(defaultDirection, 0.0f)));
                 file << indent << "  light_direction: [ " << direction.x << ", " << direction.y << ", " << direction.z
                      << " ]\n";
             }
-            else {  // Point light
-                file << indent << "  light_radius: " << entity.LightData.Radius << "\n";
+            else {  // Square area light
+                file << indent << "  light_size: " << entity.LightData.Size << "\n";
             }
         }
 

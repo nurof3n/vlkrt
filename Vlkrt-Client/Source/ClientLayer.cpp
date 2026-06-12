@@ -135,9 +135,10 @@ namespace Vlkrt
             m_NetworkDataChanged = false;
         }
 
-        // Sync hierarchy changes to flat arrays
+        // Sync hierarchy changes to flat arrays; only invalidate if data changed
+        m_SceneDirty = false;
         FlattenHierarchyToScene(m_SceneRoot, glm::mat4(1.0f));
-        m_Renderer.InvalidateScene();
+        if (m_SceneDirty) m_Renderer.InvalidateScene();
     }
 
     void ClientLayer::OnRender()
@@ -168,8 +169,8 @@ namespace Vlkrt
             auto image = m_Renderer.GetFinalImage();
             if (image) {
                 ImGui::GetBackgroundDrawList()->AddImage(image->GetDescriptorSet(), viewport->Pos,
-                        ImVec2(viewport->Pos.x + viewport->Size.x, viewport->Pos.y + viewport->Size.y), ImVec2(0, 1),
-                        ImVec2(1, 0));
+                        ImVec2(viewport->Pos.x + viewport->Size.x, viewport->Pos.y + viewport->Size.y),
+                        ImVec2(0, 0), ImVec2(1, 1));
             }
 
             // Stats panel overlay
@@ -177,6 +178,111 @@ namespace Vlkrt
             ImGui::Text("Last render: %.3fms", m_LastRenderTime);
             ImGui::Text("Player ID: %u", m_PlayerID);
             ImGui::Text("Players: %zu", m_PlayerData.size());
+            ImGui::End();
+
+            // Raytracing settings panel
+            ImGui::Begin("Raytracing Settings");
+            {
+                // Rendering mode
+                const char* modeNames[] = { "Path Tracing", "Path Tracing Temporal" };
+                int rtMode = (m_Scene.RaytracingType == RaytracingMode::PathTracingTemporal) ? 1 : 0;
+                if (ImGui::Combo("Mode", &rtMode, modeNames, 2)) {
+                    m_Scene.RaytracingType = (rtMode == 1)
+                        ? RaytracingMode::PathTracingTemporal
+                        : RaytracingMode::PathTracing;
+                    m_Renderer.ResetAccumulation();
+                }
+
+                // Importance sampling
+                const char* isNames[] = { "Uniform", "Cosine", "BSDF" };
+                int isMode = (int)m_Scene.ImportanceSampling;
+                if (ImGui::Combo("Importance Sampling", &isMode, isNames, 3)) {
+                    m_Scene.ImportanceSampling = (ImportanceSamplingMode)isMode;
+                    m_Renderer.ResetAccumulation();
+                }
+
+                ImGui::Separator();
+
+                // Path tracing parameters
+                static constexpr int k_MaxRayDepth = 12;
+                int maxDepth = (int)m_Scene.MaxRecursionDepth;
+                if (ImGui::SliderInt("Max Ray Depth", &maxDepth, 1, k_MaxRayDepth)) {
+                    m_Scene.MaxRecursionDepth = (uint32_t)maxDepth;
+                    uint32_t maxAllowedShadow = m_Scene.MaxRecursionDepth;
+                    if (m_Scene.MaxShadowRecursionDepth > maxAllowedShadow)
+                        m_Scene.MaxShadowRecursionDepth = maxAllowedShadow;
+                    m_Renderer.ResetAccumulation();
+                }
+
+                int maxShadowDepth = (int)m_Scene.MaxShadowRecursionDepth;
+                if (ImGui::SliderInt("Max Shadow Depth", &maxShadowDepth, 1, (int)m_Scene.MaxRecursionDepth)) {
+                    m_Scene.MaxShadowRecursionDepth = (uint32_t)maxShadowDepth;
+                    m_Renderer.ResetAccumulation();
+                }
+
+                int sqrtSamples = (int)m_Scene.PathSqrtSamplesPerPixel;
+                if (ImGui::SliderInt("Sqrt SPP", &sqrtSamples, 1, 8)) {
+                    m_Scene.PathSqrtSamplesPerPixel = (uint32_t)sqrtSamples;
+                    m_Renderer.ResetAccumulation();
+                }
+
+                int rrDepth = (int)m_Scene.RussianRouletteDepth;
+                if (ImGui::SliderInt("Russian Roulette Depth", &rrDepth, 1, 16)) {
+                    m_Scene.RussianRouletteDepth = (uint32_t)rrDepth;
+                    m_Renderer.ResetAccumulation();
+                }
+
+                if (ImGui::Checkbox("Apply Jitter", &m_Scene.ApplyJitter))           m_Renderer.ResetAccumulation();
+                if (ImGui::Checkbox("One Light Sample", &m_Scene.OnlyOneLightSample)) m_Renderer.ResetAccumulation();
+                if (ImGui::Checkbox("Anisotropic BSDF", &m_Scene.AnisotropicBSDF))   m_Renderer.ResetAccumulation();
+
+                // PBR Showcase: adjustable sun direction
+                if (m_Scene.SceneIndex == SceneFactory::SCENE_PBR_SHOWCASE && !m_Scene.Lights.empty()) {
+                    ImGui::Separator(); ImGui::Text("Sun Controls");
+                    glm::vec3& sunDir = m_Scene.Lights[0].Direction;
+                    float elevation = glm::degrees(glm::asin(glm::clamp(-sunDir.y, -1.0f, 1.0f)));
+                    float azimuth   = glm::degrees(glm::atan(sunDir.z, sunDir.x));
+                    bool sunChanged = false;
+                    sunChanged |= ImGui::SliderFloat("Elevation", &elevation, -90.0f, 90.0f);
+                    sunChanged |= ImGui::SliderFloat("Azimuth",   &azimuth,  -180.0f, 180.0f);
+                    if (sunChanged) {
+                        float el = glm::radians(elevation);
+                        float az = glm::radians(azimuth);
+                        sunDir = glm::normalize(glm::vec3(
+                            glm::cos(el) * glm::cos(az),
+                            -glm::sin(el),
+                            glm::cos(el) * glm::sin(az)));
+                        m_Renderer.ResetAccumulation();
+                    }
+                    if (ImGui::SliderFloat("Sun Intensity", &m_Scene.Lights[0].Intensity, 0.0f, 10.0f))
+                        m_Renderer.ResetAccumulation();
+                    ImGui::Separator();
+                }
+
+                // Demo: background color
+                if (m_Scene.SceneIndex == SceneFactory::SCENE_DEMO) {
+                    ImGui::Separator(); ImGui::Text("Background");
+                    if (ImGui::ColorEdit3("Color##bg", &m_Scene.BackgroundColor.x))
+                        m_Renderer.ResetAccumulation();
+                    ImGui::Separator();
+                } else if (m_Scene.SceneIndex != SceneFactory::SCENE_PBR_SHOWCASE) {
+                    // Generic background color for other scenes (e.g. Cornell Box / YAML)
+                    if (ImGui::ColorEdit3("Background", &m_Scene.BackgroundColor.x))
+                        m_Renderer.ResetAccumulation();
+                    ImGui::Separator();
+                }
+
+                if (ImGui::Button("Reset Temporal Accumulation"))
+                    m_Renderer.ResetAccumulation();
+
+                // Show accumulated frame count in temporal mode
+                if (m_Scene.RaytracingType == RaytracingMode::PathTracingTemporal) {
+                    uint32_t frames = m_Renderer.GetAccumulatedFrameCount();
+                    uint32_t spp    = m_Scene.PathSqrtSamplesPerPixel * m_Scene.PathSqrtSamplesPerPixel;
+                    ImGui::Text("Accumulated frames: %u  (%.1f%% of %u SPP cycle)",
+                                frames, (spp > 0 ? 100.0f * (frames % spp) / (float)spp : 0.0f), spp);
+                }
+            }
             ImGui::End();
 
             // Chat panel
@@ -251,8 +357,38 @@ namespace Vlkrt
         m_CurrentScene     = sceneName;
         m_SelectedScene    = sceneName;
 
-        // Create mapping from hierarchy to flat arrays for incremental updates
+        // Apply camera hint from YAML scene_settings if present
+        if (m_Scene.HasCameraHint) {
+            m_Camera.SetPosition(m_Scene.CameraPosition);
+            m_Camera.SetTarget(m_Scene.CameraTarget);
+        }
+
         m_HierarchyMapping = SceneLoader::CreateMapping(m_SceneRoot, m_Scene);
+        m_Renderer.ResetAccumulation();
+    }
+
+    void ClientLayer::LoadFactoryScene(uint32_t sceneIndex)
+    {
+        SceneFactory::CameraHint cam;
+        switch (sceneIndex) {
+            case SceneFactory::SCENE_CORNELL_BOX:
+                m_Scene = SceneFactory::CreateCornellBox(&cam);
+                break;
+            case SceneFactory::SCENE_DEMO:
+                m_Scene = SceneFactory::CreateDemo(&cam);
+                break;
+            case SceneFactory::SCENE_PBR_SHOWCASE:
+                m_Scene = SceneFactory::CreatePbrShowcase(&cam);
+                break;
+            default: return;
+        }
+        // Move camera to canonical position
+        m_Camera.SetPosition(cam.Eye);
+        m_Camera.SetTarget(cam.Target);
+        // Clear hierarchy — factory scenes have no YAML hierarchy
+        m_SceneRoot = SceneEntity{};
+        m_HierarchyMapping = HierarchyMapping{};
+        m_Renderer.ResetAccumulation();
     }
 
     void ClientLayer::OnDataReceived(const Walnut::Buffer& data)
@@ -297,14 +433,14 @@ namespace Vlkrt
                 SceneEntity* lightEntity = m_HierarchyMapping.LightIndexToEntity[i];
                 if (lightEntity) {
                     // Sync editable light properties from flat array to hierarchy
-                    lightEntity->LightData.Color     = m_Scene.Lights[i].Color;
+                    lightEntity->LightData.Emission  = m_Scene.Lights[i].Emission;
                     lightEntity->LightData.Intensity = m_Scene.Lights[i].Intensity;
                     lightEntity->LightData.Type      = m_Scene.Lights[i].Type;
-                    lightEntity->LightData.Radius    = m_Scene.Lights[i].Radius;
+                    lightEntity->LightData.Size      = m_Scene.Lights[i].Size;
 
                     // For directional lights, convert direction back to rotation quaternion
                     // (Position is not used for directional lights)
-                    if (m_Scene.Lights[i].Type < 0.5f) {
+                    if (m_Scene.Lights[i].Type == LightType::Directional) {
                         glm::vec3 desiredDirection = glm::normalize(m_Scene.Lights[i].Direction);
                         glm::vec3 defaultDirection = glm::vec3(0.0f, 0.0f, -1.0f);
                         glm::vec3 axis             = glm::cross(defaultDirection, desiredDirection);
@@ -451,23 +587,25 @@ namespace Vlkrt
         switch (entity.Type) {
             case EntityType::Light: {
                 // Light type
-                bool isDirectional       = entity.LightData.Type < 0.5f;
-                const char* lightTypes[] = { "Directional", "Point" };
-                int selectedType         = isDirectional ? 0 : 1;
+                const char* lightTypes[] = { "Square", "Directional" };
+                int selectedType         = static_cast<int>(entity.LightData.Type);
                 if (ImGui::Combo(
                             ("Light Type##" + idStr).c_str(), &selectedType, lightTypes, IM_ARRAYSIZE(lightTypes))) {
-                    entity.LightData.Type = selectedType == 0 ? 0.0f : 1.0f;
+                    entity.LightData.Type = static_cast<LightType>(selectedType);
                 }
 
-                // Color picker
-                ImGui::ColorEdit3(("Color##" + idStr).c_str(), &entity.LightData.Color[0]);
+                // Emission colour
+                if (ImGui::ColorEdit3(("Emission##" + idStr).c_str(), glm::value_ptr(entity.LightData.Emission)))
+                    m_Renderer.ResetAccumulation();
 
                 // Intensity control
-                ImGui::DragFloat(("Intensity##" + idStr).c_str(), &entity.LightData.Intensity, 0.01f, 0.0f, 10.0f);
+                if (ImGui::DragFloat(("Intensity##" + idStr).c_str(), &entity.LightData.Intensity, 0.01f, 0.0f, 10.0f))
+                    m_Renderer.ResetAccumulation();
 
-                // Type-specific properties
-                if (!isDirectional) {
-                    ImGui::DragFloat(("Radius##" + idStr).c_str(), &entity.LightData.Radius, 0.1f, 0.1f, 100.0f);
+                // Size for square lights
+                if (entity.LightData.Type == LightType::Square) {
+                    if (ImGui::DragFloat(("Size##" + idStr).c_str(), &entity.LightData.Size, 0.05f, 0.01f, 50.0f))
+                        m_Renderer.ResetAccumulation();
                 }
                 break;
             }
@@ -487,18 +625,23 @@ namespace Vlkrt
                     ImGui::Separator();
                     ImGui::Text("Material: %s", mat.Name.c_str());
 
-                    // Material properties
+                    // Disney BSDF properties
                     if (ImGui::ColorEdit3(("Albedo##" + idStr).c_str(), glm::value_ptr(mat.Albedo)))
-                        m_Renderer.InvalidateScene();
-                    if (ImGui::ColorEdit3(("Specular##" + idStr).c_str(), glm::value_ptr(mat.Specular)))
-                        m_Renderer.InvalidateScene();
-                    if (ImGui::DragFloat(("Shininess##" + idStr).c_str(), &mat.Shininess, 1.0f, 1.0f, 512.0f))
-                        m_Renderer.InvalidateScene();
+                        m_Renderer.ResetAccumulation();
+                    if (ImGui::SliderFloat(("Roughness##" + idStr).c_str(), &mat.Roughness, 0.0f, 1.0f))
+                        m_Renderer.ResetAccumulation();
+                    if (ImGui::SliderFloat(("Metallic##" + idStr).c_str(), &mat.Metallic, 0.0f, 1.0f))
+                        m_Renderer.ResetAccumulation();
+                    if (ImGui::SliderFloat(("Spec. Trans.##" + idStr).c_str(), &mat.SpecularTransmission, 0.0f, 1.0f))
+                        m_Renderer.ResetAccumulation();
+                    if (ImGui::SliderFloat(("Clearcoat##" + idStr).c_str(), &mat.Clearcoat, 0.0f, 1.0f))
+                        m_Renderer.ResetAccumulation();
+                    if (ImGui::SliderFloat(("Eta##" + idStr).c_str(), &mat.Eta, 1.0f, 3.0f))
+                        m_Renderer.ResetAccumulation();
 
                     // Tiling factor
-                    if (ImGui::DragFloat(("Tiling##" + idStr).c_str(), &mat.Tiling, 0.1f, 0.01f, 100.0f)) {
-                        m_Renderer.InvalidateScene();
-                    }
+                    if (ImGui::DragFloat(("Tiling##" + idStr).c_str(), &mat.Tiling, 0.1f, 0.01f, 100.0f))
+                        m_Renderer.ResetAccumulation();
 
                     ImGui::Text("Texture");
 
@@ -510,12 +653,12 @@ namespace Vlkrt
                                 mat.TextureFilename.empty() ? "(none)" : mat.TextureFilename.c_str())) {
                         if (ImGui::Selectable("(none)", mat.TextureFilename.empty())) {
                             mat.TextureFilename.clear();
-                            m_Renderer.InvalidateScene();
+                            m_Renderer.ResetAccumulation();
                         }
                         for (const auto& textureName : m_AvailableTextures) {
                             if (ImGui::Selectable(textureName.c_str(), mat.TextureFilename == textureName)) {
                                 mat.TextureFilename = textureName;
-                                m_Renderer.InvalidateScene();
+                                m_Renderer.ResetAccumulation();
                             }
                         }
                         ImGui::EndCombo();
@@ -540,10 +683,49 @@ namespace Vlkrt
                                 }
                             }
 
-                            m_Renderer.InvalidateScene();
+                            m_Renderer.ResetAccumulation();
                         }
                     }
                     ImGui::EndCombo();
+                }
+                break;
+            }
+
+            case EntityType::Procedural: {
+                int matIdx = entity.ProceduralData.MaterialIndex;
+                if (ImGui::DragInt(("Material Index##" + idStr).c_str(), &matIdx, 1.0f, 0,
+                            (int) m_Scene.Materials.size() - 1)) {
+                    entity.ProceduralData.MaterialIndex = matIdx;
+                    m_Renderer.ResetAccumulation();
+                }
+
+                if (matIdx >= 0 && matIdx < (int) m_Scene.Materials.size()) {
+                    Material& mat = m_Scene.Materials[matIdx];
+
+                    ImGui::Separator();
+                    ImGui::Text("Material: %s", mat.Name.c_str());
+
+                    if (ImGui::ColorEdit3(("Albedo##" + idStr).c_str(), glm::value_ptr(mat.Albedo)))
+                        m_Renderer.ResetAccumulation();
+                    if (ImGui::SliderFloat(("Roughness##" + idStr).c_str(), &mat.Roughness, 0.0f, 1.0f))
+                        m_Renderer.ResetAccumulation();
+                    if (ImGui::SliderFloat(("Metallic##" + idStr).c_str(), &mat.Metallic, 0.0f, 1.0f))
+                        m_Renderer.ResetAccumulation();
+                    if (ImGui::SliderFloat(("Spec. Trans.##" + idStr).c_str(), &mat.SpecularTransmission, 0.0f, 1.0f))
+                        m_Renderer.ResetAccumulation();
+                    if (ImGui::SliderFloat(("Clearcoat##" + idStr).c_str(), &mat.Clearcoat, 0.0f, 1.0f))
+                        m_Renderer.ResetAccumulation();
+                    if (ImGui::SliderFloat(("Eta##" + idStr).c_str(), &mat.Eta, 1.0f, 3.0f))
+                        m_Renderer.ResetAccumulation();
+                }
+
+                if (ImGui::Checkbox(("Analytic##" + idStr).c_str(), &entity.ProceduralData.IsAnalytic))
+                    m_Renderer.ResetAccumulation();
+
+                int primitiveType = (int) entity.ProceduralData.PrimitiveType;
+                if (ImGui::DragInt(("Primitive Type##" + idStr).c_str(), &primitiveType, 1.0f, 0, 8)) {
+                    entity.ProceduralData.PrimitiveType = (uint32_t) primitiveType;
+                    m_Renderer.ResetAccumulation();
                 }
                 break;
             }
@@ -591,9 +773,12 @@ namespace Vlkrt
             if (it != m_HierarchyMapping.EntityToMeshIdx.end()) {
                 uint32_t meshIdx = it->second;
                 if (meshIdx < m_Scene.StaticMeshes.size()) {
-                    // Update mesh transform and properties
-                    m_Scene.StaticMeshes[meshIdx].Transform     = worldTransform;
-                    m_Scene.StaticMeshes[meshIdx].MaterialIndex = entity.MeshData.MaterialIndex;
+                    auto& mesh = m_Scene.StaticMeshes[meshIdx];
+                    if (mesh.Transform != worldTransform || mesh.MaterialIndex != entity.MeshData.MaterialIndex) {
+                        mesh.Transform     = worldTransform;
+                        mesh.MaterialIndex = entity.MeshData.MaterialIndex;
+                        m_SceneDirty       = true;
+                    }
                 }
             }
         }
@@ -603,17 +788,43 @@ namespace Vlkrt
             if (it != m_HierarchyMapping.EntityToLightIdx.end()) {
                 uint32_t lightIdx = it->second;
                 if (lightIdx < m_Scene.Lights.size()) {
-                    // Update light properties
-                    Light& light    = m_Scene.Lights[lightIdx];
-                    light.Color     = entity.LightData.Color;
-                    light.Intensity = entity.LightData.Intensity;
-                    light.Type      = entity.LightData.Type;
-                    light.Radius    = entity.LightData.Radius;
-
-                    // Compute world position and direction
-                    light.Position             = glm::vec3(worldTransform[3]);
-                    glm::vec3 defaultDirection = glm::vec3(0.0f, 0.0f, -1.0f);
-                    light.Direction = glm::normalize(glm::vec3(worldTransform * glm::vec4(defaultDirection, 0.0f)));
+                    // Compute candidate values first
+                    glm::vec3 newPos = glm::vec3(worldTransform[3]);
+                    glm::vec3 newDir = glm::normalize(glm::vec3(worldTransform * glm::vec4(0.0f, 0.0f, -1.0f, 0.0f)));
+                    Light& light     = m_Scene.Lights[lightIdx];
+                    if (light.Emission   != entity.LightData.Emission
+                     || light.Intensity  != entity.LightData.Intensity
+                     || light.Type       != entity.LightData.Type
+                     || light.Size       != entity.LightData.Size
+                     || light.Position   != newPos
+                     || light.Direction  != newDir) {
+                        light.Emission   = entity.LightData.Emission;
+                        light.Intensity  = entity.LightData.Intensity;
+                        light.Type       = entity.LightData.Type;
+                        light.Size       = entity.LightData.Size;
+                        light.Position   = newPos;
+                        light.Direction  = newDir;
+                        m_SceneDirty     = true;
+                    }
+                }
+            }
+        }
+        else if (entity.Type == EntityType::Procedural) {
+            auto it = m_HierarchyMapping.EntityToProceduralIdx.find(const_cast<SceneEntity*>(&entity));
+            if (it != m_HierarchyMapping.EntityToProceduralIdx.end()) {
+                uint32_t procIdx = it->second;
+                if (procIdx < m_Scene.ProceduralEntities.size()) {
+                    ProceduralEntity& pe = m_Scene.ProceduralEntities[procIdx];
+                    if (pe.Transform     != worldTransform
+                     || pe.MaterialIndex != entity.ProceduralData.MaterialIndex
+                     || pe.IsAnalytic    != entity.ProceduralData.IsAnalytic
+                     || pe.PrimitiveType != entity.ProceduralData.PrimitiveType) {
+                        pe.Transform     = worldTransform;
+                        pe.MaterialIndex = entity.ProceduralData.MaterialIndex;
+                        pe.IsAnalytic    = entity.ProceduralData.IsAnalytic;
+                        pe.PrimitiveType = entity.ProceduralData.PrimitiveType;
+                        m_SceneDirty     = true;
+                    }
                 }
             }
         }

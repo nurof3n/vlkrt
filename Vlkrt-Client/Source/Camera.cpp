@@ -15,6 +15,7 @@ namespace Vlkrt
     {
         m_ForwardDirection = glm::vec3(0, 0, -1);
         m_Position         = glm::vec3(0, 2, 10);
+        RecalculateView();
     }
 
     auto Camera::OnUpdate(float ts) -> bool

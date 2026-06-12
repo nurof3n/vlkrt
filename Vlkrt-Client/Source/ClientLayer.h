@@ -8,6 +8,7 @@
 #include "Scene.h"
 #include "SceneLoader.h"
 #include "MeshLoader.h"
+#include "SceneFactory.h"
 #include "UserInfo.h"
 
 #include <mutex>
@@ -65,6 +66,7 @@ namespace Vlkrt
         // Chat UI functions
         void ImGuiRenderChatPanel();
         void SendChatMessage(const std::string& message);
+        void LoadFactoryScene(uint32_t sceneIndex);
 
     private:
         bool m_TexturesLoaded{ false };
@@ -110,6 +112,7 @@ namespace Vlkrt
         // Scene change tracking
         glm::vec3 m_LastPlayerPosition{};
         size_t m_LastPlayerCount{ 0 };
+        bool m_SceneDirty{ false }; // set by FlattenHierarchyToScene when data changes
 
         // Resource cache
         std::vector<std::string> m_AvailableTextures;

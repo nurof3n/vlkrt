@@ -1,0 +1,101 @@
+materials:
+- name: cb_floor
+  albedo: [ 0.9, 0.9, 0.9 ]
+  roughness: 0.4
+  material_index: 0
+- name: cb_white_wall
+  albedo: [ 0.9, 0.9, 0.9 ]
+  roughness: 1.0
+  material_index: 1
+- name: cb_green_wall
+  albedo: [ 0.2, 0.8, 0.2 ]
+  roughness: 1.0
+  material_index: 2
+- name: cb_red_wall
+  albedo: [ 0.8, 0.1, 0.1 ]
+  roughness: 1.0
+  material_index: 3
+- name: cb_light
+  albedo: [ 1.0, 1.0, 0.7 ]
+  emission: [ 5.0, 5.0, 3.5 ]
+  roughness: 1.0
+  light_index: 0
+  material_index: 4
+- name: cb_aabb_box
+  albedo: [ 0.9, 0.9, 0.9 ]
+  roughness: 0.5
+  subsurface: 1.0
+  eta: 1.7
+  extinction: [ 1.0, 0.9, 1.0 ]
+  material_index: 5
+- name: cb_sphere_chrome
+  albedo: [ 0.549, 0.556, 0.554 ]
+  metallic: 1.0
+  roughness: 0.0
+  extinction: [ 0.7, 1.0, 1.0 ]
+  eta: 1.5
+  material_index: 6
+
+entities:
+- name: floor
+  type: mesh
+  mesh: cb_floor.obj
+  material: 0
+- name: ceiling
+  type: mesh
+  mesh: cb_ceiling.obj
+  material: 1
+- name: back_wall
+  type: mesh
+  mesh: cb_back_wall.obj
+  material: 1
+- name: left_wall
+  type: mesh
+  mesh: cb_left_wall.obj
+  material: 3
+- name: right_wall
+  type: mesh
+  mesh: cb_right_wall.obj
+  material: 2
+- name: light_panel
+  type: mesh
+  mesh: cb_light_panel.obj
+  material: 4
+  children:
+  - name: area_light
+    type: light
+    light_emission: [ 1.0, 1.0, 0.7 ]
+    light_intensity: 5.0
+    light_type: 0
+    light_size: 1.825
+    light_direction: [ 0.0, -1, 0.0 ]
+    transform:
+      position: [ 0.0, 4.799, -1.5 ]
+- name: cb_aabb
+  type: procedural
+  procedural_analytic: true
+  procedural_type: 0
+  material: 5
+  transform:
+    position: [ -0.9, 1.3, -2.9 ]
+    rotation: [ 0.0, 0.8415, 0.0, 0.5403 ]
+    scale: [ 0.9, 1.5, 0.9 ]
+- name: cb_sphere
+  type: procedural
+  procedural_analytic: true
+  procedural_type: 1
+  material: 6
+  transform:
+    position: [ 1.0, 0.8, -1 ]
+    scale: [ 1.0, 1.0, 1.0 ]
+
+scene_settings:
+  background_color: [ 0.0, 0.0, 0.0 ]
+  scene_index: 1
+  max_recursion_depth: 12
+  max_shadow_recursion_depth: 2
+  russian_roulette_depth: 3
+  apply_jitter: true
+  anisotropic_bsdf: false
+  camera_position: [ 0.0, 3.5, 8.0 ]
+  camera_target: [ 0.0, 2.5, 0.0 ]
