@@ -111,13 +111,23 @@ struct DisneyBSDF : IBxDF {
         float dotHL = dot(H, L);
         float fd90  = FD90(mat.roughness, dotHL);
         float d     = FD(fd90, V.y) * FD(fd90, L.y);
-        float fss90 = FSS90(mat.roughness, dotHL);
-        float Fss   = FD(fss90, V.y) * FD(fss90, L.y);
-        float ss    = 1.25f * (Fss * (1.0f / (L.y + V.y) - 0.5f) + 0.5f);
-        float3 sh   = mat.sheen * SchlickF(dotHL) * sheenColor;
+        
+        float d_val = d;
+        if (mat.subsurface > 0.0f) {
+            float fss90 = FSS90(mat.roughness, dotHL);
+            float Fss   = FD(fss90, V.y) * FD(fss90, L.y);
+            float ss    = 1.25f * (Fss * (1.0f / (L.y + V.y) - 0.5f) + 0.5f);
+            d_val = lerp(d, ss, mat.subsurface);
+        }
+
+        float3 sh = float3(0.0f);
+        if (mat.sheen > 0.0f) {
+            sh = mat.sheen * SchlickF(dotHL) * sheenColor;
+        }
+
         pdf = L.y * INV_PI;
         return (1.0f - mat.metallic) * (1.0f - mat.specularTransmission) *
-               (INV_PI * mat.albedo * lerp(d, ss, mat.subsurface) + sh);
+               (INV_PI * mat.albedo * d_val + sh);
     }
 
     float3 _EvalSpecRefl(float3 V, float3 L, float3 H, out float pdf) {

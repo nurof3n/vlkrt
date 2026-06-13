@@ -49,27 +49,37 @@ struct Ray {
 };
 
 /// Main path-tracing payload (location 0).
+/// Total size: 180 bytes (keep maxPipelineRayPayloadSize in sync in Renderer.cpp).
+///
+/// Fields are grouped:
+///   [0..63]  Multi-bounce core fields — carried at every recursion depth.
+///   [64..111] NRD first-hit guide fields — only written at recursionDepth==0,
+///             only read in raygen shaders. Future: could move to a separate payload
+///             type for secondary bounces to reduce GPU continuation stack.
 struct RayPayload {
+    // ---- Core fields (every bounce) ----
     float4 color;          ///< accumulated radiance
-    float4 worldPosition;  ///< hit world-pos; w=first-hit distance, w=0 miss
+    float4 worldPosition;  ///< hit world-pos; w=hit distance, w=0 on miss
     float4 throughput;     ///< path throughput
-    float4 absorption;     ///< accumulated Beer–Lambert absorption
-    float4 firstHitNormalRoughness; ///< xyz = first-hit normal, w = first-hit roughness
-    float4 firstHitMaterialParams;  ///< x = metallic, y = specTrans, z = clearcoat, w = albedo luminance
-    float4 firstHitWorldPosPrev;    ///< xyz = first-hit previous-frame world position
+    float4 absorption;     ///< accumulated Beer-Lambert absorption
     uint   rngState;       ///< PCG RNG state
     uint   recursionDepth;
     uint   inside;         ///< non-zero when inside a refractive medium
     float  bsdfPdf;        ///< PDF of the last BSDF sample (MIS)
     float  firstBounceHitDist;
 
-    // NRD separate guides
+    // ---- NRD separate guide channels (depth-0 only) ----
     float3 diffuse;
     float3 specular;
     float  diffuseHitDist;
     float  specularHitDist;
     float3 emission;
     float  firstHitMetallic;
+
+    // ---- NRD first-hit G-buffer data (depth-0 only) ----
+    float4 firstHitNormalRoughness; ///< xyz = first-hit normal, w = first-hit roughness
+    float4 firstHitMaterialParams;  ///< xyz = albedo, w = specularWeight
+    float4 firstHitWorldPosPrev;    ///< xyz = first-hit previous-frame world pos, w = materialClass
 };
 
 /// Shadow ray payload (location 1). 4 bytes.

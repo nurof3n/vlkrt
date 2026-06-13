@@ -313,16 +313,35 @@ float3 DoPathTracing(inout RayPayload payload,
         float clampedPdf = max(bsdfPdf, 0.05f);
         float3 newThroughput = throughput * reflectance / clampedPdf / rrPdf;
 
-        // Build child payload (copy + update mutated fields)
-        RayPayload childPayload    = payload;
-        childPayload.throughput    = float4(newThroughput, 1.0f);
-        childPayload.absorption    = float4(newAbsorption, 1.0f);
-        childPayload.bsdfPdf       = bsdfPdf;
-        childPayload.recursionDepth++;
-        childPayload.inside        = refraction ? (payload.inside ^ 1u) : payload.inside;
-        childPayload.color         = float4(0.0f);
-        childPayload.worldPosition = float4(0.0f);
+        if (max(newThroughput.r, max(newThroughput.g, newThroughput.b)) < 0.001f) {
+            return color;
+        }
+
+        // Build child payload: copy only the fields that secondary bounces need.
+        // The NRD first-hit G-buffer fields (firstHitNormalRoughness, firstHitMaterialParams,
+        // firstHitWorldPosPrev) are depth-0-only — explicitly zero them so they don't
+        // pollute the GPU stack at every recursion level.
+        RayPayload childPayload;
+        childPayload.color              = float4(0.0f);
+        childPayload.worldPosition      = float4(0.0f);
+        childPayload.throughput         = float4(newThroughput, 1.0f);
+        childPayload.absorption         = float4(newAbsorption, 1.0f);
+        childPayload.rngState           = payload.rngState;
+        childPayload.recursionDepth     = payload.recursionDepth + 1u;
+        childPayload.inside             = refraction ? (payload.inside ^ 1u) : payload.inside;
+        childPayload.bsdfPdf            = bsdfPdf;
         childPayload.firstBounceHitDist = 0.0f;
+        // NRD guide channels: zero out — not needed for secondary bounces
+        childPayload.diffuse            = float3(0.0f);
+        childPayload.specular           = float3(0.0f);
+        childPayload.diffuseHitDist     = 0.0f;
+        childPayload.specularHitDist    = 0.0f;
+        childPayload.emission           = float3(0.0f);
+        childPayload.firstHitMetallic   = 0.0f;
+        // NRD G-buffer fields: zero out — only meaningful at depth 0
+        childPayload.firstHitNormalRoughness = float4(0.0f);
+        childPayload.firstHitMaterialParams  = float4(0.0f);
+        childPayload.firstHitWorldPosPrev    = float4(0.0f);
 
         RayDesc bounceRay;
         bounceRay.Origin    = hitPos;
@@ -458,22 +477,27 @@ void ClosestHitHelper(inout RayPayload payload,
         }
     }
 
-    // Atmospheric fog
+    // Atmospheric fog — early-out when fog is negligible (fogFactor < 0.001 for t < ~23m)
+    // This avoids exp() + two ComputeBackground() calls per hit in small scenes.
     float t = hitDist;
     float fogFactor = 1.0f - exp(-0.000002f * t * t * t);
-    color = lerp(color,
-                 ComputeBackground(rayDir, payload.recursionDepth == 0u) * payload.throughput,
-                 fogFactor);
+    if (fogFactor >= 0.001f) {
+        float4 bgColor = ComputeBackground(rayDir, payload.recursionDepth == 0u) * payload.throughput;
+        color = lerp(color, bgColor, fogFactor);
 
-    if (payload.recursionDepth == 0u) {
+        if (payload.recursionDepth == 0u) {
+            bool isLight = isTriangle && (mat.lightIndex >= 0);
+            float3 primaryEmission = isLight ? color.xyz : mat.emission;
+            payload.emission = primaryEmission;
+
+            float3 fogColor = bgColor.xyz;  // reuse — same ray dir, same throughput
+            payload.diffuse  = lerp(payload.diffuse,  fogColor,      fogFactor);
+            payload.specular = lerp(payload.specular, float3(0.0f),  fogFactor);
+            payload.emission = lerp(payload.emission, float3(0.0f),  fogFactor);
+        }
+    } else if (payload.recursionDepth == 0u) {
         bool isLight = isTriangle && (mat.lightIndex >= 0);
-        float3 primaryEmission = isLight ? color.xyz : mat.emission;
-        payload.emission = primaryEmission;
-
-        float3 fogColor = ComputeBackground(rayDir, true).xyz * payload.throughput.xyz;
-        payload.diffuse = lerp(payload.diffuse, fogColor, fogFactor);
-        payload.specular = lerp(payload.specular, float3(0.0f), fogFactor);
-        payload.emission = lerp(payload.emission, float3(0.0f), fogFactor);
+        payload.emission = isLight ? color.xyz : mat.emission;
     }
 
     payload.color = color;

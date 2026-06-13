@@ -88,17 +88,17 @@ entities:
   mesh: cb_light_panel.obj
   material: 4
   children:
-    - name: area_light
-      type: light
-      transform:
-        position: [ 0, 4.799, -1.5 ]
-        rotation: [ -0.707107, 0, -0, 0.707107 ]
-        scale: [ 1, 1, 1 ]
-      light_emission: [ 1, 1, 0.7 ]
-      light_intensity: 5
-      light_type: 0
-      light_direction: [ 0, -1, -5.96046e-08 ]
-      light_size: 1.825
+  - name: area_light
+    type: light
+    transform:
+      position: [ 0, 4.799, -1.5 ]
+      rotation: [ -0.707107, 0, -0, 0.707107 ]
+      scale: [ 1, 1, 1 ]
+    light_emission: [ 1, 1, 0.7 ]
+    light_intensity: 5
+    light_type: 0
+    light_direction: [ 0, -1, -5.96046e-08 ]
+    light_size: 1.825
 - name: cb_aabb
   type: procedural
   transform:
@@ -126,6 +126,9 @@ scene_settings:
   path_sqrt_samples: 1
   russian_roulette_depth: 3
   apply_jitter: true
-  anisotropic_bsdf: false
+  anisotropic_bsdf: true
+  enable_fsr: true
+  fsr_quality_mode: 1
+  fsr_sharpness: 0
   camera_position: [ 0, 3.5, 8 ]
-  camera_target: [ 0, 2.5, 0 ]
+  camera_target: [ 0, 3.37597, 7.00772 ]

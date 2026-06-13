@@ -303,6 +303,12 @@ namespace Vlkrt
         size_t m_LastMaterialCount{ 0 };
         size_t m_LastLightCount{ 0 };
         uint32_t m_LastProceduralCount{ UINT32_MAX };  // UINT32_MAX forces initial creation
+        uint32_t m_LastMaxRecursionDepth{ UINT32_MAX }; // UINT32_MAX forces initial creation
+
+        // Cached scene metrics — only recomputed when m_SceneValid is false (scene invalidated)
+        size_t   m_CachedTotalMeshCount{ 0 };
+        size_t   m_CachedTotalVertices{ 0 };
+        size_t   m_CachedTotalIndices{ 0 };
         bool m_SceneValid{ false };
         bool m_FirstFrame{ true };
         bool m_AccumFirstFrame{ true };

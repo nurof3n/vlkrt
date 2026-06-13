@@ -39,12 +39,15 @@ void ClosestHitMain([[vk::location(0)]] inout RayPayload payload,
 
     float3 hitPos = WorldRayOrigin() + RayTCurrent() * WorldRayDirection();
 
-    // Reconstruct previous-frame hit position using barycentric interpolation.
-    float3 p0Prev = g_vtxPrev[tri.x].position;
-    float3 p1Prev = g_vtxPrev[tri.y].position;
-    float3 p2Prev = g_vtxPrev[tri.z].position;
-    float3 prevHitPosModel = p0Prev + bary.x * (p1Prev - p0Prev) + bary.y * (p2Prev - p0Prev);
-    float3 prevHitPos = mul(float3x4(ObjectToWorld3x4()), float4(prevHitPosModel, 1.0f));
+    // Reconstruct previous-frame hit position using barycentric interpolation only at depth 0.
+    float3 prevHitPos = float3(0.0f);
+    if (payload.recursionDepth == 0u) {
+        float3 p0Prev = g_vtxPrev[tri.x].position;
+        float3 p1Prev = g_vtxPrev[tri.y].position;
+        float3 p2Prev = g_vtxPrev[tri.z].position;
+        float3 prevHitPosModel = p0Prev + bary.x * (p1Prev - p0Prev) + bary.y * (p2Prev - p0Prev);
+        prevHitPos = mul(float3x4(ObjectToWorld3x4()), float4(prevHitPosModel, 1.0f));
+    }
 
     ClosestHitHelper(payload, mat, normal, hitPos, prevHitPos, true);
 }

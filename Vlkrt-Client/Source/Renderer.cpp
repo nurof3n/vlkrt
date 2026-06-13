@@ -9,6 +9,7 @@
 #include "Walnut/VulkanRayTracing.h"
 #include "Walnut/Core/Log.h"
 
+#include <algorithm>
 #include <cstring>
 #include <chrono>
 #include <glm/gtc/type_ptr.hpp>
@@ -302,36 +303,45 @@ namespace Vlkrt
         m_ActiveScene  = &scene;
         m_ActiveCamera = &camera;
 
-        // (Re)create pipeline whenever procedural count changes or first frame
+        // (Re)create pipeline whenever procedural count or max recursion depth changes, or first frame
         uint32_t proceduralCount = (uint32_t) scene.ProceduralEntities.size();
-        if (m_RTPipeline == VK_NULL_HANDLE || proceduralCount != m_LastProceduralCount) {
+        if (m_RTPipeline == VK_NULL_HANDLE || proceduralCount != m_LastProceduralCount
+                || scene.MaxRecursionDepth != m_LastMaxRecursionDepth) {
             DestroyPipelineObjects();
             CreateRayTracingPipeline();
             CreateShaderBindingTable(scene);
-            m_LastProceduralCount = proceduralCount;
+            m_LastProceduralCount    = proceduralCount;
+            m_LastMaxRecursionDepth  = scene.MaxRecursionDepth;
         }
 
-        // Calculate current scene metrics
-        size_t totalMeshCount = scene.StaticMeshes.size() + scene.DynamicMeshes.size();
-        size_t totalVertices  = 0;
-        size_t totalIndices   = 0;
-        for (const auto& mesh : scene.StaticMeshes) {
-            totalVertices += mesh.Vertices.size();
-            totalIndices += mesh.Indices.size();
-        }
-        for (const auto& mesh : scene.DynamicMeshes) {
-            totalVertices += mesh.Vertices.size();
-            totalIndices += mesh.Indices.size();
+        // Calculate current scene metrics — recompute only when the scene was invalidated
+        // (m_SceneValid==false means InvalidateScene()/InvalidateSceneStructure() was called).
+        // On steady-state frames this avoids a linear scan over all mesh vertex arrays.
+        if (!m_SceneValid) {
+            size_t totalMeshCount = scene.StaticMeshes.size() + scene.DynamicMeshes.size();
+            size_t totalVertices  = 0;
+            size_t totalIndices   = 0;
+            for (const auto& mesh : scene.StaticMeshes) {
+                totalVertices += mesh.Vertices.size();
+                totalIndices += mesh.Indices.size();
+            }
+            for (const auto& mesh : scene.DynamicMeshes) {
+                totalVertices += mesh.Vertices.size();
+                totalIndices += mesh.Indices.size();
+            }
+            m_CachedTotalMeshCount = totalMeshCount;
+            m_CachedTotalVertices  = totalVertices;
+            m_CachedTotalIndices   = totalIndices;
         }
 
-        bool sizeChanged = (totalMeshCount != m_LastMeshCount) || (totalVertices != m_LastVertexCount)
-                           || (totalIndices != m_LastIndexCount) || (scene.Materials.size() != m_LastMaterialCount);
+        bool sizeChanged = (m_CachedTotalMeshCount != m_LastMeshCount) || (m_CachedTotalVertices != m_LastVertexCount)
+                           || (m_CachedTotalIndices != m_LastIndexCount) || (scene.Materials.size() != m_LastMaterialCount);
         bool needsRebuild = !m_SceneValid || sizeChanged;
 
         if (m_VertexBuffer == VK_NULL_HANDLE || needsRebuild) {
             if (needsRebuild && m_VertexBuffer != VK_NULL_HANDLE) {
-                if (totalMeshCount != m_LastMeshCount || totalVertices != m_LastVertexCount
-                        || totalIndices != m_LastIndexCount) {
+                if (m_CachedTotalMeshCount != m_LastMeshCount || m_CachedTotalVertices != m_LastVertexCount
+                        || m_CachedTotalIndices != m_LastIndexCount) {
                     Walnut::Application::SubmitResourceFree(
                             [device = m_Device, vbuf = m_VertexBuffer, vmem = m_VertexMemory, ibuf = m_IndexBuffer,
                                     imem = m_IndexMemory, mibuf = m_MaterialIndexBuffer,
@@ -373,9 +383,9 @@ namespace Vlkrt
             if (m_VertexBuffer == VK_NULL_HANDLE) CreateSceneBuffers(scene);
             UpdateSceneData(scene);
 
-            m_LastMeshCount     = totalMeshCount;
-            m_LastVertexCount   = totalVertices;
-            m_LastIndexCount    = totalIndices;
+            m_LastMeshCount     = m_CachedTotalMeshCount;
+            m_LastVertexCount   = m_CachedTotalVertices;
+            m_LastIndexCount    = m_CachedTotalIndices;
             m_LastMaterialCount = scene.Materials.size();
             m_LastLightCount    = scene.Lights.size();
             m_SceneValid        = true;
@@ -484,7 +494,12 @@ namespace Vlkrt
             }
 
             if (barrierCount > 0) {
-                vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                // Source stage covers both ray tracing (prior frames) and compute (NRD) writes.
+                // On the very first frame only TOP_OF_PIPE is needed (no prior writes).
+                VkPipelineStageFlags srcStage = m_GuidesFirstFrame
+                    ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT
+                    : (VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+                vkCmdPipelineBarrier(cmd, srcStage,
                         VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr, 0, nullptr, barrierCount,
                         barriers);
             }
@@ -615,7 +630,8 @@ namespace Vlkrt
                 barrier.subresourceRange.levelCount     = 1;
                 barrier.subresourceRange.baseArrayLayer = 0;
                 barrier.subresourceRange.layerCount     = 1;
-                vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                vkCmdPipelineBarrier(cmd,
+                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
             }
 
@@ -688,7 +704,9 @@ namespace Vlkrt
             }
 
             if (barrierCount > 0) {
-                vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                // Source covers both ray tracing writes (no NRD) and compute writes (NRD post-process).
+                vkCmdPipelineBarrier(cmd,
+                        VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, barrierCount, barriers);
             }
         }
@@ -935,7 +953,8 @@ namespace Vlkrt
                     = makeStage(VK_SHADER_STAGE_INTERSECTION_BIT_KHR, m_IntersectSDFShader, entryNames[IDX_RINT_SDF]);
 
             VkRayTracingPipelineInterfaceCreateInfoKHR interfaceConfig = { VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_INTERFACE_CREATE_INFO_KHR };
-            interfaceConfig.maxPipelineRayPayloadSize      = 132;
+            // RayPayload struct: 7×float4 (112B) + 3×uint+2×float (20B) + NRD fields ~48B = 180B total
+            interfaceConfig.maxPipelineRayPayloadSize      = 180;
             interfaceConfig.maxPipelineRayHitAttributeSize = 32;
 
             VkRayTracingPipelineCreateInfoKHR pci = { VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR };
@@ -943,7 +962,8 @@ namespace Vlkrt
             pci.pStages                           = stages;
             pci.groupCount                        = totalGroups;
             pci.pGroups                           = grps.data();
-            pci.maxPipelineRayRecursionDepth      = 16;
+            pci.maxPipelineRayRecursionDepth      = std::min(m_ActiveScene ? (m_ActiveScene->MaxRecursionDepth + 2u) : 16u, 16u);
+            // +2 accounts for: 1 shadow ray recursion level + 1 safety margin
             pci.layout                            = m_RTPipelineLayout;
             pci.pLibraryInterface                 = &interfaceConfig;
             return pvkCreateRayTracingPipelinesKHR(
@@ -1281,16 +1301,14 @@ namespace Vlkrt
 
         // Process static meshes
         for (const auto& mesh : scene.StaticMeshes) {
-            // Copy vertices and apply mesh transform
+            // Compute normal matrix once per mesh (avoid per-vertex inverse/transpose)
+            const glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(mesh.Transform)));
+
             for (const auto& vertex : mesh.Vertices) {
                 GPUVertex gpuVert{};
-                // Transform position
-                glm::vec4 transformedPos = mesh.Transform * glm::vec4(vertex.Position, 1.0f);
-                gpuVert.position         = glm::vec3(transformedPos);
-                // Transform normal (use transpose of inverse for normals, but for uniform scaling this simplifies)
-                glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(mesh.Transform)));
-                gpuVert.normal         = glm::normalize(normalMatrix * vertex.Normal);
-                gpuVert.texCoord       = vertex.TexCoord;
+                gpuVert.position = glm::vec3(mesh.Transform * glm::vec4(vertex.Position, 1.0f));
+                gpuVert.normal   = glm::normalize(normalMatrix * vertex.Normal);
+                gpuVert.texCoord = vertex.TexCoord;
                 gpuVertices.push_back(gpuVert);
             }
 
@@ -1298,7 +1316,7 @@ namespace Vlkrt
             for (const auto& index : mesh.Indices) { gpuIndices.push_back(index + vertexOffset); }
 
             // Store material index for each triangle in this mesh
-            uint32_t triangleCount = static_cast<uint32_t>(mesh.Indices.size() / 3);
+            const uint32_t triangleCount = static_cast<uint32_t>(mesh.Indices.size() / 3);
             for (uint32_t i = 0; i < triangleCount; i++) {
                 materialIndices.push_back(static_cast<uint32_t>(mesh.MaterialIndex));
             }
@@ -1308,16 +1326,14 @@ namespace Vlkrt
 
         // Process dynamic meshes
         for (const auto& mesh : scene.DynamicMeshes) {
-            // Copy vertices and apply mesh transform
+            // Compute normal matrix once per mesh (avoid per-vertex inverse/transpose)
+            const glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(mesh.Transform)));
+
             for (const auto& vertex : mesh.Vertices) {
                 GPUVertex gpuVert{};
-                // Transform position
-                glm::vec4 transformedPos = mesh.Transform * glm::vec4(vertex.Position, 1.0f);
-                gpuVert.position         = glm::vec3(transformedPos);
-                // Transform normal (use transpose of inverse for normals, but for uniform scaling this simplifies)
-                glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(mesh.Transform)));
-                gpuVert.normal         = glm::normalize(normalMatrix * vertex.Normal);
-                gpuVert.texCoord       = vertex.TexCoord;
+                gpuVert.position = glm::vec3(mesh.Transform * glm::vec4(vertex.Position, 1.0f));
+                gpuVert.normal   = glm::normalize(normalMatrix * vertex.Normal);
+                gpuVert.texCoord = vertex.TexCoord;
                 gpuVertices.push_back(gpuVert);
             }
 
@@ -1325,7 +1341,7 @@ namespace Vlkrt
             for (const auto& index : mesh.Indices) { gpuIndices.push_back(index + vertexOffset); }
 
             // Store material index for each triangle in this mesh
-            uint32_t triangleCount = static_cast<uint32_t>(mesh.Indices.size() / 3);
+            const uint32_t triangleCount = static_cast<uint32_t>(mesh.Indices.size() / 3);
             for (uint32_t i = 0; i < triangleCount; i++) {
                 materialIndices.push_back(static_cast<uint32_t>(mesh.MaterialIndex));
             }
@@ -1353,48 +1369,6 @@ namespace Vlkrt
             vkMapMemory(m_Device, m_IndexMemory, 0, sizeof(uint32_t) * gpuIndices.size(), 0, &data);
             memcpy(data, gpuIndices.data(), sizeof(uint32_t) * gpuIndices.size());
             vkUnmapMemory(m_Device, m_IndexMemory);
-        }
-
-        // Upload material data
-        if (!scene.Materials.empty()) {
-            std::vector<GPUPBRMaterial> gpuMaterials(scene.Materials.size());
-            for (size_t i = 0; i < scene.Materials.size(); ++i) {
-                gpuMaterials[i].albedo               = scene.Materials[i].Albedo;
-                gpuMaterials[i].textureIndex         = -1;  // resolved below
-                gpuMaterials[i].emission             = scene.Materials[i].Emission;
-                gpuMaterials[i].tiling               = scene.Materials[i].Tiling;
-                gpuMaterials[i].extinction           = scene.Materials[i].Extinction;
-                gpuMaterials[i].materialIndex        = scene.Materials[i].MaterialIndex;
-                gpuMaterials[i].stepScale            = scene.Materials[i].StepScale;
-                gpuMaterials[i].sheen                = scene.Materials[i].Sheen;
-                gpuMaterials[i].sheenTint            = scene.Materials[i].SheenTint;
-                gpuMaterials[i].clearcoat            = scene.Materials[i].Clearcoat;
-                gpuMaterials[i].clearcoatGloss       = scene.Materials[i].ClearcoatGloss;
-                gpuMaterials[i].roughness            = scene.Materials[i].Roughness;
-                gpuMaterials[i].subsurface           = scene.Materials[i].Subsurface;
-                gpuMaterials[i].anisotropic          = scene.Materials[i].Anisotropic;
-                gpuMaterials[i].metallic             = scene.Materials[i].Metallic;
-                gpuMaterials[i].specularTint         = scene.Materials[i].SpecularTint;
-                gpuMaterials[i].specularTransmission = scene.Materials[i].SpecularTransmission;
-                gpuMaterials[i].eta                  = scene.Materials[i].Eta;
-                gpuMaterials[i].atDistance           = scene.Materials[i].AtDistance;
-                gpuMaterials[i].lightIndex           = scene.Materials[i].LightIndex;
-                gpuMaterials[i]._pad1                = 0.0f;
-                gpuMaterials[i]._pad2                = 0.0f;
-
-                // Sync texture index
-                if (!scene.Materials[i].TextureFilename.empty()) {
-                    // Try to finding texture in cache
-                    auto tex = LoadOrGetTexture(scene.Materials[i].TextureFilename);
-                    if (tex) {
-                        // Find index in cache (order is not guaranteed, but we'll collect all textures)
-                    }
-                }
-            }
-
-            vkMapMemory(m_Device, m_MaterialMemory, 0, sizeof(GPUPBRMaterial) * gpuMaterials.size(), 0, &data);
-            memcpy(data, gpuMaterials.data(), sizeof(GPUPBRMaterial) * gpuMaterials.size());
-            vkUnmapMemory(m_Device, m_MaterialMemory);
         }
 
         // Upload material index data (one per triangle)
