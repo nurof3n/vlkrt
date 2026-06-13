@@ -205,6 +205,7 @@ float3 DoPathTracing(inout RayPayload payload,
         childPayload.inside        = refraction ? (payload.inside ^ 1u) : payload.inside;
         childPayload.color         = float4(0.0f);
         childPayload.worldPosition = float4(0.0f);
+        childPayload.firstBounceHitDist = 0.0f;
 
         RayDesc bounceRay;
         bounceRay.Origin    = hitPos;
@@ -215,6 +216,10 @@ float3 DoPathTracing(inout RayPayload payload,
         TraceRay(g_tlas, RAY_FLAG_NONE, 0xFF, 0, 2, 0, bounceRay, childPayload);
         childPayload.color = RadianceClamp(childPayload.color);
         color += childPayload.color.xyz;
+
+        if (payload.recursionDepth == 0u) {
+            payload.firstBounceHitDist = childPayload.firstBounceHitDist;
+        }
 
         // Propagate RNG advancement back to the parent
         payload.rngState = childPayload.rngState;
@@ -233,10 +238,36 @@ void ClosestHitHelper(inout RayPayload payload,
                       GPUPBRMaterial   mat,
                       float3           normal,
                       float3           hitPos,
+                      float3           prevHitPos,
                       bool             isTriangle) {
-    payload.worldPosition = float4(hitPos, 1.0f);
+    float hitDist = RayTCurrent();
+    payload.worldPosition = float4(hitPos, hitDist);
 
-    float  hitDist = RayTCurrent();
+    if (payload.recursionDepth == 1u) {
+        payload.firstBounceHitDist = hitDist;
+    }
+
+    if (payload.recursionDepth == 0u) {
+        payload.firstHitNormalRoughness = float4(normalize(normal), mat.roughness);
+
+        float metallic = clamp(mat.metallic, 0.0f, 1.0f);
+        float specTrans = clamp(mat.specularTransmission, 0.0f, 1.0f);
+        float clearcoat = clamp(mat.clearcoat, 0.0f, 1.0f);
+        float albedoLum = GetLuminance(mat.albedo);
+
+        float diffuseWeight = (1.0f - metallic) * (1.0f - specTrans);
+        float specularWeight = metallic + specTrans + clearcoat * 0.25f + 0.04f * (1.0f - metallic);
+        specularWeight *= lerp(0.5f, 1.0f, saturate(albedoLum));
+
+        float weightSum = max(diffuseWeight + specularWeight, 1e-6f);
+        diffuseWeight /= weightSum;
+        specularWeight /= weightSum;
+
+        payload.firstHitMaterialParams = float4(mat.albedo, specularWeight);
+        float materialClass = float(mat.materialIndex & 3u);
+        payload.firstHitWorldPosPrev = float4(prevHitPos, materialClass);
+    }
+
     float3 rayDir  = WorldRayDirection();
     float4 color   = float4(0.0f, 0.0f, 0.0f, 1.0f);
 

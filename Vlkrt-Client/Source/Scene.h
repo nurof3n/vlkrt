@@ -1,5 +1,9 @@
 #pragma once
 
+#ifndef GLM_FORCE_DEPTH_ZERO_TO_ONE
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#endif
+
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -44,6 +48,16 @@ namespace Vlkrt
         Uniform = 0,
         Cosine  = 1,
         BSDF    = 2,
+    };
+
+    enum class NRDGuideDebugViewMode : uint32_t
+    {
+        FinalImage            = 0,
+        NormalRoughness       = 1,
+        ViewZ                 = 2,
+        MotionVectors         = 3,
+        DiffRadianceHitDist   = 4,
+        SpecRadianceHitDist   = 5,
     };
 
     // -------------------------------------------------------------------------
@@ -256,6 +270,8 @@ namespace Vlkrt
         bool                  OnlyOneLightSample         { false };
         uint32_t              RussianRouletteDepth       { 3 };
         bool                  AnisotropicBSDF            { true };
+        bool                  EnableNRDDenoiser          { false };
+        NRDGuideDebugViewMode NRDGuideDebugView          { NRDGuideDebugViewMode::FinalImage };
         uint32_t              SceneIndex                 { 0 };  // 0=Custom,1=Demo,2=Cornell,3=PbrShowcase
         glm::vec3             BackgroundColor            { 0.0f };
 

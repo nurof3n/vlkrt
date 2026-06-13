@@ -1,7 +1,12 @@
 #pragma once
 
+#ifndef GLM_FORCE_DEPTH_ZERO_TO_ONE
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#endif
+
 #include "Walnut/Image.h"
 #include "AccelerationStructure.h"
+#include "NRDDenoiser.h"
 
 #include <memory>
 #include <vector>
@@ -73,30 +78,48 @@ namespace Vlkrt
         glm::mat4 bottomLevelASToLocalSpace;  // offset 64  (BLAS → local)
     };
 
-    // Scene UBO sent to shaders every frame (176 bytes, matches GLSL SceneUBO std140)
+    // Scene UBO sent to shaders every frame (304 bytes, matches Slang SceneUBO layout)
     struct SceneUBOData
     {
         glm::mat4  projectionToWorld;          //   0 (64)
-        glm::vec4  cameraPosition;             //  64 (16)
-        glm::vec4  backgroundColor;            //  80 (16)
-        uint32_t   numLights;                  //  96
-        float      elapsedTime;                // 100
-        uint32_t   elapsedTicks;               // 104
-        uint32_t   raytracingType;             // 108
-        uint32_t   importanceSamplingType;     // 112
-        uint32_t   maxRecursionDepth;          // 116
-        uint32_t   maxShadowRecursionDepth;    // 120
-        uint32_t   pathSqrtSamplesPerPixel;    // 124
-        uint32_t   pathFrameCacheIndex;        // 128
-        uint32_t   applyJitter;                // 132
-        uint32_t   onlyOneLightSample;         // 136
-        uint32_t   russianRouletteDepth;       // 140
-        uint32_t   anisotropicBSDF;            // 144
-        uint32_t   sceneIndex;                 // 148
-        float      _pad[6];                    // 152..175 (24 bytes)
-        //                                     // 176 total
+        glm::mat4  worldToClip;                //  64 (64)
+        glm::mat4  worldToClipPrev;            // 128 (64)
+        glm::vec4  cameraPosition;             // 192 (16)
+        glm::vec4  backgroundColor;            // 208 (16)
+        uint32_t   numLights;                  // 224
+        float      elapsedTime;                // 228
+        uint32_t   elapsedTicks;               // 232
+        uint32_t   raytracingType;             // 236
+        uint32_t   importanceSamplingType;     // 240
+        uint32_t   maxRecursionDepth;          // 244
+        uint32_t   maxShadowRecursionDepth;    // 248
+        uint32_t   pathSqrtSamplesPerPixel;    // 252
+        uint32_t   pathFrameCacheIndex;        // 256
+        uint32_t   applyJitter;                // 260
+        uint32_t   onlyOneLightSample;         // 264
+        uint32_t   russianRouletteDepth;       // 268
+        uint32_t   anisotropicBSDF;            // 272
+        uint32_t   sceneIndex;                 // 276
+        float      cameraForward[3];           // 280 (12)
+        uint32_t   nrdDebugViewMode;           // 292 (4)
+        float      _pad[2];                    // 296 (8)
+        //                                     // 304 total
     };
-    static_assert(sizeof(SceneUBOData) == 176, "SceneUBOData size mismatch");
+    static_assert(sizeof(SceneUBOData) == 304, "SceneUBOData size mismatch");
+
+    struct RenderPassStats
+    {
+        float SceneSetupMs{ 0.0f };
+        float UBOUploadMs{ 0.0f };
+        float RayTraceRecordMs{ 0.0f };
+        float NRDRecordMs{ 0.0f };
+        float CommandSubmitMs{ 0.0f };
+        float FrameTotalMs{ 0.0f };
+        bool  NRDEnabled{ false };
+        bool  NRDOperational{ false };
+        uint32_t Width{ 0 };
+        uint32_t Height{ 0 };
+    };
 
     class Renderer
     {
@@ -111,6 +134,8 @@ namespace Vlkrt
         void InvalidateSceneStructure() { m_SceneValid = false; m_LastProceduralCount = UINT32_MAX; }
         void ResetAccumulation() { m_SceneValid = false; m_FrameIndex = 0; m_AccumFirstFrame = true; }
         uint32_t GetAccumulatedFrameCount() const { return m_FrameIndex; }
+        const char* GetNRDStatus() const { return m_NRDDenoiser.GetStatus(); }
+        bool IsNRDOperational() const { return m_NRDDenoiser.IsOperational(); }
 
         void MarkDirtyMeshes(const std::vector<uint32_t>& meshIndices)
         {
@@ -123,6 +148,12 @@ namespace Vlkrt
         }
 
         auto GetFinalImage() const -> std::shared_ptr<Walnut::Image> { return m_FinalImage; }
+        auto GetGuideNormalRoughness() const -> std::shared_ptr<Walnut::Image> { return m_GuideNormalRoughness; }
+        auto GetGuideViewZ() const -> std::shared_ptr<Walnut::Image> { return m_GuideViewZ; }
+        auto GetGuideMotionVectors() const -> std::shared_ptr<Walnut::Image> { return m_GuideMotionVectors; }
+        auto GetGuideDiffRadianceHitDist() const -> std::shared_ptr<Walnut::Image> { return m_GuideDiffRadianceHitDist; }
+        auto GetGuideSpecRadianceHitDist() const -> std::shared_ptr<Walnut::Image> { return m_GuideSpecRadianceHitDist; }
+        const RenderPassStats& GetLastPassStats() const { return m_LastPassStats; }
 
         void PreloadTextures(const std::vector<std::string>& textureFilenames);
 
@@ -148,6 +179,7 @@ namespace Vlkrt
         // Ray tracing pipeline
         VkPipeline m_RTPipeline{ VK_NULL_HANDLE };
         VkPipelineLayout m_RTPipelineLayout{ VK_NULL_HANDLE };
+        VkPipelineLayout m_ComputePipelineLayout{ VK_NULL_HANDLE };
 
         // Shader modules
         VkShaderModule m_RaygenShader          { VK_NULL_HANDLE };
@@ -158,6 +190,9 @@ namespace Vlkrt
         VkShaderModule m_ClosestHitAABBShader  { VK_NULL_HANDLE };
         VkShaderModule m_IntersectAnalyticShader { VK_NULL_HANDLE };
         VkShaderModule m_IntersectSDFShader    { VK_NULL_HANDLE };
+        VkShaderModule m_ComposeDenoisedShader { VK_NULL_HANDLE };
+
+        VkPipeline m_ComposeDenoisedPipeline{ VK_NULL_HANDLE };
 
         // Shader binding table
         VkBuffer m_SBTBuffer{ VK_NULL_HANDLE };
@@ -176,6 +211,10 @@ namespace Vlkrt
         VkBuffer m_VertexBuffer{ VK_NULL_HANDLE };
         VkDeviceMemory m_VertexMemory{ VK_NULL_HANDLE };
         VkDeviceSize m_VertexBufferSize{ 0 };
+
+        VkBuffer m_PrevVertexBuffer{ VK_NULL_HANDLE };
+        VkDeviceMemory m_PrevVertexMemory{ VK_NULL_HANDLE };
+        VkDeviceSize m_PrevVertexBufferSize{ 0 };
 
         VkBuffer m_IndexBuffer{ VK_NULL_HANDLE };
         VkDeviceMemory m_IndexMemory{ VK_NULL_HANDLE };
@@ -200,6 +239,10 @@ namespace Vlkrt
         VkDeviceMemory m_AABBTransformMemory{ VK_NULL_HANDLE };
         VkDeviceSize m_AABBTransformBufferSize{ 0 };
 
+        VkBuffer m_PrevAABBTransformBuffer{ VK_NULL_HANDLE };
+        VkDeviceMemory m_PrevAABBTransformMemory{ VK_NULL_HANDLE };
+        VkDeviceSize m_PrevAABBTransformBufferSize{ 0 };
+
         VkBuffer m_AABBMaterialBuffer{ VK_NULL_HANDLE };
         VkDeviceMemory m_AABBMaterialMemory{ VK_NULL_HANDLE };
         VkDeviceSize m_AABBMaterialBufferSize{ 0 };
@@ -210,6 +253,14 @@ namespace Vlkrt
 
         // Temporal accumulation image (binding 10, rgba32f)
         std::shared_ptr<Walnut::Image> m_AccumImage;
+
+        // NRD guide buffers for full REBLUR denoising
+        // These are written by RT shader and read by NRD compute shaders
+        std::shared_ptr<Walnut::Image> m_GuideNormalRoughness;     // RGB=normal, A=roughness (RGBA32F)
+        std::shared_ptr<Walnut::Image> m_GuideViewZ;               // R=view space depth (RGBA32F)
+        std::shared_ptr<Walnut::Image> m_GuideMotionVectors;       // RG=motion (RGBA32F)
+        std::shared_ptr<Walnut::Image> m_GuideDiffRadianceHitDist; // RGB=diffuse, A=hit distance (RGBA32F)
+        std::shared_ptr<Walnut::Image> m_GuideSpecRadianceHitDist; // RGB=specular, A=hit distance (RGBA32F)
 
         // Frame counter for temporal accumulation (resets on scene change)
         uint32_t m_FrameIndex{ 0 };
@@ -236,8 +287,18 @@ namespace Vlkrt
         bool m_SceneValid{ false };
         bool m_FirstFrame{ true };
         bool m_AccumFirstFrame{ true };
+        bool m_GuidesFirstFrame{ true };
         glm::mat4 m_LastCameraView{ glm::mat4(0.0f) }; // for temporal accumulation reset on camera move
+        glm::mat4 m_LastCameraProjection{ glm::mat4(0.0f) };
+        glm::vec2 m_LastCameraJitter{ 0.0f, 0.0f };
         float m_ElapsedTime{ 0.0f };
+        RenderPassStats m_LastPassStats{};
+
+        std::vector<GPUVertex> m_PreviousFrameVertices;
+        std::vector<AABBTransform> m_PreviousFrameAABBTransforms;
+
+        // NRD integration wrapper (currently scaffold mode until SDK/backend is wired).
+        NRDDenoiser m_NRDDenoiser;
 
         // Texture cache
         std::unordered_map<std::string, std::shared_ptr<Walnut::Image>> m_TextureCache;

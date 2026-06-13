@@ -33,10 +33,14 @@ void RayGenTemporalMain() {
     payload.worldPosition  = float4(0.0f);
     payload.throughput     = float4(1.0f);
     payload.absorption     = float4(0.0f);
+    payload.firstHitNormalRoughness = float4(0.0f, 1.0f, 0.0f, 0.5f);
+    payload.firstHitMaterialParams = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    payload.firstHitWorldPosPrev = float4(0.0f, 0.0f, 0.0f, 1.0f);
     payload.rngState       = seed;
     payload.recursionDepth = 0u;
     payload.inside         = 0u;
     payload.bsdfPdf        = 1.0f;
+    payload.firstBounceHitDist = 0.0f;
 
     RayDesc rayDesc;
     rayDesc.Origin    = ray.origin;
@@ -58,4 +62,42 @@ void RayGenTemporalMain() {
 
     g_accumImage [int2(DispatchRaysIndex().xy)] = float4(result, 1.0f);
     g_outputImage[int2(DispatchRaysIndex().xy)] = float4(result, 1.0f);
+
+    int2 pixelCoord = int2(DispatchRaysIndex().xy);
+    if (payload.worldPosition.w > 0.0f) {
+        float3 n = payload.firstHitNormalRoughness.xyz;
+        if (dot(n, n) > 1e-6f) {
+            n = normalize(n);
+        } else {
+            n = float3(0.0f, 1.0f, 0.0f);
+        }
+
+        float roughness = clamp(payload.firstHitNormalRoughness.w, 0.0f, 1.0f);
+        float depth = ComputeViewDepth(payload.worldPosition.xyz);
+        float2 motion = ComputeMotionVector(payload.worldPosition.xyz, payload.firstHitWorldPosPrev.xyz);
+        float hitDist = max(payload.firstBounceHitDist, 0.001f);
+
+        float3 albedo = payload.firstHitMaterialParams.xyz;
+        float specularWeight = saturate(payload.firstHitMaterialParams.w);
+        float diffuseWeight = saturate(1.0f - specularWeight);
+        float materialID = clamp(floor(payload.firstHitWorldPosPrev.w + 0.5f), 0.0f, 3.0f);
+
+        float normHitDistDiffuse = REBLUR_FrontEnd_GetNormHitDist(hitDist, depth, float3(3.0f, 0.1f, 20.0f), 1.0f);
+        float normHitDistSpecular = REBLUR_FrontEnd_GetNormHitDist(hitDist, depth, float3(3.0f, 0.1f, 20.0f), roughness);
+
+        float3 demodulatedDiffuse = (payload.color.xyz * diffuseWeight) / max(albedo, 0.01f);
+
+        g_guideNormalRoughness[pixelCoord] = PackNormalAndRoughness(n, roughness, materialID);
+        g_guideViewZ[pixelCoord] = float4(depth, albedo);
+        g_guideMotionVectors[pixelCoord] = float4(motion, 0.0f, 1.0f);
+        g_guideDiffRadianceHitDist[pixelCoord] = REBLUR_FrontEnd_PackRadianceAndNormHitDist(demodulatedDiffuse, normHitDistDiffuse);
+        g_guideSpecRadianceHitDist[pixelCoord] = REBLUR_FrontEnd_PackRadianceAndNormHitDist(payload.color.xyz * specularWeight, normHitDistSpecular);
+    } else {
+        g_guideNormalRoughness[pixelCoord] = PackNormalAndRoughness(float3(0.0f, 1.0f, 0.0f), 1.0f, 0.0f);
+        g_guideViewZ[pixelCoord] = float4(1e6f, float3(0.0f));
+        g_guideMotionVectors[pixelCoord] = float4(0.0f, 0.0f, 0.0f, 0.0f);
+        g_guideDiffRadianceHitDist[pixelCoord] = float4(0.0f, 0.0f, 0.0f, 0.0f);
+        g_guideSpecRadianceHitDist[pixelCoord] = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    }
+
 }

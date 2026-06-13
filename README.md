@@ -17,6 +17,9 @@ Many thanks to Cherno for providing such a great starting point and for his amaz
 - C++20 compatible compiler
 - Visual Studio 2022 or later (for Windows)
 - `make` (for Linux/Mac)
+- Vulkan SDK installed and available in `PATH`
+- CMake 3.30+ (required by NRD dependency build)
+- Git with submodule support (`git submodule update --init --recursive`)
 
 ### Building
 

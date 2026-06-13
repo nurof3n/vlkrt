@@ -11,6 +11,10 @@ project "Vlkrt-Client"
    {
       "../Vlkrt-Common/Source",
 
+      -- NRD (direct integration headers)
+      "../vendor/nrd/Include",
+      "../vendor/nrd/_NRD_SDK/Include",
+
       "../Walnut/vendor/imgui",
       "../Walnut/vendor/glfw/include",
       "../Walnut/vendor/glm",
@@ -34,7 +38,9 @@ project "Vlkrt-Client"
    defines
    {
       "YAML_CPP_STATIC_DEFINE",
-      "SOL_ALL_SAFETIES_ON=1"
+      "SOL_ALL_SAFETIES_ON=1",
+      "VLKRT_NRD_DIRECT_PATH=1",
+      "GLM_FORCE_DEPTH_ZERO_TO_ONE"
    }
 
    links
@@ -58,6 +64,12 @@ project "Vlkrt-Client"
       systemversion "latest"
       defines { "WL_PLATFORM_WINDOWS" }
       buildoptions { "/utf-8" }
+      libdirs {
+         "../vendor/nrd/_NRD_SDK/Lib/%{cfg.buildcfg}",
+      }
+      links {
+         "NRD",
+      }
 
       prebuildcommands
       {
@@ -69,6 +81,7 @@ project "Vlkrt-Client"
          '{COPY} "../%{WalnutNetworkingBinDir}GameNetworkingSockets.dll" "%{cfg.targetdir}"',
          '{COPY} "../%{WalnutNetworkingBinDir}libcrypto-3-x64.dll" "%{cfg.targetdir}"',
          '{COPY} "../vendor/luajit/src/lua51.dll" "%{cfg.targetdir}"',
+         '{COPY} "../vendor/nrd/_NRD_SDK/Lib/%{cfg.buildcfg}/NRD.dll" "%{cfg.targetdir}"',
       }
 
    filter { "system:windows", "configurations:Debug" }

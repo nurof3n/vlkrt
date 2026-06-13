@@ -33,7 +33,7 @@ namespace Vlkrt
 
         m_Client.SetDataReceivedCallback([this](const Walnut::Buffer& buffer) { OnDataReceived(buffer); });
 
-        LoadScene("default");
+        LoadScene("cornell_box");
     }
 
     void ClientLayer::RefreshResources()
@@ -165,8 +165,30 @@ namespace Vlkrt
                 m_Camera.OnResize(m_ViewportWidth, m_ViewportHeight);
             }
 
-            // Render raytraced image as background
-            auto image = m_Renderer.GetFinalImage();
+            // Render selected output as background (final image or NRD guide debug views).
+            std::shared_ptr<Walnut::Image> image = m_Renderer.GetFinalImage();
+            if (!m_Scene.EnableNRDDenoiser) {
+                switch (m_Scene.NRDGuideDebugView) {
+                    case NRDGuideDebugViewMode::NormalRoughness:
+                        image = m_Renderer.GetGuideNormalRoughness();
+                        break;
+                    case NRDGuideDebugViewMode::ViewZ:
+                        image = m_Renderer.GetGuideViewZ();
+                        break;
+                    case NRDGuideDebugViewMode::MotionVectors:
+                        image = m_Renderer.GetGuideMotionVectors();
+                        break;
+                    case NRDGuideDebugViewMode::DiffRadianceHitDist:
+                        image = m_Renderer.GetGuideDiffRadianceHitDist();
+                        break;
+                    case NRDGuideDebugViewMode::SpecRadianceHitDist:
+                        image = m_Renderer.GetGuideSpecRadianceHitDist();
+                        break;
+                    case NRDGuideDebugViewMode::FinalImage:
+                    default:
+                        break;
+                }
+            }
             if (image) {
                 ImGui::GetBackgroundDrawList()->AddImage(image->GetDescriptorSet(), viewport->Pos,
                         ImVec2(viewport->Pos.x + viewport->Size.x, viewport->Pos.y + viewport->Size.y),
@@ -176,6 +198,18 @@ namespace Vlkrt
             // Stats panel overlay
             ImGui::Begin("Stats");
             ImGui::Text("Last render: %.3fms", m_LastRenderTime);
+            const auto& passStats = m_Renderer.GetLastPassStats();
+            ImGui::Separator();
+            ImGui::Text("Pass Timings (CPU)");
+            ImGui::Text("Frame Total:      %.3f ms", passStats.FrameTotalMs);
+            ImGui::Text("Scene Setup:      %.3f ms", passStats.SceneSetupMs);
+            ImGui::Text("UBO Upload:       %.3f ms", passStats.UBOUploadMs);
+            ImGui::Text("RT Record:        %.3f ms", passStats.RayTraceRecordMs);
+            ImGui::Text("NRD Record:       %.3f ms", passStats.NRDRecordMs);
+            ImGui::Text("Cmd Submit+Wait:  %.3f ms", passStats.CommandSubmitMs);
+            ImGui::Text("NRD: %s (%s)", passStats.NRDEnabled ? "enabled" : "disabled",
+                        passStats.NRDOperational ? "operational" : "not operational");
+            ImGui::Text("Resolution: %ux%u", passStats.Width, passStats.Height);
             ImGui::Text("Player ID: %u", m_PlayerID);
             ImGui::Text("Players: %zu", m_PlayerData.size());
             ImGui::End();
@@ -235,6 +269,22 @@ namespace Vlkrt
                 if (ImGui::Checkbox("Apply Jitter", &m_Scene.ApplyJitter))           m_Renderer.ResetAccumulation();
                 if (ImGui::Checkbox("One Light Sample", &m_Scene.OnlyOneLightSample)) m_Renderer.ResetAccumulation();
                 if (ImGui::Checkbox("Anisotropic BSDF", &m_Scene.AnisotropicBSDF))   m_Renderer.ResetAccumulation();
+                if (ImGui::Checkbox("Enable NRD Denoiser", &m_Scene.EnableNRDDenoiser)) m_Renderer.ResetAccumulation();
+
+                const char* nrdDebugViewNames[] = {
+                    "Final Image",
+                    "Guide: Normal + Roughness",
+                    "Guide: ViewZ",
+                    "Guide: Motion Vectors",
+                    "Guide: Diffuse Radiance + HitDist",
+                    "Guide: Specular Radiance + HitDist"
+                };
+                int nrdDebugViewMode = (int)m_Scene.NRDGuideDebugView;
+                if (ImGui::Combo("NRD Debug View", &nrdDebugViewMode, nrdDebugViewNames, 6)) {
+                    m_Scene.NRDGuideDebugView = (NRDGuideDebugViewMode)nrdDebugViewMode;
+                }
+
+                ImGui::Text("NRD Status: %s", m_Renderer.GetNRDStatus());
 
                 // PBR Showcase: adjustable sun direction
                 if (m_Scene.SceneIndex == SceneFactory::SCENE_PBR_SHOWCASE && !m_Scene.Lights.empty()) {

@@ -11,5 +11,5 @@ void AabbClosestHitMain([[vk::location(0)]] inout RayPayload payload,
                         AabbHitAttr attr) {
     GPUPBRMaterial mat    = g_aabbMaterials[g_shaderRecord.instanceIndex];
     float3         hitPos = WorldRayOrigin() + RayTCurrent() * WorldRayDirection();
-    ClosestHitHelper(payload, mat, attr.normal, hitPos, false);
+    ClosestHitHelper(payload, mat, attr.normal, hitPos, attr.prevWorldPos, false);
 }

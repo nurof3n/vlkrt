@@ -48,16 +48,20 @@ struct Ray {
     float3 direction;
 };
 
-/// Main path-tracing payload (location 0). 64 bytes.
+/// Main path-tracing payload (location 0).
 struct RayPayload {
     float4 color;          ///< accumulated radiance
-    float4 worldPosition;  ///< hit world-pos; w=1 hit, w=0 miss
+    float4 worldPosition;  ///< hit world-pos; w=first-hit distance, w=0 miss
     float4 throughput;     ///< path throughput
     float4 absorption;     ///< accumulated Beer–Lambert absorption
+    float4 firstHitNormalRoughness; ///< xyz = first-hit normal, w = first-hit roughness
+    float4 firstHitMaterialParams;  ///< x = metallic, y = specTrans, z = clearcoat, w = albedo luminance
+    float4 firstHitWorldPosPrev;    ///< xyz = first-hit previous-frame world position
     uint   rngState;       ///< PCG RNG state
     uint   recursionDepth;
     uint   inside;         ///< non-zero when inside a refractive medium
     float  bsdfPdf;        ///< PDF of the last BSDF sample (MIS)
+    float  firstBounceHitDist;
 };
 
 /// Shadow ray payload (location 1). 4 bytes.
@@ -66,6 +70,7 @@ struct ShadowRayPayload {
 };
 
 /// GPU vertex — 48 bytes, std430-compatible
+
 struct GPUVertex {
     float3 position;  // offset  0
     float  _pad0;     // offset 12
@@ -120,6 +125,8 @@ struct AABBTransform {
 /// Scene uniform buffer — matches C++ GPUSceneData
 struct SceneUBO {
     float4x4 projectionToWorld;
+    float4x4 worldToClip;
+    float4x4 worldToClipPrev;
     float4   cameraPosition;
     float4   backgroundColor;
     uint     numLights;
@@ -136,7 +143,15 @@ struct SceneUBO {
     uint     russianRouletteDepth;
     uint     anisotropicBSDF;
     uint     sceneIndex;
-    float    _pad1, _pad2, _pad3, _pad4, _pad5, _pad6;
+    float    cameraForwardX;
+    float    cameraForwardY;
+    float    cameraForwardZ;
+    uint     nrdDebugViewMode;
+    float    _pad2, _pad3;
+
+    float3 GetCameraForward() {
+        return float3(cameraForwardX, cameraForwardY, cameraForwardZ);
+    }
 };
 
 // ------------------------------------------------------------------ //
@@ -156,6 +171,25 @@ struct SceneUBO {
 [[vk::binding(10, 0)]] [[vk::image_format("rgba32f")]]
                         RWTexture2D<float4>                    g_accumImage;
 [[vk::binding(11, 0)]] ConstantBuffer<SceneUBO>               g_scene;
+
+// NRD guide buffers (all RGBA32F for simplicity)
+[[vk::binding(12, 0)]] [[vk::image_format("rgba32f")]]
+                        RWTexture2D<float4>                    g_guideNormalRoughness;
+[[vk::binding(13, 0)]] [[vk::image_format("rgba32f")]]
+                        RWTexture2D<float4>                    g_guideViewZ;
+[[vk::binding(14, 0)]] [[vk::image_format("rgba32f")]]
+                        RWTexture2D<float4>                    g_guideMotionVectors;
+[[vk::binding(15, 0)]] [[vk::image_format("rgba32f")]]
+                        RWTexture2D<float4>                    g_guideDiffRadianceHitDist;
+[[vk::binding(16, 0)]] [[vk::image_format("rgba32f")]]
+                        RWTexture2D<float4>                    g_guideSpecRadianceHitDist;
+[[vk::binding(17, 0)]] StructuredBuffer<GPUVertex>            g_vtxPrev;
+[[vk::binding(18, 0)]] StructuredBuffer<AABBTransform>        g_aabbTransformsPrev;
+
+[[vk::binding(19, 0)]] [[vk::image_format("rgba32f")]]
+                        RWTexture2D<float4>                    g_outDiffRadianceHitDist;
+[[vk::binding(20, 0)]] [[vk::image_format("rgba32f")]]
+                        RWTexture2D<float4>                    g_outSpecRadianceHitDist;
 
 // ------------------------------------------------------------------ //
 // Math helpers
@@ -177,6 +211,48 @@ float4 RadianceClamp(float4 color) {
     float lum = GetLuminance(color.xyz);
     if (lum > 5.0f) color.xyz *= 5.0f / lum;
     return color;
+}
+
+/// Transform world position to view space (using camera position)
+float3 WorldToViewSpace(float3 worldPos) {
+    return worldPos - g_scene.cameraPosition.xyz;
+}
+
+/// Compute linear view-space depth (coordinate along forward look axis)
+float ComputeViewDepth(float3 worldPos) {
+    return dot(worldPos - g_scene.cameraPosition.xyz, g_scene.GetCameraForward());
+}
+
+float EncodeDebugViewDepth(float rawDepth) {
+    const float kDepthRange = 1024.0f;
+    const float kInvLogRange = 1.0f / log2(1.0f + kDepthRange);
+    return saturate(log2(1.0f + max(rawDepth, 0.0f)) * kInvLogRange);
+}
+
+float2 EncodeDebugMotionVector(float2 motion) {
+    // Encode motion vectors for display: map from NDC space to [0,1]
+    // motion typically in range [-1, 1] in NDC space
+    // 0.5 offset centers the display: gray = no motion, bright = +motion, dark = -motion
+    return saturate(motion * 0.5f + 0.5f);
+}
+
+float2 ComputeMotionVector(float3 worldPos, float3 prevWorldPos) {
+    float4 currClip = mul(g_scene.worldToClip, float4(worldPos, 1.0f));
+    float4 prevClip = mul(g_scene.worldToClipPrev, float4(prevWorldPos, 1.0f));
+
+    if (abs(currClip.w) < 1e-6f || abs(prevClip.w) < 1e-6f)
+        return float2(0.0f, 0.0f);
+
+    float2 currNdc = currClip.xy / currClip.w;
+    float2 prevNdc = prevClip.xy / prevClip.w;
+
+    // NRD motion convention: current UV + mv = previous UV.
+    // NDC X increases rightward, UV X increases rightward. (Same direction)
+    // NDC Y increases upward, UV Y increases downward. (Opposite directions)
+    return float2(
+        (prevNdc.x - currNdc.x) * 0.5f,
+        (currNdc.y - prevNdc.y) * 0.5f
+    );
 }
 
 // ------------------------------------------------------------------ //
@@ -249,6 +325,7 @@ Ray GenerateCameraRay(uint2 index, float2 offset) {
 /// Hit attribute for AABB / procedural shaders (written by IS, read by CH)
 struct AabbHitAttr {
     float3 normal;  ///< world-space surface normal
+    float3 prevWorldPos; ///< previous-frame world-space hit position
 };
 
 /// Per-SBT-record payload for AABB hit groups
@@ -297,3 +374,83 @@ float4 ComputeBackground(float3 rayDir) {
     }
     return g_scene.backgroundColor;
 }
+
+// ------------------------------------------------------------------ //
+// NRD helper functions
+// ------------------------------------------------------------------ //
+
+bool NRD_IsInvalid(float3 v) {
+    return isnan(v.x) || isnan(v.y) || isnan(v.z) || isinf(v.x) || isinf(v.y) || isinf(v.z);
+}
+
+bool NRD_IsInvalid(float v) {
+    return isnan(v) || isinf(v);
+}
+
+float3 NRD_LinearToYCoCg(float3 color) {
+    float Y = dot(color, float3(0.25f, 0.5f, 0.25f));
+    float Co = dot(color, float3(0.5f, 0.0f, -0.5f));
+    float Cg = dot(color, float3(-0.25f, 0.5f, -0.25f));
+    return float3(Y, Co, Cg);
+}
+
+float3 NRD_YCoCgToLinear(float3 color) {
+    float t = color.x - color.z;
+    float3 r;
+    r.y = color.x + color.z;
+    r.x = t + color.y;
+    r.z = t - color.y;
+    return max(r, 0.0f);
+}
+
+float NRD_GetSpecMagicCurve(float roughness, float power) {
+    float f = 1.0f - exp2(-200.0f * roughness * roughness);
+    f *= pow(saturate(roughness), power);
+    return f;
+}
+
+float REBLUR_GetHitDistanceNormalization(float viewZ, float3 hitDistParams, float roughness) {
+    float smc = NRD_GetSpecMagicCurve(roughness, 0.5f);
+    return (hitDistParams.x + abs(viewZ) * hitDistParams.y) * lerp(hitDistParams.z, 1.0f, smc);
+}
+
+float REBLUR_FrontEnd_GetNormHitDist(float hitDist, float viewZ, float3 hitDistParams, float roughness) {
+    float f = REBLUR_GetHitDistanceNormalization(viewZ, hitDistParams, roughness);
+    return saturate(hitDist / f);
+}
+
+float4 REBLUR_FrontEnd_PackRadianceAndNormHitDist(float3 radiance, float normHitDist) {
+    radiance = NRD_IsInvalid(radiance) ? float3(0.0f) : clamp(radiance, 0.0f, 65504.0f);
+    normHitDist = NRD_IsInvalid(normHitDist) ? 0.0f : saturate(normHitDist);
+    return float4(NRD_LinearToYCoCg(radiance), normHitDist);
+}
+
+float3 NRD_EncodeNormalRoughness101010(float3 n, float roughness) {
+    n /= abs(n.x) + abs(n.y) + abs(n.z);
+    float3 r;
+    r.y = n.y * 0.5f + 0.5f;
+    r.x = n.x * 0.5f + r.y;
+    r.y -= n.x * 0.5f;
+    roughness = max(roughness, 1.5f / 512.0f);
+    float s = n.z < 0.0f ? -roughness : roughness;
+    r.z = s * 0.5f + 0.5f;
+    return r;
+}
+
+float4 PackNormalAndRoughness(float3 N, float roughness, float materialID) {
+    float4 p;
+    p.xyz = NRD_EncodeNormalRoughness101010(N, roughness);
+    p.w = saturate(materialID / 3.0f);
+    return p;
+}
+
+void NRD_DecodeNormalRoughness101010(float3 r, out float3 n, out float roughness) {
+    float s = (r.z - 0.5f) * 2.0f;
+    roughness = abs(s);
+    float zSign = s >= 0.0f ? 1.0f : -1.0f;
+    n.x = r.x - r.y;
+    n.y = r.x + r.y - 1.0f;
+    n.z = zSign * max(0.0f, 1.0f - abs(n.x) - abs(n.y));
+    n = normalize(n);
+}
+

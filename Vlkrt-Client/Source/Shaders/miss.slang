@@ -8,6 +8,9 @@ import common;
 void MissMain([[vk::location(0)]] inout RayPayload payload) {
     payload.worldPosition = float4(0.0f);
     payload.color         = ComputeBackground(WorldRayDirection()) * payload.throughput;
+    if (payload.recursionDepth == 1u) {
+        payload.firstBounceHitDist = 1e6f;
+    }
 }
 
 // Shadow miss: ray reached the light without hitting anything → not occluded

@@ -8,3 +8,6 @@
 [submodule "vendor/luajit"]
 	path = vendor/luajit
 	url = https://github.com/LuaJIT/LuaJIT
+[submodule "vendor/nrd"]
+	path = vendor/nrd
+	url = https://github.com/NVIDIA-RTX/NRD
