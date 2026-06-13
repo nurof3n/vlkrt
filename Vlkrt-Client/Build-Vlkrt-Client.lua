@@ -15,6 +15,10 @@ project "Vlkrt-Client"
       "../vendor/nrd/Include",
       "../vendor/nrd/_NRD_SDK/Include",
 
+      -- FSR 3.1 SDK
+      "../vendor/FidelityFX-SDK-v1.1.4/sdk/include",
+      "../vendor/FidelityFX-SDK-v1.1.4/ffx-api/include",
+
       "../Walnut/vendor/imgui",
       "../Walnut/vendor/glfw/include",
       "../Walnut/vendor/glm",
@@ -40,6 +44,7 @@ project "Vlkrt-Client"
       "YAML_CPP_STATIC_DEFINE",
       "SOL_ALL_SAFETIES_ON=1",
       "VLKRT_NRD_DIRECT_PATH=1",
+      "VLKRT_FSR_ENABLED=1",
       "GLM_FORCE_DEPTH_ZERO_TO_ONE"
    }
 
@@ -66,9 +71,11 @@ project "Vlkrt-Client"
       buildoptions { "/utf-8" }
       libdirs {
          "../vendor/nrd/_NRD_SDK/Lib/%{cfg.buildcfg}",
+         "../vendor/FidelityFX-SDK-v1.1.4/PrebuiltSignedDLL",
       }
       links {
          "NRD",
+         "amd_fidelityfx_vk",
       }
 
       prebuildcommands
@@ -82,6 +89,7 @@ project "Vlkrt-Client"
          '{COPY} "../%{WalnutNetworkingBinDir}libcrypto-3-x64.dll" "%{cfg.targetdir}"',
          '{COPY} "../vendor/luajit/src/lua51.dll" "%{cfg.targetdir}"',
          '{COPY} "../vendor/nrd/_NRD_SDK/Lib/%{cfg.buildcfg}/NRD.dll" "%{cfg.targetdir}"',
+         '{COPY} "../vendor/FidelityFX-SDK-v1.1.4/PrebuiltSignedDLL/amd_fidelityfx_vk.dll" "%{cfg.targetdir}"',
       }
 
    filter { "system:windows", "configurations:Debug" }

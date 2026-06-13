@@ -145,6 +145,7 @@ namespace Vlkrt
     {
         if (m_Client.GetConnectionStatus() == Walnut::Client::ConnectionStatus::Connected) [[likely]] {
             Walnut::Timer timer;
+            m_Renderer.OnFSRSettingsChanged(m_Scene.EnableFSR, m_Scene.FSRQualityMode, m_Scene.FSRSharpness);
             m_Renderer.Render(m_Scene, m_Camera);
             m_LastRenderTime = timer.ElapsedMillis();
         }
@@ -167,6 +168,10 @@ namespace Vlkrt
 
             // Render selected output as background (final image or NRD guide debug views).
             std::shared_ptr<Walnut::Image> image = m_Renderer.GetFinalImage();
+            if (m_Scene.EnableFSR && m_Scene.NRDGuideDebugView == NRDGuideDebugViewMode::FinalImage) {
+                auto upscaled = m_Renderer.GetUpscaledImage();
+                if (upscaled) image = upscaled;
+            }
             if (!m_Scene.EnableNRDDenoiser) {
                 switch (m_Scene.NRDGuideDebugView) {
                     case NRDGuideDebugViewMode::NormalRoughness:
@@ -271,6 +276,35 @@ namespace Vlkrt
                 if (ImGui::Checkbox("Anisotropic BSDF", &m_Scene.AnisotropicBSDF))   m_Renderer.ResetAccumulation();
                 if (ImGui::Checkbox("Enable NRD Denoiser", &m_Scene.EnableNRDDenoiser)) m_Renderer.ResetAccumulation();
 
+                ImGui::Separator();
+                ImGui::Text("FSR Upscaling");
+                bool fsrEnabled = m_Scene.EnableFSR;
+                if (ImGui::Checkbox("Enable FSR", &fsrEnabled)) {
+                    m_Scene.EnableFSR = fsrEnabled;
+                    m_Renderer.ResetAccumulation();
+                }
+                if (m_Scene.EnableFSR) {
+                    const char* fsrQualityNames[] = {
+                        "Native AA (1.0x)",
+                        "Quality (1.5x)",
+                        "Balanced (1.7x)",
+                        "Performance (2.0x)",
+                        "Ultra Performance (3.0x)"
+                    };
+                    int fsrQuality = (int)m_Scene.FSRQualityMode;
+                    if (ImGui::Combo("FSR Quality Mode", &fsrQuality, fsrQualityNames, 5)) {
+                        m_Scene.FSRQualityMode = (uint32_t)fsrQuality;
+                        m_Renderer.ResetAccumulation();
+                    }
+
+                    float fsrSharpness = m_Scene.FSRSharpness;
+                    if (ImGui::SliderFloat("FSR Sharpness", &fsrSharpness, 0.0f, 1.0f)) {
+                        m_Scene.FSRSharpness = fsrSharpness;
+                        m_Renderer.ResetAccumulation();
+                    }
+                }
+                ImGui::Separator();
+
                 const char* nrdDebugViewNames[] = {
                     "Final Image",
                     "Guide: Normal + Roughness",
@@ -287,65 +321,7 @@ namespace Vlkrt
                 ImGui::Text("NRD Status: %s", m_Renderer.GetNRDStatus());
 
                 // PBR Showcase: adjustable sun direction
-                if (m_Scene.SceneIndex == SceneFactory::SCENE_PBR_SHOWCASE && !m_Scene.Lights.empty()) {
-                    ImGui::Separator(); ImGui::Text("Sun Controls");
-                    glm::vec3& sunDir = m_Scene.Lights[0].Direction;
-                    float elevation = glm::degrees(glm::asin(glm::clamp(-sunDir.y, -1.0f, 1.0f)));
-                    float azimuth   = glm::degrees(glm::atan(sunDir.z, sunDir.x));
-                    bool sunChanged = false;
-                    sunChanged |= ImGui::SliderFloat("Elevation", &elevation, -90.0f, 90.0f);
-                    sunChanged |= ImGui::SliderFloat("Azimuth",   &azimuth,  -180.0f, 180.0f);
-                    if (sunChanged) {
-                        float el = glm::radians(elevation);
-                        float az = glm::radians(azimuth);
-                        glm::vec3 newWorldDir = glm::normalize(glm::vec3(
-                            glm::cos(el) * glm::cos(az),
-                            -glm::sin(el),
-                            glm::cos(el) * glm::sin(az)));
 
-                        // Keep flat light data updated immediately for rendering.
-                        sunDir = newWorldDir;
-
-                        // Also update hierarchy transform so FlattenHierarchyToScene does not overwrite on next frame.
-                        if (!m_HierarchyMapping.LightIndexToEntity.empty() && m_HierarchyMapping.LightIndexToEntity[0]) {
-                            SceneEntity* sunEntity = m_HierarchyMapping.LightIndexToEntity[0];
-
-                            glm::mat4 parentWorld = glm::mat4(1.0f);
-                            if (sunEntity->Parent) {
-                                std::vector<SceneEntity*> chain;
-                                for (SceneEntity* p = sunEntity->Parent; p; p = p->Parent)
-                                    chain.push_back(p);
-                                for (auto it = chain.rbegin(); it != chain.rend(); ++it)
-                                    parentWorld = (*it)->LocalTransform.GetWorldMatrix(parentWorld);
-                            }
-
-                            glm::vec3 localDir = glm::normalize(glm::inverse(glm::mat3(parentWorld)) * newWorldDir);
-                            glm::vec3 defaultDirection = glm::vec3(0.0f, 0.0f, -1.0f);
-                            glm::vec3 axis = glm::cross(defaultDirection, localDir);
-                            float dot = glm::dot(defaultDirection, localDir);
-
-                            if (glm::length(axis) > 0.001f) {
-                                float angle = glm::acos(glm::clamp(dot, -1.0f, 1.0f));
-                                sunEntity->LocalTransform.Rotation = glm::angleAxis(angle, glm::normalize(axis));
-                            }
-                            else if (dot < 0.0f) {
-                                sunEntity->LocalTransform.Rotation = glm::angleAxis(glm::pi<float>(), glm::vec3(0.0f, 1.0f, 0.0f));
-                            }
-                            else {
-                                sunEntity->LocalTransform.Rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
-                            }
-                        }
-
-                        m_Renderer.ResetAccumulation();
-                    }
-                    if (ImGui::SliderFloat("Sun Intensity", &m_Scene.Lights[0].Intensity, 0.0f, 10.0f)) {
-                        // Persist intensity via hierarchy data too; otherwise flattening overwrites it next frame.
-                        if (!m_HierarchyMapping.LightIndexToEntity.empty() && m_HierarchyMapping.LightIndexToEntity[0])
-                            m_HierarchyMapping.LightIndexToEntity[0]->LightData.Intensity = m_Scene.Lights[0].Intensity;
-                        m_Renderer.ResetAccumulation();
-                    }
-                    ImGui::Separator();
-                }
 
                 // Demo: background color
                 if (m_Scene.SceneIndex == SceneFactory::SCENE_DEMO) {
@@ -545,6 +521,11 @@ namespace Vlkrt
 
     void ClientLayer::SaveScene()
     {
+        // Update scene camera settings with current runtime camera state so they persist
+        m_Scene.HasCameraHint = true;
+        m_Scene.CameraPosition = m_Camera.GetPosition();
+        m_Scene.CameraTarget = m_Camera.GetPosition() + m_Camera.GetDirection();
+
         // Hierarchy is already synced to flat arrays every frame in OnUpdate()
         // Just save to YAML
         SceneLoader::SaveToYAMLWithHierarchy(m_CurrentScene + ".yaml", m_Scene, m_SceneRoot);

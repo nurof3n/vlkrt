@@ -3,6 +3,7 @@
 #include "Scene.h"
 #include "ShaderLoader.h"
 #include "Utils.h"
+#include "FSRUpscaler.h"
 
 #include "Walnut/Application.h"
 #include "Walnut/VulkanRayTracing.h"
@@ -21,11 +22,15 @@ namespace Vlkrt
         m_RTPipelineProperties  = Walnut::Application::GetRayTracingPipelineProperties();
         m_AccelerationStructure = std::make_unique<AccelerationStructure>();
         m_NRDDenoiser.Initialize(m_Device);
+
+        m_FSRUpscaler = std::make_unique<FSRUpscaler>();
+        m_FSRUpscaler->Initialize(m_Device, Walnut::Application::GetPhysicalDevice(), Walnut::Application::GetGraphicsQueue(), Walnut::Application::GetGraphicsQueueFamily());
     }
 
     Renderer::~Renderer()
     {
         m_NRDDenoiser.Shutdown();
+        if (m_FSRUpscaler) m_FSRUpscaler->Shutdown();
 
         // Clean up Vulkan resources
         if (m_SBTBuffer != VK_NULL_HANDLE) {
@@ -109,32 +114,73 @@ namespace Vlkrt
         m_PreviousFrameAABBTransforms.clear();
     }
 
+    void Renderer::OnFSRSettingsChanged(bool enabled, uint32_t qualityMode, float sharpness)
+    {
+        bool changed = (m_FSREnabled != enabled) || 
+                       (m_FSRQuality != qualityMode) || 
+                       (m_FSRSharpness != sharpness);
+        if (changed)
+        {
+            m_FSREnabled = enabled;
+            m_FSRQuality = qualityMode;
+            m_FSRSharpness = sharpness;
+
+            if (m_DisplayWidth > 0 && m_DisplayHeight > 0)
+            {
+                OnResize(m_DisplayWidth, m_DisplayHeight);
+            }
+        }
+    }
+
     void Renderer::OnResize(uint32_t width, uint32_t height)
     {
-        auto createOrResizeImage = [&](std::shared_ptr<Walnut::Image>& img, Walnut::ImageFormat fmt) {
+        m_DisplayWidth  = width;
+        m_DisplayHeight = height;
+
+        if (m_FSREnabled && m_FSRUpscaler) {
+            m_FSRUpscaler->OnResize(width, height, static_cast<FSRUpscaler::Quality>(m_FSRQuality), m_FSRSharpness);
+            m_RenderWidth  = m_FSRUpscaler->GetRenderWidth();
+            m_RenderHeight = m_FSRUpscaler->GetRenderHeight();
+        } else {
+            m_RenderWidth  = width;
+            m_RenderHeight = height;
+        }
+
+        auto createOrResizeImage = [&](std::shared_ptr<Walnut::Image>& img, uint32_t w, uint32_t h, Walnut::ImageFormat fmt) {
             if (img) {
-                if (img->GetWidth() == width && img->GetHeight() == height) return;
-                img->Resize(width, height);
+                if (img->GetWidth() == w && img->GetHeight() == h) return;
+                img->Resize(w, h);
             }
             else {
-                img = std::make_shared<Walnut::Image>(width, height, fmt);
+                img = std::make_shared<Walnut::Image>(w, h, fmt);
             }
         };
 
-        createOrResizeImage(m_FinalImage, Walnut::ImageFormat::RGBA);
-        createOrResizeImage(m_AccumImage, Walnut::ImageFormat::RGBA32F);
+        createOrResizeImage(m_FinalImage, m_RenderWidth, m_RenderHeight, Walnut::ImageFormat::RGBA);
+        createOrResizeImage(m_AccumImage, m_RenderWidth, m_RenderHeight, Walnut::ImageFormat::RGBA32F);
 
         // NRD guide buffers for REBLUR denoising (all RGBA32F for simplified descriptor binding)
-        createOrResizeImage(m_GuideNormalRoughness, Walnut::ImageFormat::RGBA32F);
-        createOrResizeImage(m_GuideViewZ, Walnut::ImageFormat::RGBA32F);
-        createOrResizeImage(m_GuideMotionVectors, Walnut::ImageFormat::RGBA32F);
-        createOrResizeImage(m_GuideDiffRadianceHitDist, Walnut::ImageFormat::RGBA32F);
-        createOrResizeImage(m_GuideSpecRadianceHitDist, Walnut::ImageFormat::RGBA32F);
+        createOrResizeImage(m_GuideNormalRoughness, m_RenderWidth, m_RenderHeight, Walnut::ImageFormat::RGBA32F);
+        createOrResizeImage(m_GuideViewZ, m_RenderWidth, m_RenderHeight, Walnut::ImageFormat::RGBA32F);
+        createOrResizeImage(m_GuideMotionVectors, m_RenderWidth, m_RenderHeight, Walnut::ImageFormat::RGBA32F);
+        createOrResizeImage(m_GuideDiffRadianceHitDist, m_RenderWidth, m_RenderHeight, Walnut::ImageFormat::RGBA32F);
+        createOrResizeImage(m_GuideSpecRadianceHitDist, m_RenderWidth, m_RenderHeight, Walnut::ImageFormat::RGBA32F);
+        createOrResizeImage(m_GuideEmission, m_RenderWidth, m_RenderHeight, Walnut::ImageFormat::RGBA32F);
+        createOrResizeImage(m_GuideDepth, m_RenderWidth, m_RenderHeight, Walnut::ImageFormat::RGBA32F);
+
+        if (m_FSREnabled) {
+            createOrResizeImage(m_FinalImageUpscaled, m_DisplayWidth, m_DisplayHeight, Walnut::ImageFormat::RGBA);
+        } else {
+            m_FinalImageUpscaled = nullptr;
+        }
+
+        // Pre-initialize NRD instance to allocate output images at the render resolution
+        m_NRDDenoiser.EnsureDirectInstance(m_RenderWidth, m_RenderHeight);
 
         // First-time descriptor set creation (layout never changes)
         if (m_DescriptorSetLayout == VK_NULL_HANDLE) CreateDescriptorSets();
 
-        // Update output image bindings (bindings 1 and 10)
+        // Update output image bindings (bindings 1, 10, 22)
         if (m_DescriptorSet != VK_NULL_HANDLE) {
             VkDescriptorImageInfo outputInfo{};
             outputInfo.imageView   = m_FinalImage->GetVkImageView();
@@ -144,7 +190,7 @@ namespace Vlkrt
             accumInfo.imageView   = m_AccumImage->GetVkImageView();
             accumInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-            VkWriteDescriptorSet writes[9] = {};
+            VkWriteDescriptorSet writes[11] = {};
             writes[0].sType                = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             writes[0].dstSet               = m_DescriptorSet;
             writes[0].dstBinding           = 1;
@@ -184,9 +230,9 @@ namespace Vlkrt
 
             // OUT buffer descriptors (bindings 19-20)
             VkDescriptorImageInfo outInfos[2]{};
-            outInfos[0].imageView   = m_NRDDenoiser.GetOutDiffRadianceHitDist() ? m_NRDDenoiser.GetOutDiffRadianceHitDist()->GetVkImageView() : m_GuideDiffRadianceHitDist->GetVkImageView();
+            outInfos[0].imageView   = m_NRDDenoiser.GetOutDiffRadianceHitDist()->GetVkImageView();
             outInfos[0].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-            outInfos[1].imageView   = m_NRDDenoiser.GetOutSpecRadianceHitDist() ? m_NRDDenoiser.GetOutSpecRadianceHitDist()->GetVkImageView() : m_GuideSpecRadianceHitDist->GetVkImageView();
+            outInfos[1].imageView   = m_NRDDenoiser.GetOutSpecRadianceHitDist()->GetVkImageView();
             outInfos[1].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
             writes[7].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -203,14 +249,38 @@ namespace Vlkrt
             writes[8].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
             writes[8].pImageInfo      = &outInfos[1];
 
-            vkUpdateDescriptorSets(m_Device, 9, writes, 0, nullptr);
+            // Guide emission buffer descriptor (binding 21)
+            VkDescriptorImageInfo emissionInfo{};
+            emissionInfo.imageView   = m_GuideEmission->GetVkImageView();
+            emissionInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+            writes[9].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[9].dstSet          = m_DescriptorSet;
+            writes[9].dstBinding      = 21;
+            writes[9].descriptorCount = 1;
+            writes[9].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            writes[9].pImageInfo      = &emissionInfo;
+
+            // Guide depth buffer descriptor (binding 22)
+            VkDescriptorImageInfo depthInfo{};
+            depthInfo.imageView   = m_GuideDepth->GetVkImageView();
+            depthInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+            writes[10].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[10].dstSet          = m_DescriptorSet;
+            writes[10].dstBinding      = 22;
+            writes[10].descriptorCount = 1;
+            writes[10].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            writes[10].pImageInfo      = &depthInfo;
+
+            vkUpdateDescriptorSets(m_Device, 11, writes, 0, nullptr);
         }
 
         // Update NRD guide buffers with real renderer buffers (populated by RT shader)
         m_NRDDenoiser.SetGuideBuffers(m_GuideNormalRoughness, m_GuideViewZ, m_GuideMotionVectors,
                 m_GuideDiffRadianceHitDist, m_GuideSpecRadianceHitDist);
 
-        // Force pipeline rebuild on next Render (procedural count may differ from any cached value)
+        // Force pipeline rebuild on next Render
         m_FirstFrame       = true;
         m_AccumFirstFrame  = true;
         m_GuidesFirstFrame = true;
@@ -388,9 +458,11 @@ namespace Vlkrt
                 m_GuideMotionVectors,
                 m_GuideDiffRadianceHitDist,
                 m_GuideSpecRadianceHitDist,
+                m_GuideEmission,
+                m_GuideDepth,
             };
 
-            VkImageMemoryBarrier barriers[5]{};
+            VkImageMemoryBarrier barriers[7]{};
             uint32_t barrierCount = 0;
             for (const auto& guideImage : guideImages) {
                 if (!guideImage) continue;
@@ -476,8 +548,8 @@ namespace Vlkrt
 
             denoiseParams.CameraJitter[0]     = 0.0f;
             denoiseParams.CameraJitter[1]     = 0.0f;
-            denoiseParams.CameraJitterPrev[0] = m_LastCameraJitter.x;
-            denoiseParams.CameraJitterPrev[1] = m_LastCameraJitter.y;
+            denoiseParams.CameraJitterPrev[0] = 0.0f;
+            denoiseParams.CameraJitterPrev[1] = 0.0f;
             denoiseParams.HasValidMatrices    = true;
 
             const auto nrdRecordStart = Clock::now();
@@ -495,35 +567,6 @@ namespace Vlkrt
                         1, &composeBarrier,
                         0, nullptr,
                         0, nullptr);
-
-                // NRD OUT images are only allocated after the first Dispatch. Update bindings 19/20
-                // each frame so the compose shader reads from the freshly-written NRD output.
-                auto outDiff = m_NRDDenoiser.GetOutDiffRadianceHitDist();
-                auto outSpec = m_NRDDenoiser.GetOutSpecRadianceHitDist();
-                if (outDiff && outSpec) {
-                    VkDescriptorImageInfo outInfos[2]{};
-                    outInfos[0].imageView   = outDiff->GetVkImageView();
-                    outInfos[0].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-                    outInfos[1].imageView   = outSpec->GetVkImageView();
-                    outInfos[1].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-
-                    VkWriteDescriptorSet outWrites[2] = {};
-                    outWrites[0] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-                    outWrites[0].dstSet          = m_DescriptorSet;
-                    outWrites[0].dstBinding      = 19;
-                    outWrites[0].descriptorCount = 1;
-                    outWrites[0].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-                    outWrites[0].pImageInfo      = &outInfos[0];
-
-                    outWrites[1] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-                    outWrites[1].dstSet          = m_DescriptorSet;
-                    outWrites[1].dstBinding      = 20;
-                    outWrites[1].descriptorCount = 1;
-                    outWrites[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-                    outWrites[1].pImageInfo      = &outInfos[1];
-
-                    vkUpdateDescriptorSets(m_Device, 2, outWrites, 0, nullptr);
-                }
 
                 vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_ComposeDenoisedPipeline);
                 vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_ComputePipelineLayout, 0, 1,
@@ -557,6 +600,60 @@ namespace Vlkrt
                     VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
         }
 
+        if (m_FSREnabled && m_FSRUpscaler && m_FinalImageUpscaled) {
+            {
+                VkImageMemoryBarrier barrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+                barrier.image                = m_FinalImageUpscaled->GetVkImage();
+                barrier.oldLayout            = m_FirstFrame ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                barrier.newLayout            = VK_IMAGE_LAYOUT_GENERAL;
+                barrier.srcAccessMask        = m_FirstFrame ? 0 : VK_ACCESS_SHADER_READ_BIT;
+                barrier.dstAccessMask        = VK_ACCESS_SHADER_WRITE_BIT;
+                barrier.srcQueueFamilyIndex  = VK_QUEUE_FAMILY_IGNORED;
+                barrier.dstQueueFamilyIndex  = VK_QUEUE_FAMILY_IGNORED;
+                barrier.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+                barrier.subresourceRange.baseMipLevel   = 0;
+                barrier.subresourceRange.levelCount     = 1;
+                barrier.subresourceRange.baseArrayLayer = 0;
+                barrier.subresourceRange.layerCount     = 1;
+                vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+            }
+
+            float dtMs = 16.6667f;
+
+            m_FSRUpscaler->Dispatch(
+                cmd,
+                m_FinalImage,
+                m_GuideDepth,
+                m_GuideMotionVectors,
+                m_FinalImageUpscaled,
+                m_LastCameraJitter,
+                dtMs,
+                m_FirstFrame,
+                camera.GetNearClip(),
+                camera.GetFarClip(),
+                glm::radians(camera.GetFOV())
+            );
+
+            {
+                VkImageMemoryBarrier barrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+                barrier.image                = m_FinalImageUpscaled->GetVkImage();
+                barrier.oldLayout            = VK_IMAGE_LAYOUT_GENERAL;
+                barrier.newLayout            = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                barrier.srcAccessMask        = VK_ACCESS_SHADER_WRITE_BIT;
+                barrier.dstAccessMask        = VK_ACCESS_SHADER_READ_BIT;
+                barrier.srcQueueFamilyIndex  = VK_QUEUE_FAMILY_IGNORED;
+                barrier.dstQueueFamilyIndex  = VK_QUEUE_FAMILY_IGNORED;
+                barrier.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+                barrier.subresourceRange.baseMipLevel   = 0;
+                barrier.subresourceRange.levelCount     = 1;
+                barrier.subresourceRange.baseArrayLayer = 0;
+                barrier.subresourceRange.layerCount     = 1;
+                vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+            }
+        }
+
         // Transition guide images for ImGui debug sampling.
         {
             std::shared_ptr<Walnut::Image> guideImages[] = {
@@ -565,9 +662,11 @@ namespace Vlkrt
                 m_GuideMotionVectors,
                 m_GuideDiffRadianceHitDist,
                 m_GuideSpecRadianceHitDist,
+                m_GuideEmission,
+                m_GuideDepth,
             };
 
-            VkImageMemoryBarrier barriers[5]{};
+            VkImageMemoryBarrier barriers[7]{};
             uint32_t barrierCount = 0;
             for (const auto& guideImage : guideImages) {
                 if (!guideImage) continue;
@@ -600,7 +699,7 @@ namespace Vlkrt
 
         m_LastCameraProjection = camera.GetProjection();
         m_LastCameraView       = camera.GetView();
-        m_LastCameraJitter     = glm::vec2(0.0f, 0.0f);
+
 
         const auto frameEnd              = Clock::now();
         m_LastPassStats.SceneSetupMs     = msBetween(setupStart, setupEnd);
@@ -630,6 +729,9 @@ namespace Vlkrt
         }
         if (m_RTPipelineLayout != VK_NULL_HANDLE) {
             vkDestroyPipelineLayout(m_Device, m_RTPipelineLayout, nullptr);
+            if (m_ComputePipelineLayout == m_RTPipelineLayout) {
+                m_ComputePipelineLayout = VK_NULL_HANDLE;
+            }
             m_RTPipelineLayout = VK_NULL_HANDLE;
         }
         if (m_ComputePipelineLayout != VK_NULL_HANDLE) {
@@ -644,17 +746,65 @@ namespace Vlkrt
         }
     }
 
+    static float Halton(int32_t index, int32_t base)
+    {
+        float f = 1.0f;
+        float r = 0.0f;
+        int32_t curr = index;
+        while (curr > 0) {
+            f = f / (float)base;
+            r = r + f * (float)(curr % base);
+            curr = curr / base;
+        }
+        return r;
+    }
+
     void Renderer::UpdateSceneUBO(const Scene& scene, const Camera& camera)
     {
         ++m_GlobalTick;
         SceneUBOData ubo{};
-        const glm::mat4 worldToClip = camera.GetProjection() * camera.GetView();
-        const glm::mat4 worldToClipPrev
-                = (m_FirstFrame) ? worldToClip : (m_LastCameraProjection * m_LastCameraView);
 
-        ubo.projectionToWorld       = glm::inverse(worldToClip);
-        ubo.worldToClip             = worldToClip;
-        ubo.worldToClipPrev         = worldToClipPrev;
+        // Store previous frame jitter
+        m_PrevCameraJitter = m_LastCameraJitter;
+
+        glm::mat4 projection = camera.GetProjection();
+        float jitterX = 0.0f;
+        float jitterY = 0.0f;
+
+        if (m_FSREnabled && m_FSRUpscaler) {
+            // Calculate jitter phase count using FSR formula: 8.0 * (display_width / render_width)^2
+            float ratio = (float)m_DisplayWidth / (float)m_RenderWidth;
+            int32_t phaseCount = int32_t(8.0f * ratio * ratio);
+            if (phaseCount < 1) phaseCount = 1;
+
+            jitterX = Halton((m_FrameIndex % phaseCount) + 1, 2) - 0.5f;
+            jitterY = Halton((m_FrameIndex % phaseCount) + 1, 3) - 0.5f;
+
+            // Apply jitter to projection matrix (unit pixels -> NDC translation)
+            float ndcOffsetX = 2.0f * jitterX / (float)m_RenderWidth;
+            float ndcOffsetY = -2.0f * jitterY / (float)m_RenderHeight;
+            projection[2][0] += ndcOffsetX;
+            projection[2][1] += ndcOffsetY;
+
+            m_LastCameraJitter = glm::vec2(jitterX, jitterY);
+        } else {
+            m_LastCameraJitter = glm::vec2(0.0f, 0.0f);
+        }
+
+        const glm::mat4 worldToClipJittered = projection * camera.GetView();
+        
+        // Compute unjittered clip space matrices for jitter-free motion vectors on the GPU
+        const glm::mat4 worldToClipUnjittered = camera.GetProjection() * camera.GetView();
+        const glm::mat4 worldToClipPrevUnjittered
+                = (m_FirstFrame) ? worldToClipUnjittered : (m_LastCameraProjection * m_LastCameraView);
+
+        // projectionToWorld uses the jittered projection to generate jittered camera rays
+        ubo.projectionToWorld       = glm::inverse(worldToClipJittered);
+        
+        // worldToClip and worldToClipPrev use the unjittered projection for jitter-free motion vectors
+        ubo.worldToClip             = worldToClipUnjittered;
+        ubo.worldToClipPrev         = worldToClipPrevUnjittered;
+
         ubo.cameraPosition          = glm::vec4(camera.GetPosition(), 1.0f);
         ubo.backgroundColor         = glm::vec4(scene.BackgroundColor, 1.0f);
         ubo.numLights               = (uint32_t) scene.Lights.size();
@@ -666,7 +816,10 @@ namespace Vlkrt
         ubo.maxShadowRecursionDepth = scene.MaxShadowRecursionDepth;
         ubo.pathSqrtSamplesPerPixel = scene.PathSqrtSamplesPerPixel;
         ubo.pathFrameCacheIndex     = m_FrameIndex + 1;
-        ubo.applyJitter             = scene.ApplyJitter ? 1u : 0u;
+        
+        // Disable random per-pixel/per-sample jitter when FSR is active to prevent noise clash
+        ubo.applyJitter             = (scene.ApplyJitter && !m_FSREnabled) ? 1u : 0u;
+
         ubo.onlyOneLightSample      = scene.OnlyOneLightSample ? 1u : 0u;
         ubo.russianRouletteDepth    = scene.RussianRouletteDepth;
         ubo.anisotropicBSDF         = scene.AnisotropicBSDF ? 1u : 0u;
@@ -969,8 +1122,8 @@ namespace Vlkrt
                                           | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_INTERSECTION_BIT_KHR;
         const VkShaderStageFlags kAllRTCompute = kAllRT | VK_SHADER_STAGE_COMPUTE_BIT;
 
-        VkDescriptorSetLayoutBinding bindings[21] = {};
-
+        VkDescriptorSetLayoutBinding bindings[23] = {};
+ 
         // 0: TLAS
         bindings[0] = { 0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, kAllRTCompute, nullptr };
         // 1: output image (rgba8)
@@ -998,9 +1151,13 @@ namespace Vlkrt
         bindings[11] = { 11, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, kAllRTCompute, nullptr };
         // 12-16: NRD guide buffers
         bindings[12] = { 12, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, kAllRTCompute, nullptr };
+        // 13: viewZ
         bindings[13] = { 13, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, kAllRTCompute, nullptr };
+        // 14: motion
         bindings[14] = { 14, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, kAllRTCompute, nullptr };
+        // 15: diff
         bindings[15] = { 15, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, kAllRTCompute, nullptr };
+        // 16: spec
         bindings[16] = { 16, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, kAllRTCompute, nullptr };
         // 17: previous-frame vertex buffer
         bindings[17] = { 17, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, kAllRTCompute, nullptr };
@@ -1008,19 +1165,23 @@ namespace Vlkrt
         bindings[18] = { 18, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, kAllRTCompute, nullptr };
         // 19-20: Separate OUT targets for NRD
         bindings[19] = { 19, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, kAllRTCompute, nullptr };
+        // 20: specular
         bindings[20] = { 20, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, kAllRTCompute, nullptr };
-
+        // 21: guide emission
+        bindings[21] = { 21, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, kAllRTCompute, nullptr };
+        // 22: guide depth
+        bindings[22] = { 22, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, kAllRTCompute, nullptr };
+ 
         VkDescriptorSetLayoutCreateInfo layoutInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-        layoutInfo.bindingCount                    = 21;
+        layoutInfo.bindingCount                    = 23;
         layoutInfo.pBindings                       = bindings;
         vkCreateDescriptorSetLayout(m_Device, &layoutInfo, nullptr, &m_DescriptorSetLayout);
-
+ 
         // Pool
         VkDescriptorPoolSize poolSizes[5] = {};
         poolSizes[0] = { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1 };
-        poolSizes[1] = { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 9 };  // binding 1,10,12-16,19,20
-        poolSizes[2]
-                = { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 9 };  // vtx,idx,mat,matIdx,lights,aabbT,aabbM,prevVtx,prevAabbT
+        poolSizes[1] = { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 11 };  // binding 1,10,12-16,19,20,21,22
+        poolSizes[2] = { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 9 };  // vtx,idx,mat,matIdx,lights,aabbT,aabbM,prevVtx,prevAabbT
         poolSizes[3] = { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16 };
         poolSizes[4] = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 };
 

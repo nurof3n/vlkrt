@@ -20,6 +20,7 @@ namespace Vlkrt
 {
     class Camera;
     struct Scene;
+    class FSRUpscaler;
 
     // GPU-aligned vertex structure (48 bytes, matches GLSL GPUVertex)
     struct GPUVertex
@@ -153,7 +154,12 @@ namespace Vlkrt
         auto GetGuideMotionVectors() const -> std::shared_ptr<Walnut::Image> { return m_GuideMotionVectors; }
         auto GetGuideDiffRadianceHitDist() const -> std::shared_ptr<Walnut::Image> { return m_GuideDiffRadianceHitDist; }
         auto GetGuideSpecRadianceHitDist() const -> std::shared_ptr<Walnut::Image> { return m_GuideSpecRadianceHitDist; }
+        auto GetGuideEmission() const -> std::shared_ptr<Walnut::Image> { return m_GuideEmission; }
+        auto GetGuideDepth() const -> std::shared_ptr<Walnut::Image> { return m_GuideDepth; }
+        auto GetUpscaledImage() const -> std::shared_ptr<Walnut::Image> { return m_FinalImageUpscaled; }
         const RenderPassStats& GetLastPassStats() const { return m_LastPassStats; }
+
+        void OnFSRSettingsChanged(bool enabled, uint32_t qualityMode, float sharpness);
 
         void PreloadTextures(const std::vector<std::string>& textureFilenames);
 
@@ -261,6 +267,19 @@ namespace Vlkrt
         std::shared_ptr<Walnut::Image> m_GuideMotionVectors;       // RG=motion (RGBA32F)
         std::shared_ptr<Walnut::Image> m_GuideDiffRadianceHitDist; // RGB=diffuse, A=hit distance (RGBA32F)
         std::shared_ptr<Walnut::Image> m_GuideSpecRadianceHitDist; // RGB=specular, A=hit distance (RGBA32F)
+        std::shared_ptr<Walnut::Image> m_GuideEmission;            // RGB=direct emission (RGBA32F)
+        std::shared_ptr<Walnut::Image> m_GuideDepth;               // NDC depth (RGBA32F)
+
+        // FSR upscaler
+        std::unique_ptr<FSRUpscaler> m_FSRUpscaler;
+        std::shared_ptr<Walnut::Image> m_FinalImageUpscaled;
+        uint32_t m_RenderWidth{ 0 };
+        uint32_t m_RenderHeight{ 0 };
+        uint32_t m_DisplayWidth{ 0 };
+        uint32_t m_DisplayHeight{ 0 };
+        bool     m_FSREnabled{ false };
+        uint32_t m_FSRQuality{ 1 };
+        float    m_FSRSharpness{ 0.0f };
 
         // Frame counter for temporal accumulation (resets on scene change)
         uint32_t m_FrameIndex{ 0 };
@@ -291,6 +310,7 @@ namespace Vlkrt
         glm::mat4 m_LastCameraView{ glm::mat4(0.0f) }; // for temporal accumulation reset on camera move
         glm::mat4 m_LastCameraProjection{ glm::mat4(0.0f) };
         glm::vec2 m_LastCameraJitter{ 0.0f, 0.0f };
+        glm::vec2 m_PrevCameraJitter{ 0.0f, 0.0f };
         float m_ElapsedTime{ 0.0f };
         RenderPassStats m_LastPassStats{};
 

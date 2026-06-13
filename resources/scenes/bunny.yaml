@@ -22,71 +22,69 @@ entities:
     position: [ 0, 0, 0 ]
     rotation: [ 0, 0, 0, 1 ]
     scale: [ 1, 1, 1 ]
-  children:
-    - name: ground_plane
-      type: mesh
-      transform:
-        position: [ 0, -1.5, 0 ]
-        rotation: [ 0, 0, 0, 1 ]
-        scale: [ 10, 0.5, 10 ]
-      mesh: ground.obj
-      material: 2
-    - name: bunny_main
-      type: mesh
-      transform:
-        position: [ -1.9, -1, 0 ]
-        rotation: [ 0, 0, 0, 1 ]
-        scale: [ 10, 10, 10 ]
-      mesh: bunny.obj
-      material: 0
-    - name: lighting_rig
-      type: empty
-      transform:
-        position: [ 0, 0, 0 ]
-        rotation: [ 0, 0, 0, 1 ]
-        scale: [ 1, 1, 1 ]
-      children:
-        - name: key_light
-          type: light
-          transform:
-            position: [ 5, 8, 5 ]
-            rotation: [ -0.382707, 0, -0, 0.92387 ]
-            scale: [ 1, 1, 1 ]
-          light_emission: [ 1, 0.98, 0.95 ]
-          light_intensity: 1.8
-          light_type: 0
-          light_direction: [ 0, -0.707143, -0.707071 ]
-          light_size: 1.825
-        - name: fill_light
-          type: light
-          transform:
-            position: [ -4, 5, -3 ]
-            rotation: [ 0, 0, 0, 1 ]
-            scale: [ 1, 1, 1 ]
-          light_emission: [ 0.7, 0.75, 0.85 ]
-          light_intensity: 1.2
-          light_type: 1
-          light_direction: [ 0, 0, -1 ]
-        - name: rim_light
-          type: light
-          transform:
-            position: [ 3, 3, -6 ]
-            rotation: [ 0, 0, 0, 1 ]
-            scale: [ 1, 1, 1 ]
-          light_emission: [ 0.9, 0.4, 1 ]
-          light_intensity: 4
-          light_type: 1
-          light_direction: [ 0, 0, -1 ]
-        - name: ambient_light
-          type: light
-          transform:
-            position: [ 0, 10, 0 ]
-            rotation: [ 0, 0, 0, 1 ]
-            scale: [ 1, 1, 1 ]
-          light_emission: [ 0.8, 0.8, 0.9 ]
-          light_intensity: 0.6
-          light_type: 1
-          light_direction: [ 0, 0, -1 ]
+- name: ground_plane
+  type: mesh
+  transform:
+    position: [ 0, -1.5, 0 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 10, 0.5, 10 ]
+  mesh: ground.obj
+  material: 2
+- name: bunny_main
+  type: mesh
+  transform:
+    position: [ -1.9, -1, 0 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 10, 10, 10 ]
+  mesh: bunny.obj
+  material: 0
+- name: lighting_rig
+  type: empty
+  transform:
+    position: [ 0, 0, 0 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+- name: key_light
+  type: light
+  transform:
+    position: [ 5, 8, 5 ]
+    rotation: [ -0.382707, 0, -0, 0.92387 ]
+    scale: [ 1, 1, 1 ]
+  light_emission: [ 1, 0.98, 0.95 ]
+  light_intensity: 1.8
+  light_type: 0
+  light_direction: [ 0, -0.707143, -0.707071 ]
+  light_size: 1.825
+- name: fill_light
+  type: light
+  transform:
+    position: [ -4, 5, -3 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  light_emission: [ 0.7, 0.75, 0.85 ]
+  light_intensity: 1.2
+  light_type: 1
+  light_direction: [ 0, 0, -1 ]
+- name: rim_light
+  type: light
+  transform:
+    position: [ 3, 3, -6 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  light_emission: [ 0.9, 0.4, 1 ]
+  light_intensity: 4
+  light_type: 1
+  light_direction: [ 0, 0, -1 ]
+- name: ambient_light
+  type: light
+  transform:
+    position: [ 0, 10, 0 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  light_emission: [ 0.8, 0.8, 0.9 ]
+  light_intensity: 0.6
+  light_type: 1
+  light_direction: [ 0, 0, -1 ]
 
 scene_settings:
   background_color: [ 0, 0, 0 ]
@@ -97,3 +95,8 @@ scene_settings:
   russian_roulette_depth: 3
   apply_jitter: true
   anisotropic_bsdf: true
+  enable_fsr: false
+  fsr_quality_mode: 1
+  fsr_sharpness: 0
+  camera_position: [ -4.87352, 0.641678, 2.225 ]
+  camera_target: [ -4.02498, 0.506941, 1.7133 ]

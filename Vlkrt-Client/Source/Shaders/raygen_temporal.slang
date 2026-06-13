@@ -41,6 +41,12 @@ void RayGenTemporalMain() {
     payload.inside         = 0u;
     payload.bsdfPdf        = 1.0f;
     payload.firstBounceHitDist = 0.0f;
+    payload.diffuse        = float3(0.0f);
+    payload.specular       = float3(0.0f);
+    payload.diffuseHitDist = 0.0f;
+    payload.specularHitDist = 0.0f;
+    payload.emission       = float3(0.0f);
+    payload.firstHitMetallic = 0.0f;
 
     RayDesc rayDesc;
     rayDesc.Origin    = ray.origin;
@@ -75,29 +81,44 @@ void RayGenTemporalMain() {
         float roughness = clamp(payload.firstHitNormalRoughness.w, 0.0f, 1.0f);
         float depth = ComputeViewDepth(payload.worldPosition.xyz);
         float2 motion = ComputeMotionVector(payload.worldPosition.xyz, payload.firstHitWorldPosPrev.xyz);
-        float hitDist = max(payload.firstBounceHitDist, 0.001f);
 
         float3 albedo = payload.firstHitMaterialParams.xyz;
-        float specularWeight = saturate(payload.firstHitMaterialParams.w);
-        float diffuseWeight = saturate(1.0f - specularWeight);
         float materialID = clamp(floor(payload.firstHitWorldPosPrev.w + 0.5f), 0.0f, 3.0f);
+        float metallic = clamp(payload.firstHitMetallic, 0.0f, 1.0f);
 
-        float normHitDistDiffuse = REBLUR_FrontEnd_GetNormHitDist(hitDist, depth, float3(3.0f, 0.1f, 20.0f), 1.0f);
-        float normHitDistSpecular = REBLUR_FrontEnd_GetNormHitDist(hitDist, depth, float3(3.0f, 0.1f, 20.0f), roughness);
+        float diffHitDist = (payload.diffuseHitDist > 0.0f) ? max(payload.diffuseHitDist, 0.001f) : 0.0f;
+        float specHitDist = (payload.specularHitDist > 0.0f) ? max(payload.specularHitDist, 0.001f) : 0.0f;
 
-        float3 demodulatedDiffuse = (payload.color.xyz * diffuseWeight) / max(albedo, 0.01f);
+        float normHitDistDiffuse = REBLUR_FrontEnd_GetNormHitDist(diffHitDist, depth, float3(3.0f, 0.1f, 20.0f), 1.0f);
+        float normHitDistSpecular = REBLUR_FrontEnd_GetNormHitDist(specHitDist, depth, float3(3.0f, 0.1f, 20.0f), roughness);
+
+        Ray rayCenter = GenerateCameraRay(pixelCoord, float2(0.5f, 0.5f));
+        float3 V = -rayCenter.direction;
+        float3 Rf0 = lerp(float3(0.04f), albedo, metallic);
+        float3 diffFactor, specFactor;
+        NRD_MaterialFactors(n, V, albedo, Rf0, roughness, diffFactor, specFactor);
+
+        float3 demodulatedDiffuse = clamp(payload.diffuse / diffFactor, 0.0f, 20.0f);
+        float3 demodulatedSpecular = clamp(payload.specular / specFactor, 0.0f, 250.0f);
+
+        float4 clipPos = mul(g_scene.worldToClip, float4(payload.worldPosition.xyz, 1.0f));
+        float ndcDepth = (clipPos.w > 0.0f) ? (clipPos.z / clipPos.w) : 1.0f;
 
         g_guideNormalRoughness[pixelCoord] = PackNormalAndRoughness(n, roughness, materialID);
         g_guideViewZ[pixelCoord] = float4(depth, albedo);
-        g_guideMotionVectors[pixelCoord] = float4(motion, 0.0f, 1.0f);
+        g_guideMotionVectors[pixelCoord] = float4(motion, metallic, 1.0f);
         g_guideDiffRadianceHitDist[pixelCoord] = REBLUR_FrontEnd_PackRadianceAndNormHitDist(demodulatedDiffuse, normHitDistDiffuse);
-        g_guideSpecRadianceHitDist[pixelCoord] = REBLUR_FrontEnd_PackRadianceAndNormHitDist(payload.color.xyz * specularWeight, normHitDistSpecular);
+        g_guideSpecRadianceHitDist[pixelCoord] = REBLUR_FrontEnd_PackRadianceAndNormHitDist(demodulatedSpecular, normHitDistSpecular);
+        g_guideEmission[pixelCoord] = float4(payload.emission, 1.0f);
+        g_guideDepth[pixelCoord] = float4(ndcDepth, 0.0f, 0.0f, 1.0f);
     } else {
         g_guideNormalRoughness[pixelCoord] = PackNormalAndRoughness(float3(0.0f, 1.0f, 0.0f), 1.0f, 0.0f);
         g_guideViewZ[pixelCoord] = float4(1e6f, float3(0.0f));
         g_guideMotionVectors[pixelCoord] = float4(0.0f, 0.0f, 0.0f, 0.0f);
         g_guideDiffRadianceHitDist[pixelCoord] = float4(0.0f, 0.0f, 0.0f, 0.0f);
         g_guideSpecRadianceHitDist[pixelCoord] = float4(0.0f, 0.0f, 0.0f, 0.0f);
+        g_guideEmission[pixelCoord] = float4(0.0f, 0.0f, 0.0f, 0.0f);
+        g_guideDepth[pixelCoord] = float4(1.0f, 0.0f, 0.0f, 1.0f);
     }
 
 }

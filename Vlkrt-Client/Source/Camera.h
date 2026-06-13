@@ -29,6 +29,10 @@ namespace Vlkrt
         const auto& GetPosition() const { return m_Position; }
         const auto& GetDirection() const { return m_ForwardDirection; }
 
+        float GetFOV() const { return m_VerticalFOV; }
+        float GetNearClip() const { return m_NearClip; }
+        float GetFarClip() const { return m_FarClip; }
+
         void SetPosition(const glm::vec3& pos) { m_Position = pos; RecalculateView(); }
         void SetTarget(const glm::vec3& target) {
             glm::vec3 dir = target - m_Position;

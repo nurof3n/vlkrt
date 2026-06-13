@@ -29,6 +29,79 @@ namespace Vlkrt
 
         static void Copy16(float* dst, const float* src) { std::memcpy(dst, src, sizeof(float) * 16); }
 
+        static Walnut::ImageFormat GetWalnutFormat(nrd::Format format)
+        {
+            switch (format)
+            {
+                case nrd::Format::R8_UNORM:
+                case nrd::Format::R8_SNORM:
+                case nrd::Format::R8_UINT:
+                case nrd::Format::R8_SINT:
+                    // Fall back to RGBA or R32F if R8 is not supported. Walnut Image doesn't have an R8 format.
+                    // We can use RGBA as a general fallback format.
+                    return Walnut::ImageFormat::RGBA;
+
+                case nrd::Format::RG8_UNORM:
+                case nrd::Format::RG8_SNORM:
+                case nrd::Format::RG8_UINT:
+                case nrd::Format::RG8_SINT:
+                    return Walnut::ImageFormat::RGBA;
+
+                case nrd::Format::RGBA8_UNORM:
+                case nrd::Format::RGBA8_SNORM:
+                case nrd::Format::RGBA8_UINT:
+                case nrd::Format::RGBA8_SINT:
+                case nrd::Format::RGBA8_SRGB:
+                    return Walnut::ImageFormat::RGBA;
+
+                case nrd::Format::R16_UNORM:
+                case nrd::Format::R16_SNORM:
+                case nrd::Format::R16_UINT:
+                case nrd::Format::R16_SINT:
+                case nrd::Format::R16_SFLOAT:
+                    return Walnut::ImageFormat::R32F;
+
+                case nrd::Format::RG16_UNORM:
+                case nrd::Format::RG16_SNORM:
+                case nrd::Format::RG16_UINT:
+                case nrd::Format::RG16_SINT:
+                case nrd::Format::RG16_SFLOAT:
+                    // RG16F is supported by Walnut!
+                    return Walnut::ImageFormat::RG16F;
+
+                case nrd::Format::RGBA16_UNORM:
+                case nrd::Format::RGBA16_SNORM:
+                case nrd::Format::RGBA16_UINT:
+                case nrd::Format::RGBA16_SINT:
+                case nrd::Format::RGBA16_SFLOAT:
+                    return Walnut::ImageFormat::RGBA32F;
+
+                case nrd::Format::R32_UINT:
+                case nrd::Format::R32_SINT:
+                case nrd::Format::R32_SFLOAT:
+                    return Walnut::ImageFormat::R32F;
+
+                case nrd::Format::RG32_UINT:
+                case nrd::Format::RG32_SINT:
+                case nrd::Format::RG32_SFLOAT:
+                    // Use RGBA32F since RG32F is not natively in Walnut::ImageFormat list
+                    return Walnut::ImageFormat::RGBA32F;
+
+                case nrd::Format::RGB32_UINT:
+                case nrd::Format::RGB32_SINT:
+                case nrd::Format::RGB32_SFLOAT:
+                    return Walnut::ImageFormat::RGBA32F;
+
+                case nrd::Format::RGBA32_UINT:
+                case nrd::Format::RGBA32_SINT:
+                case nrd::Format::RGBA32_SFLOAT:
+                    return Walnut::ImageFormat::RGBA32F;
+
+                default:
+                    return Walnut::ImageFormat::RGBA32F;
+            }
+        }
+
         static uint32_t FindMemoryTypeIndex(
                 VkPhysicalDevice physicalDevice, uint32_t typeBits, VkMemoryPropertyFlags properties)
         {
@@ -106,6 +179,10 @@ namespace Vlkrt
             m_NrdConstantBuffer = VK_NULL_HANDLE;
         }
         if (m_NrdConstantMemory != VK_NULL_HANDLE) {
+            if (m_NrdConstantMapped) {
+                vkUnmapMemory(m_Device, m_NrdConstantMemory);
+                m_NrdConstantMapped = nullptr;
+            }
             vkFreeMemory(m_Device, m_NrdConstantMemory, nullptr);
             m_NrdConstantMemory = VK_NULL_HANDLE;
         }
@@ -199,6 +276,11 @@ namespace Vlkrt
 
             if (vkAllocateMemory(m_Device, &allocInfo, nullptr, &m_NrdConstantMemory) != VK_SUCCESS) return false;
             if (vkBindBufferMemory(m_Device, m_NrdConstantBuffer, m_NrdConstantMemory, 0) != VK_SUCCESS) return false;
+
+            if (vkMapMemory(m_Device, m_NrdConstantMemory, 0, req.size, 0, &m_NrdConstantMapped) != VK_SUCCESS) {
+                m_NrdConstantMapped = nullptr;
+                return false;
+            }
         }
 
         // Vulkan SPIR-V register shifts (from NRD CMakeLists)
@@ -339,15 +421,16 @@ namespace Vlkrt
                 zeroImage(m_OutSpecRadianceHitDist);
             }
 
-            // Create NRD internal pools. Walnut image formats are limited, so use RGBA32F placeholders.
+            // Create NRD internal pools using the exact smaller formats requested by NRD
             m_PermanentPoolImages.resize(instanceDesc->permanentPoolSize);
             for (uint32_t i = 0; i < instanceDesc->permanentPoolSize; i++) {
                 const nrd::TextureDesc& texDesc = instanceDesc->permanentPool[i];
                 const uint32_t ds               = std::max(1u, static_cast<uint32_t>(texDesc.downsampleFactor));
                 const uint32_t w                = std::max(1u, m_InstanceWidth / ds);
                 const uint32_t h                = std::max(1u, m_InstanceHeight / ds);
+                const Walnut::ImageFormat fmt   = GetWalnutFormat(texDesc.format);
 
-                m_PermanentPoolImages[i] = std::make_shared<Walnut::Image>(w, h, Walnut::ImageFormat::RGBA32F);
+                m_PermanentPoolImages[i] = std::make_shared<Walnut::Image>(w, h, fmt);
                 zeroImage(m_PermanentPoolImages[i]);
             }
 
@@ -357,8 +440,9 @@ namespace Vlkrt
                 const uint32_t ds               = std::max(1u, static_cast<uint32_t>(texDesc.downsampleFactor));
                 const uint32_t w                = std::max(1u, m_InstanceWidth / ds);
                 const uint32_t h                = std::max(1u, m_InstanceHeight / ds);
+                const Walnut::ImageFormat fmt   = GetWalnutFormat(texDesc.format);
 
-                m_TransientPoolImages[i] = std::make_shared<Walnut::Image>(w, h, Walnut::ImageFormat::RGBA32F);
+                m_TransientPoolImages[i] = std::make_shared<Walnut::Image>(w, h, fmt);
                 zeroImage(m_TransientPoolImages[i]);
             }
         }
@@ -547,12 +631,36 @@ namespace Vlkrt
             pipe.CurrentSetIndex = 0;
         }
 
+        // Resource dependency tracking
+        struct ResourceAccess {
+            nrd::ResourceType type;
+            uint16_t index;
+            bool written;
+        };
+        std::vector<ResourceAccess> writtenResources;
+
         for (uint32_t di = 0; di < dispatchesNum; di++) {
             const nrd::DispatchDesc& d = dispatches[di];
             if (d.pipelineIndex >= m_NrdPipelines.size()) continue;
 
-            if (executedAny) {
-                // Ensure previous passes finish writing their pools before this pass reads
+            NrdPipelineState& p = m_NrdPipelines[d.pipelineIndex];
+
+            // Check if this pass reads or writes any resource that was previously written
+            bool needsBarrier = false;
+            for (uint32_t ri = 0; ri < d.resourcesNum; ri++) {
+                if (ri >= p.ResourceSlots.size()) break;
+                const nrd::ResourceDesc& r = d.resources[ri];
+                
+                for (const auto& wa : writtenResources) {
+                    if (wa.type == r.type && wa.index == r.indexInPool) {
+                        needsBarrier = true;
+                        break;
+                    }
+                }
+                if (needsBarrier) break;
+            }
+
+            if (needsBarrier && executedAny) {
                 VkMemoryBarrier memoryBarrier = { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
                 memoryBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
                 memoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
@@ -563,9 +671,20 @@ namespace Vlkrt
                         1, &memoryBarrier,
                         0, nullptr,
                         0, nullptr);
+                
+                // Clear tracker after barrier since everything is now synchronized
+                writtenResources.clear();
             }
 
-            NrdPipelineState& p = m_NrdPipelines[d.pipelineIndex];
+            // Track any writes performed by this dispatch for subsequent dispatches
+            for (uint32_t ri = 0; ri < d.resourcesNum; ri++) {
+                if (ri >= p.ResourceSlots.size()) break;
+                const nrd::ResourceDesc& r = d.resources[ri];
+                if (r.descriptorType == nrd::DescriptorType::STORAGE_TEXTURE) {
+                    writtenResources.push_back({ r.type, r.indexInPool, true });
+                }
+            }
+
             if (p.CurrentSetIndex >= p.ResourceSets.size()) {
                 WL_WARN_TAG("Renderer", "Insufficient descriptor sets for NRD pipeline {}! (Index {}, Size {})", d.pipelineIndex, p.CurrentSetIndex, p.ResourceSets.size());
                 continue;
@@ -582,17 +701,32 @@ namespace Vlkrt
                 return image ? image->GetVkImageView() : VK_NULL_HANDLE;
             };
 
-            // Resolve a dispatch resource to a concrete image view.
             auto getImageForResource
                     = [this, &ioImage](const nrd::ResourceDesc& resource) -> std::shared_ptr<Walnut::Image> {
-                auto ensurePoolImage = [&ioImage](std::vector<std::shared_ptr<Walnut::Image> >& pool,
-                                               uint32_t index) -> std::shared_ptr<Walnut::Image> {
+                auto ensurePoolImage = [this, &ioImage](std::vector<std::shared_ptr<Walnut::Image> >& pool,
+                                                uint32_t index, bool isPermanent) -> std::shared_ptr<Walnut::Image> {
                     if (index >= pool.size()) pool.resize(index + 1);
 
                     if (!pool[index]) {
-                        const uint32_t w   = std::max(1u, ioImage->GetWidth());
-                        const uint32_t h   = std::max(1u, ioImage->GetHeight());
-                        pool[index]        = std::make_shared<Walnut::Image>(w, h, Walnut::ImageFormat::RGBA32F);
+                        auto* instance = reinterpret_cast<nrd::Instance*>(m_DirectInstance);
+                        const nrd::InstanceDesc* instanceDesc = nrd::GetInstanceDesc(*instance);
+                        
+                        nrd::Format nrdFmt = nrd::Format::RGBA32_SFLOAT;
+                        uint32_t downsampleFactor = 1;
+                        if (instanceDesc) {
+                            if (isPermanent && index < instanceDesc->permanentPoolSize) {
+                                nrdFmt = instanceDesc->permanentPool[index].format;
+                                downsampleFactor = std::max(1u, (uint32_t)instanceDesc->permanentPool[index].downsampleFactor);
+                            } else if (!isPermanent && index < instanceDesc->transientPoolSize) {
+                                nrdFmt = instanceDesc->transientPool[index].format;
+                                downsampleFactor = std::max(1u, (uint32_t)instanceDesc->transientPool[index].downsampleFactor);
+                            }
+                        }
+
+                        const uint32_t w   = std::max(1u, ioImage->GetWidth() / downsampleFactor);
+                        const uint32_t h   = std::max(1u, ioImage->GetHeight() / downsampleFactor);
+                        const Walnut::ImageFormat fmt = GetWalnutFormat(nrdFmt);
+                        pool[index]        = std::make_shared<Walnut::Image>(w, h, fmt);
                         const size_t bytes = static_cast<size_t>(w) * static_cast<size_t>(h) * sizeof(float) * 4;
                         std::vector<uint8_t> zeros(bytes, 0u);
                         pool[index]->SetData(zeros.data());
@@ -625,10 +759,10 @@ namespace Vlkrt
                     case nrd::ResourceType::OUT_SPEC_HITDIST: return m_OutSpecRadianceHitDist;
 
                     case nrd::ResourceType::TRANSIENT_POOL:
-                        return ensurePoolImage(m_TransientPoolImages, static_cast<uint32_t>(resource.indexInPool));
+                        return ensurePoolImage(m_TransientPoolImages, static_cast<uint32_t>(resource.indexInPool), false);
 
                     case nrd::ResourceType::PERMANENT_POOL:
-                        return ensurePoolImage(m_PermanentPoolImages, static_cast<uint32_t>(resource.indexInPool));
+                        return ensurePoolImage(m_PermanentPoolImages, static_cast<uint32_t>(resource.indexInPool), true);
 
                     default: return nullptr;
                 }
@@ -674,7 +808,7 @@ namespace Vlkrt
                 vkUpdateDescriptorSets(m_Device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 
             if (d.constantBufferData && d.constantBufferDataSize > 0
-                    && d.constantBufferDataSize <= m_NrdConstantCapacity) {
+                    && d.constantBufferDataSize <= m_NrdConstantCapacity && m_NrdConstantMapped != nullptr) {
                 
                 if (m_CurrentSet0Index >= 64) {
                     WL_WARN_TAG("Renderer", "Exceeded max frame dispatches for constant buffers (64)");
@@ -682,12 +816,8 @@ namespace Vlkrt
                 }
                 
                 VkDeviceSize offset = static_cast<VkDeviceSize>(m_CurrentSet0Index) * m_NrdConstantStride;
-                
-                void* mapped = nullptr;
-                if (vkMapMemory(m_Device, m_NrdConstantMemory, offset, d.constantBufferDataSize, 0, &mapped) == VK_SUCCESS) {
-                    std::memcpy(mapped, d.constantBufferData, d.constantBufferDataSize);
-                    vkUnmapMemory(m_Device, m_NrdConstantMemory);
-                }
+                uint8_t* dst = static_cast<uint8_t*>(m_NrdConstantMapped) + offset;
+                std::memcpy(dst, d.constantBufferData, d.constantBufferDataSize);
             }
 
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, p.Pipeline);
@@ -749,8 +879,17 @@ namespace Vlkrt
 
         nrd::ReblurSettings reblurSettings{};
         reblurSettings.hitDistanceReconstructionMode = nrd::HitDistanceReconstructionMode::AREA_3X3;
-        reblurSettings.minMaterialForDiffuse = 0.0f;
-        reblurSettings.minMaterialForSpecular = 0.0f;
+        reblurSettings.minMaterialForDiffuse = 4.0f;
+        reblurSettings.minMaterialForSpecular = 4.0f;
+        reblurSettings.diffusePrepassBlurRadius = 10.0f;
+        reblurSettings.specularPrepassBlurRadius = 10.0f;
+        reblurSettings.maxBlurRadius = 15.0f;
+        reblurSettings.minBlurRadius = 0.5f;
+        reblurSettings.minHitDistanceWeight = 0.02f;
+        reblurSettings.lobeAngleFraction = 0.15f;
+        reblurSettings.roughnessFraction = 0.15f;
+        reblurSettings.fireflySuppressorMinRelativeScale = 2.0f;
+        reblurSettings.enableAntiFirefly = true;
         const nrd::Result settingsRes = nrd::SetDenoiserSettings(*instance, kDenoiserId, &reblurSettings);
         if (settingsRes != nrd::Result::SUCCESS) {
             WL_WARN_TAG("Renderer", "Direct NRD SetDenoiserSettings failed. Destroying instance.");
@@ -1002,5 +1141,67 @@ namespace Vlkrt
         }
 
         // No-op in scaffold mode.
+    }
+
+    void NRDDenoiser::SetGuideBuffers(const std::shared_ptr<Walnut::Image>& normalRoughness,
+                                     const std::shared_ptr<Walnut::Image>& viewZ,
+                                     const std::shared_ptr<Walnut::Image>& motionVectors,
+                                     const std::shared_ptr<Walnut::Image>& diffRadianceHitDist,
+                                     const std::shared_ptr<Walnut::Image>& specRadianceHitDist)
+    {
+        m_GuideNormalRoughness = normalRoughness;
+        m_GuideViewZ = viewZ;
+        m_GuideMotionVectors = motionVectors;
+        m_GuideDiffRadianceHitDist = diffRadianceHitDist;
+        m_GuideSpecRadianceHitDist = specRadianceHitDist;
+
+        if (m_Device == VK_NULL_HANDLE)
+            return;
+
+        // Recreate NRD-specific image views using the new guide textures
+        if (m_GuideViewZNrdImageView != VK_NULL_HANDLE) {
+            vkDestroyImageView(m_Device, m_GuideViewZNrdImageView, nullptr);
+            m_GuideViewZNrdImageView = VK_NULL_HANDLE;
+        }
+        if (m_GuideMotionVectorsNrdImageView != VK_NULL_HANDLE) {
+            vkDestroyImageView(m_Device, m_GuideMotionVectorsNrdImageView, nullptr);
+            m_GuideMotionVectorsNrdImageView = VK_NULL_HANDLE;
+        }
+
+        if (m_GuideViewZ) {
+            VkImageViewCreateInfo viewInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+            viewInfo.image                           = m_GuideViewZ->GetVkImage();
+            viewInfo.viewType                        = VK_IMAGE_VIEW_TYPE_2D;
+            viewInfo.format                          = VK_FORMAT_R32G32B32A32_SFLOAT;
+            viewInfo.components.r                    = VK_COMPONENT_SWIZZLE_IDENTITY;
+            viewInfo.components.g                    = VK_COMPONENT_SWIZZLE_IDENTITY;
+            viewInfo.components.b                    = VK_COMPONENT_SWIZZLE_IDENTITY;
+            viewInfo.components.a                    = VK_COMPONENT_SWIZZLE_IDENTITY;
+            viewInfo.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+            viewInfo.subresourceRange.baseMipLevel   = 0;
+            viewInfo.subresourceRange.levelCount     = 1;
+            viewInfo.subresourceRange.baseArrayLayer = 0;
+            viewInfo.subresourceRange.layerCount     = 1;
+
+            vkCreateImageView(m_Device, &viewInfo, nullptr, &m_GuideViewZNrdImageView);
+        }
+
+        if (m_GuideMotionVectors) {
+            VkImageViewCreateInfo viewInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+            viewInfo.image                           = m_GuideMotionVectors->GetVkImage();
+            viewInfo.viewType                        = VK_IMAGE_VIEW_TYPE_2D;
+            viewInfo.format                          = VK_FORMAT_R32G32B32A32_SFLOAT;
+            viewInfo.components.r                    = VK_COMPONENT_SWIZZLE_IDENTITY;
+            viewInfo.components.g                    = VK_COMPONENT_SWIZZLE_IDENTITY;
+            viewInfo.components.b                    = VK_COMPONENT_SWIZZLE_IDENTITY;
+            viewInfo.components.a                    = VK_COMPONENT_SWIZZLE_IDENTITY;
+            viewInfo.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+            viewInfo.subresourceRange.baseMipLevel   = 0;
+            viewInfo.subresourceRange.levelCount     = 1;
+            viewInfo.subresourceRange.baseArrayLayer = 0;
+            viewInfo.subresourceRange.layerCount     = 1;
+
+            vkCreateImageView(m_Device, &viewInfo, nullptr, &m_GuideMotionVectorsNrdImageView);
+        }
     }
 }  // namespace Vlkrt

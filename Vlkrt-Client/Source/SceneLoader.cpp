@@ -121,6 +121,9 @@ namespace Vlkrt
                 if (ss["russian_roulette_depth"])      { scene.RussianRouletteDepth       = ss["russian_roulette_depth"].as<uint32_t>(); }
                 if (ss["apply_jitter"])                { scene.ApplyJitter                = ss["apply_jitter"].as<bool>(); }
                 if (ss["anisotropic_bsdf"])            { scene.AnisotropicBSDF            = ss["anisotropic_bsdf"].as<bool>(); }
+                if (ss["enable_fsr"])                  { scene.EnableFSR                  = ss["enable_fsr"].as<bool>(); }
+                if (ss["fsr_quality_mode"])            { scene.FSRQualityMode             = ss["fsr_quality_mode"].as<uint32_t>(); }
+                if (ss["fsr_sharpness"])               { scene.FSRSharpness               = ss["fsr_sharpness"].as<float>(); }
                 if (ss["scene_index"])                 { scene.SceneIndex                 = ss["scene_index"].as<uint32_t>(); }
                 if (ss["camera_position"]) {
                     auto cp = ss["camera_position"].as<std::vector<float>>();
@@ -553,6 +556,9 @@ namespace Vlkrt
             file << "  russian_roulette_depth: " << scene.RussianRouletteDepth << "\n";
             file << "  apply_jitter: " << (scene.ApplyJitter ? "true" : "false") << "\n";
             file << "  anisotropic_bsdf: " << (scene.AnisotropicBSDF ? "true" : "false") << "\n";
+            file << "  enable_fsr: " << (scene.EnableFSR ? "true" : "false") << "\n";
+            file << "  fsr_quality_mode: " << scene.FSRQualityMode << "\n";
+            file << "  fsr_sharpness: " << scene.FSRSharpness << "\n";
             if (scene.HasCameraHint) {
                 file << "  camera_position: [ " << scene.CameraPosition.x << ", " << scene.CameraPosition.y << ", "
                      << scene.CameraPosition.z << " ]\n";
@@ -636,7 +642,7 @@ namespace Vlkrt
         // Write children recursively
         if (!entity.Children.empty()) {
             file << indent << "  children:\n";
-            for (const auto& child : entity.Children) { SaveEntityToYAML(file, child, indentLevel); }
+            for (const auto& child : entity.Children) { SaveEntityToYAML(file, child, indentLevel + 1); }
         }
     }
 }  // namespace Vlkrt

@@ -108,6 +108,78 @@ float3 MIS_DirectLight(inout uint rngState, uint depth,
 // Accepts rayDir = WorldRayDirection() and hitDist = RayTCurrent()
 // so the helper can be in a module without calling those built-ins directly.
 // ------------------------------------------------------------------ //
+// MIS: Split Direct Light for NRD Demodulation
+// ------------------------------------------------------------------ //
+void MIS_DirectLight_Split(inout uint rngState, uint depth,
+                           GPUPBRMaterial mat, float eta, bool aniso,
+                           float3 hitPos, GPULight light, float3 N, float3 wo,
+                           out float3 outDiffuse, out float3 outSpecular, out float outHitDist) {
+    outDiffuse = float3(0.0f);
+    outSpecular = float3(0.0f);
+    outHitDist = 0.0f;
+
+    LightSample ls;
+    if (!NextEventEstimation(rngState, depth, light, hitPos, N, ls))
+        return;
+
+    if (light.type == LIGHT_TYPE_DIRECTIONAL) {
+        outHitDist = 0.02f; // Sane tiny hit distance for directional light to keep shadows sharp!
+    } else {
+        outHitDist = ls.dist;
+    }
+
+    DisneyBSDF bsdf = DisneyBSDF(mat, eta, aniso);
+
+    float3 T, B;
+    ComputeLocalSpace(N, T, B);
+    float3 V = WorldToTangent(N, T, B, wo);
+    float3 L = WorldToTangent(N, T, B, ls.L);
+
+    float3 H = L.y >= 0.0f ? normalize(L + V) : normalize(L + V * eta);
+    if (H.y < 0.0f) H = -H;
+
+    float dotVH = dot(V, H);
+    float fMix  = bsdf._FresnelMix(dotVH);
+
+    float pDiff, pSpecRefl, pClearcoat, pSpecRefr;
+    bsdf._ComputePdfs(fMix, pSpecRefl, pDiff, pClearcoat, pSpecRefr);
+
+    float  totalPdf = 0.0f;
+    float3 diffRefl = float3(0.0f);
+    float3 specRefl = float3(0.0f);
+    float  lobePdf;
+
+    if (pDiff > 0.0f && L.y > 0.0f) {
+        diffRefl += bsdf._EvalDiffuse(V, L, H, lobePdf) * abs(L.y);
+        totalPdf += pDiff * lobePdf;
+    }
+    if (pSpecRefl > 0.0f && L.y > 0.0f && V.y > 0.0f) {
+        specRefl += bsdf._EvalSpecRefl(V, L, H, lobePdf) * abs(L.y);
+        totalPdf += pSpecRefl * lobePdf;
+    }
+    if (pClearcoat > 0.0f && L.y > 0.0f && V.y > 0.0f) {
+        specRefl += bsdf._EvalClearcoat(V, L, H, lobePdf) * abs(L.y);
+        totalPdf += pClearcoat * lobePdf;
+    }
+    if (pSpecRefr > 0.0f && L.y < 0.0f) {
+        specRefl += bsdf._EvalSpecRefr(V, L, H, lobePdf) * abs(L.y);
+        totalPdf += pSpecRefr * lobePdf;
+    }
+
+    if (totalPdf <= 0.0f) return;
+
+    float weight = (light.type == LIGHT_TYPE_DIRECTIONAL) ? 1.0f
+                 : PowerHeuristic(1.0f, ls.pdf, 1.0f, totalPdf);
+
+    outDiffuse  = diffRefl * weight * ls.emission / ls.pdf;
+    outSpecular = specRefl * weight * ls.emission / ls.pdf;
+}
+
+// ------------------------------------------------------------------ //
+// Core path-tracing step  (called from hit shaders)
+// Accepts rayDir = WorldRayDirection() and hitDist = RayTCurrent()
+// so the helper can be in a module without calling those built-ins directly.
+// ------------------------------------------------------------------ //
 float3 DoPathTracing(inout RayPayload payload,
                      GPUPBRMaterial   mat,
                      float3           N,
@@ -116,13 +188,6 @@ float3 DoPathTracing(inout RayPayload payload,
                      float3           rayDir) {
     float3 normalSide = dot(rayDir, N) < 0.0f ? N : -N;
 
-    // Checkerboard floor (materialIndex == 0 in Demo / PBR Showcase)
-    if (mat.materialIndex == 0u &&
-        (g_scene.sceneIndex == SCENE_DEMO || g_scene.sceneIndex == SCENE_PBR_SHOWCASE)) {
-        float pattern = Checkerboard(hitPos);
-        mat.roughness = pattern * 0.25f;
-        mat.albedo    = pattern * 0.5f * mat.albedo + 0.5f * mat.albedo;
-    }
     mat.roughness = max(0.001f, mat.roughness);
 
     float  eta        = (payload.inside != 0u) ? mat.eta : 1.0f / mat.eta;
@@ -131,28 +196,76 @@ float3 DoPathTracing(inout RayPayload payload,
     float3 wo         = -rayDir;
     bool   aniso      = g_scene.anisotropicBSDF != 0u;
 
+    if (payload.recursionDepth == 0u) {
+        payload.diffuse = float3(0.0f);
+        payload.specular = float3(0.0f);
+        payload.diffuseHitDist = 0.0f;
+        payload.specularHitDist = 0.0f;
+    }
+
     float3 color = float3(0.0f);
 
+    float3 directDiffuse = float3(0.0f);
+    float3 directSpecular = float3(0.0f);
+    float directHitDist = 0.0f;
+
     // ---- Direct lighting (NEE + MIS) ----
-    if (g_scene.sceneIndex != SCENE_PBR_SHOWCASE) {
-        if (g_scene.onlyOneLightSample != 0u) {
-            uint idx = uint(Random(payload.rngState) * float(g_scene.numLights));
-            color += throughput *
-                     MIS_DirectLight(payload.rngState, payload.recursionDepth,
-                                     mat, eta, aniso, hitPos, g_lights[idx], normalSide, wo) *
-                     float(g_scene.numLights);
+    if (true) {
+        if (payload.recursionDepth == 0u) {
+            if (g_scene.onlyOneLightSample != 0u) {
+                uint idx = uint(Random(payload.rngState) * float(g_scene.numLights));
+                float3 d, s;
+                MIS_DirectLight_Split(payload.rngState, payload.recursionDepth,
+                                      mat, eta, aniso, hitPos, g_lights[idx], normalSide, wo,
+                                      d, s, directHitDist);
+                directDiffuse += d * float(g_scene.numLights);
+                directSpecular += s * float(g_scene.numLights);
+            } else {
+                float directHitDistSum = 0.0f;
+                float directHitWeightSum = 0.0f;
+                for (uint i = 0u; i < g_scene.numLights; i++) {
+                    float3 d, s;
+                    float dhd = 0.0f;
+                    MIS_DirectLight_Split(payload.rngState, payload.recursionDepth,
+                                          mat, eta, aniso, hitPos, g_lights[i], normalSide, wo,
+                                          d, s, dhd);
+                    directDiffuse += d;
+                    directSpecular += s;
+                    if (dhd > 0.0f) {
+                        float weight = GetLuminance(d + s) + 1e-5f;
+                        directHitDistSum += dhd * weight;
+                        directHitWeightSum += weight;
+                    }
+                }
+                if (directHitWeightSum > 0.0f) {
+                    directHitDist = directHitDistSum / directHitWeightSum;
+                }
+            }
+            payload.diffuse += throughput * directDiffuse;
+            payload.specular += throughput * directSpecular;
+            color += throughput * (directDiffuse + directSpecular);
         } else {
-            for (uint i = 0u; i < g_scene.numLights; i++)
+            // For secondary bounces, use the original fast direct lighting (keeps performance high)
+            if (g_scene.onlyOneLightSample != 0u) {
+                uint idx = uint(Random(payload.rngState) * float(g_scene.numLights));
                 color += throughput *
                          MIS_DirectLight(payload.rngState, payload.recursionDepth,
-                                         mat, eta, aniso, hitPos, g_lights[i], normalSide, wo);
+                                         mat, eta, aniso, hitPos, g_lights[idx], normalSide, wo) *
+                         float(g_scene.numLights);
+            } else {
+                for (uint i = 0u; i < g_scene.numLights; i++) {
+                    color += throughput *
+                             MIS_DirectLight(payload.rngState, payload.recursionDepth,
+                                             mat, eta, aniso, hitPos, g_lights[i], normalSide, wo);
+                }
+            }
         }
     }
 
     // ---- Russian roulette ----
     float rrPdf = 1.0f;
     if (payload.recursionDepth >= g_scene.russianRouletteDepth) {
-        rrPdf = min(max(throughput.r, max(throughput.g, throughput.b)) + 0.001f, 0.95f);
+        rrPdf = clamp(max(throughput.r, max(throughput.g, throughput.b)), 0.05f, 0.95f);
         if (Random(payload.rngState) > rrPdf)
             return color;
     }
@@ -161,6 +274,7 @@ float3 DoPathTracing(inout RayPayload payload,
     float3 L;
     float  bsdfPdf;
     float3 reflectance;
+    bool   isDiffuseLobe = true;
 
     if (g_scene.importanceSamplingType == IS_UNIFORM) {
         float3 T, B;
@@ -172,6 +286,7 @@ float3 DoPathTracing(inout RayPayload payload,
         bsdfPdf     = samplePdf;
         reflectance = bsdf.Evaluate(wo, L, normalSide, bsdfPdf);
         bsdfPdf     = samplePdf;
+        isDiffuseLobe = (L.y > 0.0f);
     } else if (g_scene.importanceSamplingType == IS_COSINE) {
         float3 T, B;
         ComputeLocalSpace(N, T, B);
@@ -182,9 +297,10 @@ float3 DoPathTracing(inout RayPayload payload,
         bsdfPdf     = samplePdf;
         reflectance = bsdf.Evaluate(wo, L, normalSide, bsdfPdf);
         bsdfPdf     = samplePdf;
+        isDiffuseLobe = true;
     } else { // IS_BSDF
         DisneyBSDF bsdf = DisneyBSDF(mat, eta, aniso);
-        reflectance = bsdf.Sample(payload.rngState, wo, normalSide, L, bsdfPdf);
+        reflectance = bsdf.Sample(payload.rngState, wo, normalSide, L, bsdfPdf, isDiffuseLobe);
     }
 
     // ---- Recursive bounce ----
@@ -194,7 +310,8 @@ float3 DoPathTracing(inout RayPayload payload,
         if (refraction)
             newAbsorption = -log(mat.extinction) / mat.atDistance;
 
-        float3 newThroughput = throughput * reflectance / bsdfPdf / rrPdf;
+        float clampedPdf = max(bsdfPdf, 0.05f);
+        float3 newThroughput = throughput * reflectance / clampedPdf / rrPdf;
 
         // Build child payload (copy + update mutated fields)
         RayPayload childPayload    = payload;
@@ -215,14 +332,54 @@ float3 DoPathTracing(inout RayPayload payload,
 
         TraceRay(g_tlas, RAY_FLAG_NONE, 0xFF, 0, 2, 0, bounceRay, childPayload);
         childPayload.color = RadianceClamp(childPayload.color);
-        color += childPayload.color.xyz;
+        
+        float3 bounceColor = childPayload.color.xyz;
+        color += bounceColor;
 
         if (payload.recursionDepth == 0u) {
             payload.firstBounceHitDist = childPayload.firstBounceHitDist;
+            if (isDiffuseLobe) {
+                payload.diffuse += bounceColor;
+            } else {
+                payload.specular += bounceColor;
+            }
         }
 
         // Propagate RNG advancement back to the parent
         payload.rngState = childPayload.rngState;
+    }
+
+    if (payload.recursionDepth == 0u) {
+        float directDiffLum = GetLuminance(directDiffuse);
+        float3 indirectDiffuseColor = max(payload.diffuse - throughput * directDiffuse, 0.0f);
+        float indirectDiffLum = GetLuminance(indirectDiffuseColor);
+        
+        float indirectHitDist = payload.firstBounceHitDist;
+        
+        float directHitDistContribution = directDiffLum / max(directDiffLum + indirectDiffLum, 1e-6f);
+        directHitDistContribution = min(directHitDistContribution, 0.5f);
+        
+        float finalDiffHitDist = 0.0f;
+        if (isDiffuseLobe) {
+            finalDiffHitDist = indirectHitDist;
+            if (directHitDist > 0.0f) {
+                if (indirectHitDist > 0.0f && indirectHitDist < 999999.0f) {
+                    finalDiffHitDist = lerp(indirectHitDist, directHitDist, directHitDistContribution);
+                } else {
+                    finalDiffHitDist = directHitDist;
+                }
+            }
+            if (finalDiffHitDist <= 0.0f) {
+                finalDiffHitDist = hitDist;
+            }
+        } else {
+            // If diffuse lobe is skipped, we only have direct diffuse lighting
+            finalDiffHitDist = (directHitDist > 0.0f) ? directHitDist : 0.0f;
+        }
+        
+        payload.diffuseHitDist = finalDiffHitDist;
+        // If specular lobe is skipped, set specular hit distance to 0.0f as per NRD guidelines.
+        payload.specularHitDist = (!isDiffuseLobe && indirectHitDist > 0.0f) ? indirectHitDist : 0.0f;
     }
 
     return color;
@@ -240,6 +397,15 @@ void ClosestHitHelper(inout RayPayload payload,
                       float3           hitPos,
                       float3           prevHitPos,
                       bool             isTriangle) {
+    // Apply procedural checkerboard floor before setting up G-buffer / guides
+    if (mat.materialIndex == 0u &&
+        (g_scene.sceneIndex == SCENE_DEMO || g_scene.sceneIndex == SCENE_PBR_SHOWCASE)) {
+        float pattern = Checkerboard(hitPos);
+        mat.roughness = pattern * 0.25f;
+        mat.albedo    = pattern * 0.5f * mat.albedo + 0.5f * mat.albedo;
+    }
+    mat.roughness = max(0.001f, mat.roughness);
+
     float hitDist = RayTCurrent();
     payload.worldPosition = float4(hitPos, hitDist);
 
@@ -266,6 +432,7 @@ void ClosestHitHelper(inout RayPayload payload,
         payload.firstHitMaterialParams = float4(mat.albedo, specularWeight);
         float materialClass = float(mat.materialIndex & 3u);
         payload.firstHitWorldPosPrev = float4(prevHitPos, materialClass);
+        payload.firstHitMetallic = metallic;
     }
 
     float3 rayDir  = WorldRayDirection();
@@ -293,9 +460,21 @@ void ClosestHitHelper(inout RayPayload payload,
 
     // Atmospheric fog
     float t = hitDist;
+    float fogFactor = 1.0f - exp(-0.000002f * t * t * t);
     color = lerp(color,
-                 ComputeBackground(rayDir) * payload.throughput,
-                 1.0f - exp(-0.000002f * t * t * t));
+                 ComputeBackground(rayDir, payload.recursionDepth == 0u) * payload.throughput,
+                 fogFactor);
+
+    if (payload.recursionDepth == 0u) {
+        bool isLight = isTriangle && (mat.lightIndex >= 0);
+        float3 primaryEmission = isLight ? color.xyz : mat.emission;
+        payload.emission = primaryEmission;
+
+        float3 fogColor = ComputeBackground(rayDir, true).xyz * payload.throughput.xyz;
+        payload.diffuse = lerp(payload.diffuse, fogColor, fogFactor);
+        payload.specular = lerp(payload.specular, float3(0.0f), fogFactor);
+        payload.emission = lerp(payload.emission, float3(0.0f), fogFactor);
+    }
 
     payload.color = color;
 }

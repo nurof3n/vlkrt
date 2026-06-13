@@ -57,22 +57,16 @@ namespace Vlkrt
                             const std::shared_ptr<Walnut::Image>& viewZ,
                             const std::shared_ptr<Walnut::Image>& motionVectors,
                             const std::shared_ptr<Walnut::Image>& diffRadianceHitDist,
-                            const std::shared_ptr<Walnut::Image>& specRadianceHitDist)
-        {
-            m_GuideNormalRoughness = normalRoughness;
-            m_GuideViewZ = viewZ;
-            m_GuideMotionVectors = motionVectors;
-            m_GuideDiffRadianceHitDist = diffRadianceHitDist;
-            m_GuideSpecRadianceHitDist = specRadianceHitDist;
-        }
+                            const std::shared_ptr<Walnut::Image>& specRadianceHitDist);
         std::shared_ptr<Walnut::Image> GetOutDiffRadianceHitDist() const { return m_OutDiffRadianceHitDist; }
         std::shared_ptr<Walnut::Image> GetOutSpecRadianceHitDist() const { return m_OutSpecRadianceHitDist; }
         // Runs NRD denoising when available. In scaffold mode this is a no-op.
         void Dispatch(VkCommandBuffer cmd, const std::shared_ptr<Walnut::Image>& ioImage,
                       const NRDDenoiseParams& params);
 
-    private:
         bool EnsureDirectInstance(uint32_t width, uint32_t height);
+
+    private:
         bool BuildDirectBackend();
         void DestroyDirectBackend();
         bool ExecutePreparedDispatches(VkCommandBuffer cmd, const std::shared_ptr<Walnut::Image>& ioImage,
@@ -120,6 +114,7 @@ namespace Vlkrt
         uint32_t m_CurrentSet0Index = 0;
         VkBuffer m_NrdConstantBuffer = VK_NULL_HANDLE;
         VkDeviceMemory m_NrdConstantMemory = VK_NULL_HANDLE;
+        void* m_NrdConstantMapped = nullptr;
         uint32_t m_NrdConstantCapacity = 0;
         uint32_t m_NrdConstantStride = 256;
         VkSampler m_NrdSamplers[2] = { VK_NULL_HANDLE, VK_NULL_HANDLE };

@@ -272,6 +272,9 @@ namespace Vlkrt
         bool                  AnisotropicBSDF            { true };
         bool                  EnableNRDDenoiser          { false };
         NRDGuideDebugViewMode NRDGuideDebugView          { NRDGuideDebugViewMode::FinalImage };
+        bool                  EnableFSR                  { false };
+        uint32_t              FSRQualityMode             { 1 };   // 1 = Quality
+        float                 FSRSharpness               { 0.0f };
         uint32_t              SceneIndex                 { 0 };  // 0=Custom,1=Demo,2=Cornell,3=PbrShowcase
         glm::vec3             BackgroundColor            { 0.0f };
 

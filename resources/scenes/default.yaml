@@ -41,8 +41,8 @@ entities:
     script: cube_animation.lua
     type: mesh
     transform:
-      position: [ 2, 0.537883, 0 ]
-      rotation: [ 0, -0.994962, 0, 0.100257 ]
+      position: [ 2, -0.180116, 0 ]
+      rotation: [ -0, -0.776384, -0, -0.630261 ]
       scale: [ 1, 1, 1 ]
     mesh: cube.obj
     material: 1
@@ -84,3 +84,6 @@ scene_settings:
   russian_roulette_depth: 3
   apply_jitter: true
   anisotropic_bsdf: true
+  enable_fsr: false
+  fsr_quality_mode: 1
+  fsr_sharpness: 0

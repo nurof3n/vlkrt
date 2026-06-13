@@ -62,6 +62,14 @@ struct RayPayload {
     uint   inside;         ///< non-zero when inside a refractive medium
     float  bsdfPdf;        ///< PDF of the last BSDF sample (MIS)
     float  firstBounceHitDist;
+
+    // NRD separate guides
+    float3 diffuse;
+    float3 specular;
+    float  diffuseHitDist;
+    float  specularHitDist;
+    float3 emission;
+    float  firstHitMetallic;
 };
 
 /// Shadow ray payload (location 1). 4 bytes.
@@ -190,6 +198,10 @@ struct SceneUBO {
                         RWTexture2D<float4>                    g_outDiffRadianceHitDist;
 [[vk::binding(20, 0)]] [[vk::image_format("rgba32f")]]
                         RWTexture2D<float4>                    g_outSpecRadianceHitDist;
+[[vk::binding(21, 0)]] [[vk::image_format("rgba32f")]]
+                        RWTexture2D<float4>                    g_guideEmission;
+[[vk::binding(22, 0)]] [[vk::image_format("rgba32f")]]
+                        RWTexture2D<float4>                    g_guideDepth;
 
 // ------------------------------------------------------------------ //
 // Math helpers
@@ -209,7 +221,7 @@ float3 ACES(float3 x) {
 
 float4 RadianceClamp(float4 color) {
     float lum = GetLuminance(color.xyz);
-    if (lum > 5.0f) color.xyz *= 5.0f / lum;
+    if (lum > 250.0f) color.xyz *= 250.0f / lum;
     return color;
 }
 
@@ -356,7 +368,7 @@ float Checkerboard(float3 hitPos) {
     return fmod(abs(floor((hitPos.x + 1.0f) / 2.0f) + floor(hitPos.z / 2.0f)), 2.0f);
 }
 
-float4 ComputeBackground(float3 rayDir) {
+float4 ComputeBackground(float3 rayDir, bool isPrimary) {
     if (g_scene.sceneIndex == SCENE_PBR_SHOWCASE) {
         float3 rd     = rayDir;
         float3 sundir = -normalize(g_lights[0].direction);
@@ -367,9 +379,11 @@ float4 ComputeBackground(float3 rayDir) {
         col += I * float3(0.4f, 0.4f - exp(-rd.y * 20.0f) * 0.15f, 0.0f) * exp(-rd.y * 9.0f);
         col += I * float3(0.3f, 0.5f, 0.6f) * (1.0f - exp(-rd.y * 8.0f)) * exp(-rd.y * 0.9f);
         col  = I * lerp(col * 1.2f, float3(0.34f, 0.44f, 0.4f), 1.0f - exp(yd * 100.0f));
-        col += I * pow(clamp(dot(rd, sundir), 0.0f, 1.0f), 150.0f) * 0.15f;
-        col += g_lights[0].intensity * float3(1.0f, 0.8f, 0.55f)
-             * pow(max(dot(rd, sundir), 0.0f), 15.0f) * 0.6f;
+        if (isPrimary) {
+            col += I * pow(clamp(dot(rd, sundir), 0.0f, 1.0f), 150.0f) * 0.15f;
+            col += g_lights[0].intensity * float3(1.0f, 0.8f, 0.55f)
+                 * pow(max(dot(rd, sundir), 0.0f), 15.0f) * 0.6f;
+        }
         return float4(pow(col, float3(2.2f)), 1.0f);
     }
     return g_scene.backgroundColor;
@@ -452,5 +466,39 @@ void NRD_DecodeNormalRoughness101010(float3 r, out float3 n, out float roughness
     n.y = r.x + r.y - 1.0f;
     n.z = zSign * max(0.0f, 1.0f - abs(n.x) - abs(n.y));
     n = normalize(n);
+}
+
+float3 _NRD_EnvironmentTerm_Rtg(float3 Rf0, float NoV, float roughness) {
+    float m = saturate(roughness * roughness);
+
+    float4 X = float4(1.0f, NoV, NoV * NoV, NoV * NoV * NoV);
+    float4 Y = float4(1.0f, m, m * m, m * m * m);
+
+    float2x2 M1 = float2x2(0.99044f, -1.28514f, 1.29678f, -0.755907f);
+    float3x3 M2 = float3x3(1.0f, 2.92338f, 59.4188f, 20.3225f, -27.0302f, 222.592f, 121.563f, 626.13f, 316.627f);
+    float2x2 M3 = float2x2(0.0365463f, 3.32707f, 9.0632f, -9.04756f);
+    float3x3 M4 = float3x3(1.0f, 3.59685f, -1.36772f, 9.04401f, -16.3174f, 9.22949f, 5.56589f, 19.7886f, -20.2123f);
+
+    float2 m1_x = mul(M1, X.xy);
+    float3 m2_x = mul(M2, X.xyw);
+    float2 m3_x = mul(M3, X.xy);
+    float3 m4_x = mul(M4, X.xzw);
+
+    float bias = dot(m1_x, Y.xy) / max(dot(m2_x, Y.xyw), 1e-6f);
+    float scale = dot(m3_x, Y.xy) / max(dot(m4_x, Y.xyw), 1e-6f);
+
+    return saturate(Rf0 * scale + bias);
+}
+
+void NRD_MaterialFactors(float3 N, float3 V, float3 albedo, float3 Rf0, float roughness, out float3 diffFactor, out float3 specFactor) {
+    float NoV = abs(dot(N, V));
+    float3 Fenv = _NRD_EnvironmentTerm_Rtg(Rf0, NoV, roughness);
+
+    diffFactor = (1.0f - Fenv) * albedo;
+    diffFactor = lerp(float3(0.01f), float3(1.0f), diffFactor);
+
+    specFactor = Fenv;
+    specFactor *= lerp(float3(0.01f), float3(1.0f), roughness);
+    specFactor = lerp(float3(0.01f), float3(1.0f), specFactor);
 }
 

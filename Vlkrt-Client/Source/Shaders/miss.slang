@@ -7,7 +7,7 @@ import common;
 [shader("miss")]
 void MissMain([[vk::location(0)]] inout RayPayload payload) {
     payload.worldPosition = float4(0.0f);
-    payload.color         = ComputeBackground(WorldRayDirection()) * payload.throughput;
+    payload.color         = ComputeBackground(WorldRayDirection(), payload.recursionDepth == 0u) * payload.throughput;
     if (payload.recursionDepth == 1u) {
         payload.firstBounceHitDist = 1e6f;
     }

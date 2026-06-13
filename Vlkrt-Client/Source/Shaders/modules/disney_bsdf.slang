@@ -18,7 +18,7 @@ interface IBxDF {
     /// Evaluate the BSDF for a fixed (wo, wi) pair and return the pdf.
     float3 Evaluate(float3 wo, float3 wi, float3 N, out float pdf);
     /// Importance-sample the BSDF, returning the sampled wi and pdf.
-    float3 Sample(inout uint rng, float3 wo, float3 N, out float3 wi, out float pdf);
+    float3 Sample(inout uint rng, float3 wo, float3 N, out float3 wi, out float pdf, out bool isDiffuseLobe);
 }
 
 // ------------------------------------------------------------------ //
@@ -199,9 +199,10 @@ struct DisneyBSDF : IBxDF {
         return result * abs(L.y);
     }
 
-    float3 Sample(inout uint rng, float3 wo, float3 N, out float3 wi, out float pdf) {
+    float3 Sample(inout uint rng, float3 wo, float3 N, out float3 wi, out float pdf, out bool isDiffuseLobe) {
         pdf = 0.0f;
         wi  = float3(0.0f);
+        isDiffuseLobe = false;
 
         float3 T, B;
         ComputeLocalSpace(N, T, B);
@@ -236,6 +237,7 @@ struct DisneyBSDF : IBxDF {
             H      = normalize(V + L);
             result = _EvalDiffuse(V, L, H, lobePdf);
             pdf   *= pDiff;
+            isDiffuseLobe = true;
         }
         else if (choice < cdfSpec) {
             // Specular reflection — VNDF
