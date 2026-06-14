@@ -167,6 +167,4 @@ void RayGenMain() {
         g_guideEmission[pixelCoord] = float4(0.0f, 0.0f, 0.0f, 0.0f);
         g_guideDepth[pixelCoord] = float4(1.0f, 0.0f, 0.0f, 1.0f);
     }
-
 }
-

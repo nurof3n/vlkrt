@@ -87,4 +87,3 @@ void ComposeDenoisedMain(uint3 dispatchThreadID : SV_DispatchThreadID)
         g_outputImage[pixelCoord] = float4(spec, 1.0f);
     }
 }
-

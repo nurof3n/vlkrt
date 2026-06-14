@@ -11,49 +11,40 @@ namespace YAML
 
 namespace Vlkrt
 {
-    /**
-     * @brief Struct that maintains a bidirectional mapping between the hierarchical SceneEntity structure and the flat
-     * arrays in Scene.
-     *
-     */
+    /// @brief Struct that maintains a bidirectional mapping between the hierarchical SceneEntity structure and the flat
+    /// arrays in Scene.
     struct HierarchyMapping
     {
         std::unordered_map<SceneEntity*, uint32_t> EntityToMeshIdx;
         std::unordered_map<SceneEntity*, uint32_t> EntityToLightIdx;
         std::unordered_map<SceneEntity*, uint32_t> EntityToProceduralIdx;
-        std::vector<SceneEntity*>                  MeshIndexToEntity;
-        std::vector<SceneEntity*>                  LightIndexToEntity;
-        std::vector<SceneEntity*>                  ProceduralIndexToEntity;
+        std::vector<SceneEntity*> MeshIndexToEntity;
+        std::vector<SceneEntity*> LightIndexToEntity;
+        std::vector<SceneEntity*> ProceduralIndexToEntity;
     };
 
-    /**
-     * @brief Class responsible for loading and saving scenes from/to YAML files, as well as maintaining the mapping
-     * between the hierarchical SceneEntity structure and the flat Scene arrays.
-     *
-     */
+    /// @brief Class responsible for loading and saving scenes from/to YAML files, as well as maintaining the mapping
+    /// between the hierarchical SceneEntity structure and the flat Scene arrays.
     class SceneLoader
     {
     public:
-        static Scene LoadFromYAML(const std::string& filename);
-        static std::pair<Scene, SceneEntity> LoadFromYAMLWithHierarchy(const std::string& filename);
+        static auto LoadFromYAML(const std::string& filename) -> Scene;
+        static auto LoadFromYAMLWithHierarchy(const std::string& filename) -> std::pair<Scene, SceneEntity>;
         static void SaveToYAML(const std::string& filename, const Scene& scene);
         static void SaveToYAMLWithHierarchy(
                 const std::string& filename, const Scene& scene, const SceneEntity& rootEntity);
-
-        static HierarchyMapping CreateMapping(const SceneEntity& rootEntity, const Scene& scene);
+        static auto CreateMapping(const SceneEntity& rootEntity, const Scene& scene) -> HierarchyMapping;
         static void UpdateFlatScene(const SceneEntity& entity, const glm::mat4& parentWorldTransform, Scene& outScene,
                 const HierarchyMapping& mapping, std::vector<uint32_t>& outModifiedMeshes,
                 std::vector<uint32_t>& outModifiedLights);
 
     private:
-        static SceneEntity ParseEntity(const YAML::Node& entityNode, SceneEntity* parent = nullptr);
-        static Transform ParseTransform(const YAML::Node& transformNode);
-
+        static auto ParseEntity(const YAML::Node& entityNode, SceneEntity* parent = nullptr) -> SceneEntity;
+        static auto ParseTransform(const YAML::Node& transformNode) -> Transform;
         static void FlattenEntity(const SceneEntity& entity, const glm::mat4& parentWorldTransform, Scene& outScene,
                 const std::unordered_map<std::string, int>& materialMap);
         static void PopulateMappingRecursive(const SceneEntity& entity, const Scene& scene, HierarchyMapping& mapping,
                 uint32_t& meshIndex, uint32_t& lightIndex, uint32_t& proceduralIndex);
-
         static void SaveEntityToYAML(std::ofstream& file, const SceneEntity& entity, int indentLevel);
     };
 }  // namespace Vlkrt

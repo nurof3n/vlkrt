@@ -9,9 +9,9 @@ Walnut::Application* Walnut::CreateApplication(int argc, char** argv)
     spec.Name           = "Vlkrt";
     spec.CustomTitlebar = false;
     spec.UseDockspace   = false;
-    spec.Height         = 1080;
     spec.CenterWindow   = true;
     spec.Width          = 1920;
+    spec.Height         = 1080;
 
     auto app = new Walnut::Application(spec);
     app->PushLayer<Vlkrt::ClientLayer>();

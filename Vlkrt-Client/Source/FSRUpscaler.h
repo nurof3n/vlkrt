@@ -8,13 +8,19 @@
 #include <glm/glm.hpp>
 #include "Walnut/Image.h"
 
-// FidelityFX API includes
 #include <ffx_api/ffx_api.h>
 #include <ffx_api/ffx_upscale.h>
 #include <ffx_api/vk/ffx_api_vk.h>
 
 namespace Vlkrt
 {
+    /// <summary>
+    /// Class that encapsulates the FSR3 upscaling context and resources, providing an easy-to-use interface for
+    /// initializing, resizing, and dispatching FSR upscaling in a Vulkan application.
+    /// It manages the necessary Vulkan resources and FSR state to perform high-quality temporal upscaling based on the
+    /// input color, depth, and motion vector buffers. The class also provides utility functions to calculate the
+    /// appropriate render resolution based on the display resolution and selected quality mode.
+    /// </summary>
     class FSRUpscaler
     {
     public:
@@ -33,14 +39,11 @@ namespace Vlkrt
         void Initialize(VkDevice device, VkPhysicalDevice physDev, VkQueue queue, uint32_t queueFamilyIdx);
         void Shutdown();
 
-        // Call on window resize
         void OnResize(uint32_t displayW, uint32_t displayH, Quality q, float sharpness);
 
-        // Returns the render (internal) resolution for a given display res + quality
         static void GetRenderResolution(
                 uint32_t displayW, uint32_t displayH, Quality q, uint32_t& renderW, uint32_t& renderH);
 
-        // Per-frame upscale dispatch
         void Dispatch(VkCommandBuffer cmd,
                 std::shared_ptr<Walnut::Image> colorIn,   // denoised, internal res, RGBA32F
                 std::shared_ptr<Walnut::Image> depthIn,   // NDC depth, internal res, R32F
@@ -49,15 +52,15 @@ namespace Vlkrt
                 glm::vec2 jitter, float deltaTimeMs, bool resetHistory, float cameraNear, float cameraFar,
                 float verticalFovRadians);
 
-        bool IsInitialized() const { return m_Initialized; }
-        const char* GetStatus() const { return m_Status.c_str(); }
+        auto IsInitialized() const { return m_Initialized; }
+        auto GetStatus() const { return m_Status.c_str(); }
 
-        Quality GetQuality() const { return m_Quality; }
-        float GetSharpness() const { return m_Sharpness; }
+        auto GetQuality() const { return m_Quality; }
+        auto GetSharpness() const { return m_Sharpness; }
         void SetSharpness(float sharpness) { m_Sharpness = sharpness; }
 
-        uint32_t GetRenderWidth() const { return m_RenderW; }
-        uint32_t GetRenderHeight() const { return m_RenderH; }
+        auto GetRenderWidth() const { return m_RenderW; }
+        auto GetRenderHeight() const { return m_RenderH; }
 
     private:
         // FSR context

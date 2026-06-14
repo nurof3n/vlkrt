@@ -13,7 +13,7 @@ void MissMain([[vk::location(0)]] inout RayPayload payload) {
     }
 }
 
-// Shadow miss: ray reached the light without hitting anything → not occluded
+// Shadow miss: ray reached the light without hitting anything
 [shader("miss")]
 void ShadowMissMain([[vk::location(1)]] inout ShadowRayPayload payload) {
     payload.hit = false;

@@ -20,15 +20,14 @@
 
 namespace Vlkrt
 {
-    /**
-     * @brief ClientLayer is the main application layer for the Vlkrt client. It manages the connection to the server,
-     * handles player input, receives updates from the server, and renders the scene. It also includes a hierarchical
-     * ImGui scene editor.
-     */
+    /// <summary>
+    /// ClientLayer is the main application layer for the Vlkrt client.
+    /// It manages the connection to the server, handles player input, receives updates from the server, and renders the
+    /// scene. It also includes a hierarchical ImGui scene editor.
+    /// </summary>
     class ClientLayer : public Walnut::Layer
     {
     public:
-        // Struct to hold player data received from the server
         struct PlayerData
         {
             glm::vec3 Position;
@@ -112,7 +111,7 @@ namespace Vlkrt
         // Scene change tracking
         glm::vec3 m_LastPlayerPosition{};
         size_t m_LastPlayerCount{ 0 };
-        bool m_SceneDirty{ false }; // set by FlattenHierarchyToScene when data changes
+        bool m_SceneDirty{ false };
 
         // Resource cache
         std::vector<std::string> m_AvailableTextures;

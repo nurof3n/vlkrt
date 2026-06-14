@@ -12,29 +12,25 @@
 
 namespace Vlkrt
 {
-    // -------------------------------------------------------------------------
-    // Enumerations
-    // -------------------------------------------------------------------------
-
     enum class LightType : uint32_t
     {
-        Square      = 0,
-        Directional = 1,
+        Square,
+        Directional,
     };
 
     enum class AnalyticPrimitiveType : uint32_t
     {
-        AABB   = 0,
-        Sphere = 1,
+        AABB,
+        Sphere,
     };
 
     enum class SDFPrimitiveType : uint32_t
     {
-        IntersectedRoundCube = 0,
-        SquareTorus          = 1,
-        Cog                  = 2,
-        Cylinder             = 3,
-        SolidAngle           = 4,
+        IntersectedRoundCube,
+        SquareTorus,
+        Cog,
+        Cylinder,
+        SolidAngle,
     };
 
     enum class RaytracingMode : uint32_t
@@ -45,70 +41,59 @@ namespace Vlkrt
 
     enum class ImportanceSamplingMode : uint32_t
     {
-        Uniform = 0,
-        Cosine  = 1,
-        BSDF    = 2,
+        Uniform,
+        Cosine,
+        BSDF,
     };
 
     enum class NRDGuideDebugViewMode : uint32_t
     {
-        FinalImage            = 0,
-        NormalRoughness       = 1,
-        ViewZ                 = 2,
-        MotionVectors         = 3,
-        DiffRadianceHitDist   = 4,
-        SpecRadianceHitDist   = 5,
+        FinalImage,
+        NormalRoughness,
+        ViewZ,
+        MotionVectors,
+        DiffRadianceHitDist,
+        SpecRadianceHitDist,
     };
 
-    // -------------------------------------------------------------------------
-    // CPU material — Disney BSDF parameters.
-    // Old YAML files that supply only albedo/shininess/specular are auto-converted
-    // on load: Phong shininess drives roughness, specular drives metallic.
-    // -------------------------------------------------------------------------
+    /// <summary>
+    /// CPU material definition matching the GLSL GPUMaterial layout.
+    /// </summary>
     struct Material
     {
         std::string Name;
 
-        // Base colour
         glm::vec3 Albedo{ 1.0f };
-
-        // Emission (for emissive / light-mesh materials)
         glm::vec3 Emission{ 0.0f };
-
-        // Volume
         glm::vec3 Extinction{ 1.0f };
-        float     AtDistance{ 1.0f };
+        float AtDistance{ 1.0f };
 
         // Disney BSDF lobes
-        float Roughness            { 0.5f };
-        float Metallic             { 0.0f };
-        float Subsurface           { 0.0f };
-        float Anisotropic          { 0.0f };
-        float Sheen                { 0.0f };
-        float SheenTint            { 0.5f };
-        float Clearcoat            { 0.0f };
-        float ClearcoatGloss       { 1.0f };
-        float SpecularTint         { 0.0f };
-        float SpecularTransmission { 0.0f };
-        float Eta                  { 1.5f };
+        float Roughness{ 0.5f };
+        float Metallic{ 0.0f };
+        float Subsurface{ 0.0f };
+        float Anisotropic{ 0.0f };
+        float Sheen{ 0.0f };
+        float SheenTint{ 0.5f };
+        float Clearcoat{ 0.0f };
+        float ClearcoatGloss{ 1.0f };
+        float SpecularTint{ 0.0f };
+        float SpecularTransmission{ 0.0f };
+        float Eta{ 1.5f };
 
         // Procedural-primitive step scale (SDF ray march)
         float StepScale{ 1.0f };
 
-        // Internal classification (0 = regular, matches GLSL materialIndex)
         uint32_t MaterialIndex{ 0 };
-
-        // >=0 when this material belongs to a light mesh; index into g_lights
         int32_t LightIndex{ -1 };
 
-        // Texture
-        std::string TextureFilename;  // empty = use Albedo
-        float       Tiling{ 1.0f };
+        std::string TextureFilename;
+        float Tiling{ 1.0f };
     };
 
-    /**
-     * @brief CPU vertex definition.
-     */
+    /// <summary>
+    /// CPU vertex definition matching the GLSL GPUVertex layout.
+    /// </summary>
     struct Vertex
     {
         glm::vec3 Position{};
@@ -116,39 +101,35 @@ namespace Vlkrt
         glm::vec2 TexCoord{};
     };
 
-    /**
-     * @brief Mesh definition containing CPU vertex/index data and material reference.
-     */
+    /// <summary>
+    /// Mesh definition containing CPU vertex/index data and material reference.
+    /// </summary>
     struct Mesh
     {
-        std::string Filename;  // Source filename (if empty, mesh was created procedurally)
+        std::string Filename;
         std::string Name;
         std::vector<Vertex> Vertices;
         std::vector<uint32_t> Indices;
-
-        int MaterialIndex{ 0 };
-
         glm::mat4 Transform = glm::mat4(1.0f);
+        uint32_t MaterialIndex{ 0 };
     };
 
-    /**
-     * @brief CPU light definition matching the GLSL GPULight layout.
-     *  Type 0 = Square area light (has Position + Size)
-     *  Type 1 = Directional light (has Direction + Intensity)
-     */
+    /// <summary>
+    /// CPU light definition matching the GLSL GPULight layout.
+    /// </summary>
     struct Light
     {
-        glm::vec3 Position{};        // World position
-        float     Intensity{ 1.0f }; // Brightness
-        glm::vec3 Emission{ 1.0f };  // Colour/radiance (was Color)
-        float     Size{ 1.825f };    // Area light half-size (was Radius)
-        glm::vec3 Direction{ 0.0f }; // For directional lights (normalised)
+        glm::vec3 Position{};
+        float Intensity{ 1.0f };
+        glm::vec3 Emission{ 1.0f };
+        float Size{ 1.825f };  // Area light half-size
+        glm::vec3 Direction{ 0.0f };
         LightType Type{ LightType::Square };
     };
 
-    /**
-     * @brief Decomposed, hierarchical transform with position, rotation (quaternion), and scale.
-     */
+    /// <summary>
+    /// Decomposed, hierarchical transform with position, rotation (quaternion), and scale.
+    /// </summary>
     struct Transform
     {
         glm::vec3 Position{};
@@ -166,33 +147,33 @@ namespace Vlkrt
         auto GetWorldMatrix(const glm::mat4& parentWorld) const -> glm::mat4 { return parentWorld * GetLocalMatrix(); }
     };
 
-    // -------------------------------------------------------------------------
-    // Procedural geometry entity (AABB-based, analytic or SDF)
-    // -------------------------------------------------------------------------
+    /// <summary>
+    /// Procedural geometry entity.
+    /// </summary>
     struct ProceduralEntity
     {
         std::string Name;
-        glm::mat4   Transform{ 1.0f };  // Local-to-world
-        bool        IsAnalytic{ true }; // true=analytic BLAS, false=SDF BLAS
-        uint32_t    PrimitiveType{ 0 }; // AnalyticPrimitiveType or SDFPrimitiveType
-        int         MaterialIndex{ 0 }; // Index into Scene::Materials
+        glm::mat4 Transform{ 1.0f };  // Local-to-world
+        bool IsAnalytic{ true };      // true=analytic, false=SDF
+        uint32_t PrimitiveType{ 0 };
+        int MaterialIndex{ 0 };
     };
 
-    /**
-     * @brief Type of scene entity, used for determining how to render and update each node in the hierarchy.
-     */
+    /// <summary>
+    /// Type of scene entity, used for determining how to render and update each node in the hierarchy.
+    /// </summary>
     enum class EntityType
     {
-        Empty,      // Transform-only, used for grouping
-        Mesh,       // Mesh with material
-        Light,      // Light source
-        Camera,     // Camera
-        Procedural  // Analytic/SDF procedural shape
+        Empty,  // Transform-only, used for grouping
+        Mesh,
+        Light,
+        Camera,
+        Procedural,
     };
 
-    /**
-     * @brief Scene entity that supports hierarchical transforms, type-specific data, and scripting.
-     */
+    /// <summary>
+    /// Scene entity that supports hierarchical transforms, type-specific data, and scripting.
+    /// </summary>
     struct SceneEntity
     {
         std::string Name;
@@ -217,9 +198,9 @@ namespace Vlkrt
         struct LightData
         {
             glm::vec3 Emission{ 1.0f };
-            float     Intensity{ 1.0f };
+            float Intensity{ 1.0f };
             LightType Type{ LightType::Square };
-            float     Size{ 1.825f };
+            float Size{ 1.825f };
         } LightData;
 
         struct CameraData
@@ -231,9 +212,9 @@ namespace Vlkrt
 
         struct ProceduralData
         {
-            bool     IsAnalytic{ true };   // true=analytic BLAS, false=SDF BLAS
-            uint32_t PrimitiveType{ 0 };   // AnalyticPrimitiveType or SDFPrimitiveType
-            int      MaterialIndex{ 0 };   // Index into Scene::Materials
+            bool IsAnalytic{ true };      // true=analytic BLAS, false=SDF BLAS
+            uint32_t PrimitiveType{ 0 };  // AnalyticPrimitiveType or SDFPrimitiveType
+            int MaterialIndex{ 0 };       // Index into Scene::Materials
         } ProceduralData;
 
         void MarkDirtyRecursive()
@@ -249,56 +230,52 @@ namespace Vlkrt
         }
     };
 
-    /**
-     * @brief Flat scene definition.
-     */
+    /// <summary>
+    /// Flat scene definition.
+    /// </summary>
     struct Scene
     {
-        std::vector<Mesh>              StaticMeshes;
-        std::vector<Mesh>              DynamicMeshes;
-        std::vector<Material>          Materials;
-        std::vector<Light>             Lights;
-        std::vector<ProceduralEntity>  ProceduralEntities;
+        std::vector<Mesh> StaticMeshes;
+        std::vector<Mesh> DynamicMeshes;
+        std::vector<Material> Materials;
+        std::vector<Light> Lights;
+        std::vector<ProceduralEntity> ProceduralEntities;
 
-        // ---- Rendering parameters (written into SceneUBO each frame) ----
-        RaytracingMode        RaytracingType             { RaytracingMode::PathTracing };
-        ImportanceSamplingMode ImportanceSampling        { ImportanceSamplingMode::BSDF };
-        uint32_t              MaxRecursionDepth          { 8 };   // hard cap enforced by UI: 12
-        uint32_t              MaxShadowRecursionDepth    { 8 };   // default = MaxRecursionDepth
-        uint32_t              PathSqrtSamplesPerPixel    { 1 };
-        bool                  ApplyJitter                { true };
-        bool                  OnlyOneLightSample         { false };
-        uint32_t              RussianRouletteDepth       { 3 };
-        bool                  AnisotropicBSDF            { true };
-        bool                  EnableNRDDenoiser          { false };
-        NRDGuideDebugViewMode NRDGuideDebugView          { NRDGuideDebugViewMode::FinalImage };
-        bool                  EnableFSR                  { false };
-        uint32_t              FSRQualityMode             { 1 };   // 1 = Quality
-        float                 FSRSharpness               { 0.0f };
-        uint32_t              SceneIndex                 { 0 };  // 0=Custom,1=Demo,2=Cornell,3=PbrShowcase
-        glm::vec3             BackgroundColor            { 0.0f };
+        // Rendering parameters
+        RaytracingMode RaytracingType{ RaytracingMode::PathTracing };
+        ImportanceSamplingMode ImportanceSampling{ ImportanceSamplingMode::BSDF };
+        uint32_t MaxRecursionDepth{ 8 };
+        uint32_t MaxShadowRecursionDepth{ 8 };
+        uint32_t PathSqrtSamplesPerPixel{ 1 };
+        bool ApplyJitter{ true };
+        bool OnlyOneLightSample{ false };
+        uint32_t RussianRouletteDepth{ 3 };
+        bool AnisotropicBSDF{ true };
+        bool EnableNRDDenoiser{ false };
+        NRDGuideDebugViewMode NRDGuideDebugView{ NRDGuideDebugViewMode::FinalImage };
+        bool EnableFSR{ false };
+        uint32_t FSRQualityMode{ 1 };  // 1 = Quality
+        float FSRSharpness{ 0.0f };
+        uint32_t SceneIndex{ 0 };
+        glm::vec3 BackgroundColor{ 0.0f };
 
         // Optional camera hint loaded from YAML scene_settings
-        bool      HasCameraHint   { false };
-        glm::vec3 CameraPosition  { 0.0f, 3.0f, 10.0f };
-        glm::vec3 CameraTarget    { 0.0f, 0.0f, 0.0f };
+        bool HasCameraHint{ false };
+        glm::vec3 CameraPosition{ 0.0f, 3.0f, 10.0f };
+        glm::vec3 CameraTarget{ 0.0f, 0.0f, 0.0f };
     };
 
-    /**
-     * @brief Manages the scene hierarchy for efficient transform updates.
-     */
+    /// <summary>
+    /// Manages the scene hierarchy for efficient transform updates.
+    /// </summary>
     class SceneHierarchy
     {
     public:
         void SetLocalTransform(SceneEntity& entity, const Transform& newTransform)
-        {
-            entity.SetLocalTransform(newTransform);
-        }
+        { entity.SetLocalTransform(newTransform); }
 
         void UpdateDirtyTransforms(SceneEntity& root, const glm::mat4& parentWorld = glm::mat4(1.0f))
-        {
-            UpdateDirtyTransformsRecursive(root, parentWorld);
-        }
+        { UpdateDirtyTransformsRecursive(root, parentWorld); }
 
     private:
         void UpdateDirtyTransformsRecursive(SceneEntity& entity, const glm::mat4& parentWorld)

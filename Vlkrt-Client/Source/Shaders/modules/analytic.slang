@@ -4,9 +4,7 @@
 
 import common;
 
-// ------------------------------------------------------------------ //
-// Quadratic solver
-// ------------------------------------------------------------------ //
+/// Quadratic solver
 bool SolveQuadratic(float a, float b, float c, out float t0, out float t1) {
     float disc = b * b - 4.0f * a * c;
     if (disc < 0.0f) { t0 = t1 = 0.0f; return false; }
@@ -16,13 +14,12 @@ bool SolveQuadratic(float a, float b, float c, out float t0, out float t1) {
     return true;
 }
 
-// ------------------------------------------------------------------ //
-// Single sphere (centered at origin)
-// ------------------------------------------------------------------ //
+/// Sphere normal at hit point
 float3 SphereNormal(Ray ray, float thit) {
     return normalize(ray.origin + thit * ray.direction);
 }
 
+/// Ray-sphere intersection — returns true if hit, t0 and t1 are the two intersection distances along the ray
 bool SolveRaySphere(Ray ray, float radius, out float t0, out float t1) {
     return SolveQuadratic(
         dot(ray.direction, ray.direction),
@@ -61,9 +58,7 @@ bool RaySolidSphereTest(Ray ray, float radius,
     return true;
 }
 
-// ------------------------------------------------------------------ //
-// Multiple spheres — scene-dependent
-// ------------------------------------------------------------------ //
+/// Multiple spheres — only front-face, closest hit
 bool RaySpheresTest(uint sceneIndex, Ray ray,
                     out float thit, out float3 hitNormal) {
     const int MAX_SPHERES = 3;
@@ -110,9 +105,7 @@ bool RaySpheresTest(uint sceneIndex, Ray ray,
     return hit;
 }
 
-// ------------------------------------------------------------------ //
-// AABB in local [-1,1]³ space
-// ------------------------------------------------------------------ //
+/// Axis-aligned bounding box (AABB) — only front-face, closest hit
 bool RayAABBTest(Ray ray, out float thit, out float3 hitNormal) {
     thit = 0.0f; hitNormal = float3(0.0f, 1.0f, 0.0f);
     float3 invDir = 1.0f / ray.direction;
@@ -140,9 +133,7 @@ bool RayAABBTest(Ray ray, out float thit, out float3 hitNormal) {
     return true;
 }
 
-// ------------------------------------------------------------------ //
-// Dispatch
-// ------------------------------------------------------------------ //
+/// Dispatch
 bool RayAnalyticTest(uint sceneIndex, Ray localRay, uint primitiveType,
                      out float thit, out float3 hitNormal) {
     if (primitiveType == ANALYTIC_AABB)

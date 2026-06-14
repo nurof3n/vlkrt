@@ -5,7 +5,7 @@ project "Vlkrt-Client"
    targetdir "bin/%{cfg.buildcfg}"
    staticruntime "off"
 
-   files { "Source/**.h", "Source/**.cpp" }
+   files { "Source/**.h", "Source/**.cpp", "Source/Shaders/**.slang" }
 
    includedirs
    {

@@ -8,10 +8,10 @@
 
 namespace Vlkrt
 {
-    /**
-     * @brief Manages Lua scripting for scene entities, allowing scripts to manipulate entity properties and respond to
-     * update events. Each entity can have an optional Lua script that is loaded and executed on update.
-     */
+    /// <summary>
+    /// Manages Lua scripting for scene entities, allowing scripts to manipulate entity properties and respond to
+    /// update events. Each entity can have an optional Lua script that is loaded and executed on update.
+    /// </summary>
     class ScriptEngine
     {
     public:

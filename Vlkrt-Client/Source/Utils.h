@@ -3,8 +3,8 @@
 namespace Vlkrt
 {
     // TODO: Make these configurable via a settings file or environment variables
-    //       Also, consider using std::filesystem for path handling to ensure cross-platform compatibility
-    //	     Last, these could be organized into a ResourceManager class that handles loading and caching of resources
+    // Also, consider using std::filesystem for path handling to ensure cross-platform compatibility
+    // Last, these could be organized into a ResourceManager class that handles loading and caching of resources
     //
     // Common resource paths
     static const char* TEXTURES_DIR = "../resources/textures/";

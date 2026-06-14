@@ -2,18 +2,14 @@
 
 #include "Walnut/Application.h"
 #include "Walnut/Core/Log.h"
+#include "NRD.h"
 
 #include <algorithm>
 #include <cstring>
 #include <vector>
 
-#if VLKRT_NRD_HELPER_HEADERS_AVAILABLE
-#include "NRD.h"
-#endif
-
 namespace Vlkrt
 {
-#if VLKRT_NRD_HELPER_HEADERS_AVAILABLE
     namespace
     {
         constexpr nrd::Identifier kDenoiserId = 0;
@@ -31,8 +27,7 @@ namespace Vlkrt
 
         static Walnut::ImageFormat GetWalnutFormat(nrd::Format format)
         {
-            switch (format)
-            {
+            switch (format) {
                 case nrd::Format::R8_UNORM:
                 case nrd::Format::R8_SNORM:
                 case nrd::Format::R8_UINT:
@@ -44,42 +39,35 @@ namespace Vlkrt
                 case nrd::Format::RG8_UNORM:
                 case nrd::Format::RG8_SNORM:
                 case nrd::Format::RG8_UINT:
-                case nrd::Format::RG8_SINT:
-                    return Walnut::ImageFormat::RGBA;
+                case nrd::Format::RG8_SINT: return Walnut::ImageFormat::RGBA;
 
                 case nrd::Format::RGBA8_UNORM:
                 case nrd::Format::RGBA8_SNORM:
                 case nrd::Format::RGBA8_UINT:
                 case nrd::Format::RGBA8_SINT:
-                case nrd::Format::RGBA8_SRGB:
-                    return Walnut::ImageFormat::RGBA;
+                case nrd::Format::RGBA8_SRGB: return Walnut::ImageFormat::RGBA;
 
                 case nrd::Format::R16_UNORM:
                 case nrd::Format::R16_SNORM:
                 case nrd::Format::R16_UINT:
                 case nrd::Format::R16_SINT:
-                case nrd::Format::R16_SFLOAT:
-                    return Walnut::ImageFormat::R32F;
+                case nrd::Format::R16_SFLOAT: return Walnut::ImageFormat::R32F;
 
                 case nrd::Format::RG16_UNORM:
                 case nrd::Format::RG16_SNORM:
                 case nrd::Format::RG16_UINT:
                 case nrd::Format::RG16_SINT:
-                case nrd::Format::RG16_SFLOAT:
-                    // RG16F is supported by Walnut!
-                    return Walnut::ImageFormat::RG16F;
+                case nrd::Format::RG16_SFLOAT: return Walnut::ImageFormat::RG16F;
 
                 case nrd::Format::RGBA16_UNORM:
                 case nrd::Format::RGBA16_SNORM:
                 case nrd::Format::RGBA16_UINT:
                 case nrd::Format::RGBA16_SINT:
-                case nrd::Format::RGBA16_SFLOAT:
-                    return Walnut::ImageFormat::RGBA32F;
+                case nrd::Format::RGBA16_SFLOAT: return Walnut::ImageFormat::RGBA32F;
 
                 case nrd::Format::R32_UINT:
                 case nrd::Format::R32_SINT:
-                case nrd::Format::R32_SFLOAT:
-                    return Walnut::ImageFormat::R32F;
+                case nrd::Format::R32_SFLOAT: return Walnut::ImageFormat::R32F;
 
                 case nrd::Format::RG32_UINT:
                 case nrd::Format::RG32_SINT:
@@ -89,16 +77,13 @@ namespace Vlkrt
 
                 case nrd::Format::RGB32_UINT:
                 case nrd::Format::RGB32_SINT:
-                case nrd::Format::RGB32_SFLOAT:
-                    return Walnut::ImageFormat::RGBA32F;
+                case nrd::Format::RGB32_SFLOAT: return Walnut::ImageFormat::RGBA32F;
 
                 case nrd::Format::RGBA32_UINT:
                 case nrd::Format::RGBA32_SINT:
-                case nrd::Format::RGBA32_SFLOAT:
-                    return Walnut::ImageFormat::RGBA32F;
+                case nrd::Format::RGBA32_SFLOAT: return Walnut::ImageFormat::RGBA32F;
 
-                default:
-                    return Walnut::ImageFormat::RGBA32F;
+                default: return Walnut::ImageFormat::RGBA32F;
             }
         }
 
@@ -139,11 +124,9 @@ namespace Vlkrt
             return sampler;
         }
     }  // namespace
-#endif
 
     void NRDDenoiser::DestroyDirectBackend()
     {
-#if VLKRT_NRD_HELPER_HEADERS_AVAILABLE
         for (auto& p : m_NrdPipelines) {
             if (p.Pipeline != VK_NULL_HANDLE) vkDestroyPipeline(m_Device, p.Pipeline, nullptr);
             if (p.PipelineLayout != VK_NULL_HANDLE) vkDestroyPipelineLayout(m_Device, p.PipelineLayout, nullptr);
@@ -200,19 +183,15 @@ namespace Vlkrt
         m_ConstantSetIndex           = 0;
         m_ResourceSetIndex           = 1;
 
-        // Keep externally supplied guide buffers; renderer owns and updates these.
+        // Keep externally supplied guide buffers; renderer owns and updates these
         m_TransientPoolImages.clear();
         m_PermanentPoolImages.clear();
         m_OutDiffRadianceHitDist.reset();
         m_OutSpecRadianceHitDist.reset();
-#endif
     }
 
     bool NRDDenoiser::BuildDirectBackend()
     {
-#if !VLKRT_NRD_HELPER_HEADERS_AVAILABLE
-        return false;
-#else
         if (!m_DirectInstance) return false;
 
         DestroyDirectBackend();
@@ -240,12 +219,12 @@ namespace Vlkrt
         poolSizes[0]                      = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 64 };
         poolSizes[1]                      = { VK_DESCRIPTOR_TYPE_SAMPLER, instanceDesc->samplersNum * 64 };
         poolSizes[2]                      = { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-            std::max(32u, instanceDesc->descriptorPoolDesc.totalTexturesNum * MULTIPLIER + 8u) };
+                                 std::max(32u, instanceDesc->descriptorPoolDesc.totalTexturesNum * MULTIPLIER + 8u) };
         poolSizes[3]                      = { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            std::max(32u, instanceDesc->descriptorPoolDesc.totalStorageTexturesNum * MULTIPLIER + 8u) };
+                                 std::max(32u, instanceDesc->descriptorPoolDesc.totalStorageTexturesNum * MULTIPLIER + 8u) };
 
         VkDescriptorPoolCreateInfo poolInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
-        poolInfo.maxSets       = (pipelineCount * MULTIPLIER) + 64; // allow multiple dispatch instances per pipeline
+        poolInfo.maxSets       = (pipelineCount * MULTIPLIER) + 64;  // allow multiple dispatch instances per pipeline
         poolInfo.poolSizeCount = 4;
         poolInfo.pPoolSizes    = poolSizes;
         if (vkCreateDescriptorPool(m_Device, &poolInfo, nullptr, &m_NrdDescriptorPool) != VK_SUCCESS) return false;
@@ -253,14 +232,14 @@ namespace Vlkrt
         // Ensure proper alignment (typically 256 bytes)
         VkPhysicalDeviceProperties deviceProps{};
         vkGetPhysicalDeviceProperties(Walnut::Application::GetPhysicalDevice(), &deviceProps);
-        uint32_t align = static_cast<uint32_t>(deviceProps.limits.minUniformBufferOffsetAlignment);
-        uint32_t rawSize = std::max(256u, instanceDesc->constantBufferMaxDataSize);
-        m_NrdConstantStride = (rawSize + align - 1) & ~(align - 1);
+        uint32_t align        = static_cast<uint32_t>(deviceProps.limits.minUniformBufferOffsetAlignment);
+        uint32_t rawSize      = std::max(256u, instanceDesc->constantBufferMaxDataSize);
+        m_NrdConstantStride   = (rawSize + align - 1) & ~(align - 1);
         m_NrdConstantCapacity = rawSize;
 
         {
             VkBufferCreateInfo bufferInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-            bufferInfo.size        = m_NrdConstantStride * 64; // up to 64 dispatches
+            bufferInfo.size        = m_NrdConstantStride * 64;  // up to 64 dispatches
             bufferInfo.usage       = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
             bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
             if (vkCreateBuffer(m_Device, &bufferInfo, nullptr, &m_NrdConstantBuffer) != VK_SUCCESS) return false;
@@ -283,7 +262,7 @@ namespace Vlkrt
             }
         }
 
-        // Vulkan SPIR-V register shifts (from NRD CMakeLists)
+        // Vulkan SPIR-V register shifts
         const uint32_t SPIRV_SREG_OFFSET = 0;
         const uint32_t SPIRV_BREG_OFFSET = 2;
         const uint32_t SPIRV_UREG_OFFSET = 3;
@@ -333,7 +312,8 @@ namespace Vlkrt
         std::vector<VkWriteDescriptorSet> set0Writes;
         set0Writes.reserve(64 * (1 + instanceDesc->samplersNum));
 
-        std::vector<std::vector<VkDescriptorImageInfo>> allSamplerInfos(64, std::vector<VkDescriptorImageInfo>(instanceDesc->samplersNum));
+        std::vector<std::vector<VkDescriptorImageInfo> > allSamplerInfos(
+                64, std::vector<VkDescriptorImageInfo>(instanceDesc->samplersNum));
 
         for (uint32_t dIdx = 0; dIdx < 64; dIdx++) {
             cbInfos[dIdx].buffer = m_NrdConstantBuffer;
@@ -449,9 +429,9 @@ namespace Vlkrt
 
         if (m_GuideViewZ) {
             VkImageViewCreateInfo viewInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
-            viewInfo.image                           = m_GuideViewZ->GetVkImage();
-            viewInfo.viewType                        = VK_IMAGE_VIEW_TYPE_2D;
-            viewInfo.format                          = VK_FORMAT_R32G32B32A32_SFLOAT;
+            viewInfo.image    = m_GuideViewZ->GetVkImage();
+            viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+            viewInfo.format   = VK_FORMAT_R32G32B32A32_SFLOAT;
             // g_guideViewZ layout: R=depth(viewZ), GBA=albedo.xyz
             // NRD reads IN_VIEWZ from the R channel - use IDENTITY swizzle.
             viewInfo.components.r                    = VK_COMPONENT_SWIZZLE_IDENTITY;
@@ -509,12 +489,11 @@ namespace Vlkrt
 
                 if (!isTexture && !isStorage) return false;
 
-                uint32_t baseBinding = isTexture ? (baseTextureRegister + SPIRV_TREG_OFFSET) : (baseStorageRegister + SPIRV_UREG_OFFSET);
+                uint32_t baseBinding = isTexture ? (baseTextureRegister + SPIRV_TREG_OFFSET)
+                                                 : (baseStorageRegister + SPIRV_UREG_OFFSET);
 
-                if (isTexture)  state.TextureCount += range.descriptorsNum;
-                else            state.StorageCount += range.descriptorsNum;
-
-                VkDescriptorType vkType = isTexture ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+                VkDescriptorType vkType
+                        = isTexture ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
                 for (uint32_t bi = 0; bi < range.descriptorsNum; bi++) {
                     uint32_t slot = baseBinding + bi;
                     VkDescriptorSetLayoutBinding b{};
@@ -526,8 +505,10 @@ namespace Vlkrt
                     state.ResourceSlots.push_back({ slot, vkType });
                 }
 
-                if (isTexture)  baseTextureRegister += range.descriptorsNum;
-                else            baseStorageRegister += range.descriptorsNum;
+                if (isTexture)
+                    baseTextureRegister += range.descriptorsNum;
+                else
+                    baseStorageRegister += range.descriptorsNum;
             }
 
             VkDescriptorSetLayoutCreateInfo resourcesLayoutInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
@@ -574,39 +555,31 @@ namespace Vlkrt
 
         m_BackendReady = true;
         return true;
-#endif
     }
 
     bool NRDDenoiser::ExecutePreparedDispatches(VkCommandBuffer cmd, const std::shared_ptr<Walnut::Image>& ioImage,
             const void* dispatchesOpaque, uint32_t dispatchesNum)
     {
-#if !VLKRT_NRD_HELPER_HEADERS_AVAILABLE
-        (void) cmd;
-        (void) ioImage;
-        (void) dispatchesOpaque;
-        (void) dispatchesNum;
-        return false;
-#else
         if (!m_BackendReady || !dispatchesOpaque || !ioImage) return false;
 
         const nrd::DispatchDesc* dispatches = reinterpret_cast<const nrd::DispatchDesc*>(dispatchesOpaque);
         bool executedAny                    = false;
 
-        // Transition ALL internal pools and out textures to GENERAL before the first dispatch.
-        // oldLayout = UNDEFINED because Walnut::Image may not have been used as a storage image yet.
+        // Transition ALL internal pools and out textures to GENERAL before the first dispatch
+        // oldLayout = UNDEFINED because Walnut::Image may not have been used as a storage image yet
         if (!m_LoggedFirstPass) {
             std::vector<VkImageMemoryBarrier> initialBarriers;
             auto addBarrier = [&](const std::shared_ptr<Walnut::Image>& img) {
                 if (!img) return;
-                VkImageMemoryBarrier b = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
-                b.image                       = img->GetVkImage();
-                b.oldLayout                   = VK_IMAGE_LAYOUT_UNDEFINED; // discard previous content
-                b.newLayout                   = VK_IMAGE_LAYOUT_GENERAL;
-                b.srcAccessMask               = 0;
-                b.dstAccessMask               = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-                b.srcQueueFamilyIndex         = VK_QUEUE_FAMILY_IGNORED;
-                b.dstQueueFamilyIndex         = VK_QUEUE_FAMILY_IGNORED;
-                b.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                VkImageMemoryBarrier b            = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+                b.image                           = img->GetVkImage();
+                b.oldLayout                       = VK_IMAGE_LAYOUT_UNDEFINED;  // discard previous content
+                b.newLayout                       = VK_IMAGE_LAYOUT_GENERAL;
+                b.srcAccessMask                   = 0;
+                b.dstAccessMask                   = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+                b.srcQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+                b.dstQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+                b.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
                 b.subresourceRange.baseMipLevel   = 0;
                 b.subresourceRange.levelCount     = 1;
                 b.subresourceRange.baseArrayLayer = 0;
@@ -620,19 +593,18 @@ namespace Vlkrt
             for (const auto& poolImg : m_PermanentPoolImages) addBarrier(poolImg);
 
             if (!initialBarriers.empty()) {
-                vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                        0, 0, nullptr, 0, nullptr, static_cast<uint32_t>(initialBarriers.size()), initialBarriers.data());
+                vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0,
+                        nullptr, 0, nullptr, static_cast<uint32_t>(initialBarriers.size()), initialBarriers.data());
             }
         }
 
         // Reset resource set allocators for each pipeline
         m_CurrentSet0Index = 0;
-        for (NrdPipelineState& pipe : m_NrdPipelines) {
-            pipe.CurrentSetIndex = 0;
-        }
+        for (NrdPipelineState& pipe : m_NrdPipelines) { pipe.CurrentSetIndex = 0; }
 
         // Resource dependency tracking
-        struct ResourceAccess {
+        struct ResourceAccess
+        {
             nrd::ResourceType type;
             uint16_t index;
             bool written;
@@ -650,7 +622,7 @@ namespace Vlkrt
             for (uint32_t ri = 0; ri < d.resourcesNum; ri++) {
                 if (ri >= p.ResourceSlots.size()) break;
                 const nrd::ResourceDesc& r = d.resources[ri];
-                
+
                 for (const auto& wa : writtenResources) {
                     if (wa.type == r.type && wa.index == r.indexInPool) {
                         needsBarrier = true;
@@ -662,16 +634,11 @@ namespace Vlkrt
 
             if (needsBarrier && executedAny) {
                 VkMemoryBarrier memoryBarrier = { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
-                memoryBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-                memoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-                vkCmdPipelineBarrier(cmd,
-                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 
-                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                        0,
-                        1, &memoryBarrier,
-                        0, nullptr,
-                        0, nullptr);
-                
+                memoryBarrier.srcAccessMask   = VK_ACCESS_SHADER_WRITE_BIT;
+                memoryBarrier.dstAccessMask   = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+                vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0,
+                        1, &memoryBarrier, 0, nullptr, 0, nullptr);
+
                 // Clear tracker after barrier since everything is now synchronized
                 writtenResources.clear();
             }
@@ -686,7 +653,8 @@ namespace Vlkrt
             }
 
             if (p.CurrentSetIndex >= p.ResourceSets.size()) {
-                WL_WARN_TAG("Renderer", "Insufficient descriptor sets for NRD pipeline {}! (Index {}, Size {})", d.pipelineIndex, p.CurrentSetIndex, p.ResourceSets.size());
+                WL_WARN_TAG("Renderer", "Insufficient descriptor sets for NRD pipeline {}! (Index {}, Size {})",
+                        d.pipelineIndex, p.CurrentSetIndex, p.ResourceSets.size());
                 continue;
             }
             VkDescriptorSet currentResourceSet = p.ResourceSets[p.CurrentSetIndex++];
@@ -704,29 +672,32 @@ namespace Vlkrt
             auto getImageForResource
                     = [this, &ioImage](const nrd::ResourceDesc& resource) -> std::shared_ptr<Walnut::Image> {
                 auto ensurePoolImage = [this, &ioImage](std::vector<std::shared_ptr<Walnut::Image> >& pool,
-                                                uint32_t index, bool isPermanent) -> std::shared_ptr<Walnut::Image> {
+                                               uint32_t index, bool isPermanent) -> std::shared_ptr<Walnut::Image> {
                     if (index >= pool.size()) pool.resize(index + 1);
 
                     if (!pool[index]) {
-                        auto* instance = reinterpret_cast<nrd::Instance*>(m_DirectInstance);
+                        auto* instance                        = reinterpret_cast<nrd::Instance*>(m_DirectInstance);
                         const nrd::InstanceDesc* instanceDesc = nrd::GetInstanceDesc(*instance);
-                        
-                        nrd::Format nrdFmt = nrd::Format::RGBA32_SFLOAT;
+
+                        nrd::Format nrdFmt        = nrd::Format::RGBA32_SFLOAT;
                         uint32_t downsampleFactor = 1;
                         if (instanceDesc) {
                             if (isPermanent && index < instanceDesc->permanentPoolSize) {
                                 nrdFmt = instanceDesc->permanentPool[index].format;
-                                downsampleFactor = std::max(1u, (uint32_t)instanceDesc->permanentPool[index].downsampleFactor);
-                            } else if (!isPermanent && index < instanceDesc->transientPoolSize) {
+                                downsampleFactor
+                                        = std::max(1u, (uint32_t) instanceDesc->permanentPool[index].downsampleFactor);
+                            }
+                            else if (!isPermanent && index < instanceDesc->transientPoolSize) {
                                 nrdFmt = instanceDesc->transientPool[index].format;
-                                downsampleFactor = std::max(1u, (uint32_t)instanceDesc->transientPool[index].downsampleFactor);
+                                downsampleFactor
+                                        = std::max(1u, (uint32_t) instanceDesc->transientPool[index].downsampleFactor);
                             }
                         }
 
-                        const uint32_t w   = std::max(1u, ioImage->GetWidth() / downsampleFactor);
-                        const uint32_t h   = std::max(1u, ioImage->GetHeight() / downsampleFactor);
+                        const uint32_t w              = std::max(1u, ioImage->GetWidth() / downsampleFactor);
+                        const uint32_t h              = std::max(1u, ioImage->GetHeight() / downsampleFactor);
                         const Walnut::ImageFormat fmt = GetWalnutFormat(nrdFmt);
-                        pool[index]        = std::make_shared<Walnut::Image>(w, h, fmt);
+                        pool[index]                   = std::make_shared<Walnut::Image>(w, h, fmt);
                         const size_t bytes = static_cast<size_t>(w) * static_cast<size_t>(h) * sizeof(float) * 4;
                         std::vector<uint8_t> zeros(bytes, 0u);
                         pool[index]->SetData(zeros.data());
@@ -754,15 +725,17 @@ namespace Vlkrt
 
                     case nrd::ResourceType::IN_SPEC_RADIANCE_HITDIST:
                     case nrd::ResourceType::IN_SPEC_HITDIST: return m_GuideSpecRadianceHitDist;
-                    
+
                     case nrd::ResourceType::OUT_SPEC_RADIANCE_HITDIST:
                     case nrd::ResourceType::OUT_SPEC_HITDIST: return m_OutSpecRadianceHitDist;
 
                     case nrd::ResourceType::TRANSIENT_POOL:
-                        return ensurePoolImage(m_TransientPoolImages, static_cast<uint32_t>(resource.indexInPool), false);
+                        return ensurePoolImage(
+                                m_TransientPoolImages, static_cast<uint32_t>(resource.indexInPool), false);
 
                     case nrd::ResourceType::PERMANENT_POOL:
-                        return ensurePoolImage(m_PermanentPoolImages, static_cast<uint32_t>(resource.indexInPool), true);
+                        return ensurePoolImage(
+                                m_PermanentPoolImages, static_cast<uint32_t>(resource.indexInPool), true);
 
                     default: return nullptr;
                 }
@@ -775,7 +748,7 @@ namespace Vlkrt
             for (uint32_t ri = 0; ri < d.resourcesNum; ri++) {
                 if (ri >= p.ResourceSlots.size()) break;
                 const nrd::ResourceDesc& r = d.resources[ri];
-                const auto& slot = p.ResourceSlots[ri];
+                const auto& slot           = p.ResourceSlots[ri];
 
                 const std::shared_ptr<Walnut::Image> targetImage = getImageForResource(r);
                 const char* resourceName                         = nrd::GetResourceTypeString(r.type);
@@ -795,12 +768,12 @@ namespace Vlkrt
                 imageInfos[ri].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
                 VkWriteDescriptorSet w = {};
-                w.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                w.dstSet          = currentResourceSet;
-                w.dstBinding      = slot.binding;
-                w.descriptorType  = slot.type;
-                w.descriptorCount = 1;
-                w.pImageInfo      = &imageInfos[ri];
+                w.sType                = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                w.dstSet               = currentResourceSet;
+                w.dstBinding           = slot.binding;
+                w.descriptorType       = slot.type;
+                w.descriptorCount      = 1;
+                w.pImageInfo           = &imageInfos[ri];
                 writes.push_back(w);
             }
 
@@ -809,14 +782,13 @@ namespace Vlkrt
 
             if (d.constantBufferData && d.constantBufferDataSize > 0
                     && d.constantBufferDataSize <= m_NrdConstantCapacity && m_NrdConstantMapped != nullptr) {
-                
                 if (m_CurrentSet0Index >= 64) {
                     WL_WARN_TAG("Renderer", "Exceeded max frame dispatches for constant buffers (64)");
                     m_CurrentSet0Index = 0;
                 }
-                
+
                 VkDeviceSize offset = static_cast<VkDeviceSize>(m_CurrentSet0Index) * m_NrdConstantStride;
-                uint8_t* dst = static_cast<uint8_t*>(m_NrdConstantMapped) + offset;
+                uint8_t* dst        = static_cast<uint8_t*>(m_NrdConstantMapped) + offset;
                 std::memcpy(dst, d.constantBufferData, d.constantBufferDataSize);
             }
 
@@ -831,16 +803,10 @@ namespace Vlkrt
         }
 
         return executedAny;
-#endif
     }
 
     bool NRDDenoiser::EnsureDirectInstance(uint32_t width, uint32_t height)
     {
-#if !VLKRT_NRD_HELPER_HEADERS_AVAILABLE
-        (void) width;
-        (void) height;
-        return false;
-#else
         if (!m_RuntimeLinked) return false;
 
         if (m_BackendInitFailed && m_InstanceWidth == width && m_InstanceHeight == height) return false;
@@ -878,18 +844,18 @@ namespace Vlkrt
         }
 
         nrd::ReblurSettings reblurSettings{};
-        reblurSettings.hitDistanceReconstructionMode = nrd::HitDistanceReconstructionMode::AREA_3X3;
-        reblurSettings.minMaterialForDiffuse = 4.0f;
-        reblurSettings.minMaterialForSpecular = 4.0f;
-        reblurSettings.diffusePrepassBlurRadius = 10.0f;
-        reblurSettings.specularPrepassBlurRadius = 10.0f;
-        reblurSettings.maxBlurRadius = 15.0f;
-        reblurSettings.minBlurRadius = 0.5f;
-        reblurSettings.minHitDistanceWeight = 0.02f;
-        reblurSettings.lobeAngleFraction = 0.15f;
-        reblurSettings.roughnessFraction = 0.15f;
+        reblurSettings.hitDistanceReconstructionMode     = nrd::HitDistanceReconstructionMode::AREA_3X3;
+        reblurSettings.minMaterialForDiffuse             = 4.0f;
+        reblurSettings.minMaterialForSpecular            = 4.0f;
+        reblurSettings.diffusePrepassBlurRadius          = 10.0f;
+        reblurSettings.specularPrepassBlurRadius         = 10.0f;
+        reblurSettings.maxBlurRadius                     = 15.0f;
+        reblurSettings.minBlurRadius                     = 0.5f;
+        reblurSettings.minHitDistanceWeight              = 0.02f;
+        reblurSettings.lobeAngleFraction                 = 0.15f;
+        reblurSettings.roughnessFraction                 = 0.15f;
         reblurSettings.fireflySuppressorMinRelativeScale = 2.0f;
-        reblurSettings.enableAntiFirefly = true;
+        reblurSettings.enableAntiFirefly                 = true;
         const nrd::Result settingsRes = nrd::SetDenoiserSettings(*instance, kDenoiserId, &reblurSettings);
         if (settingsRes != nrd::Result::SUCCESS) {
             WL_WARN_TAG("Renderer", "Direct NRD SetDenoiserSettings failed. Destroying instance.");
@@ -917,14 +883,12 @@ namespace Vlkrt
 
         WL_INFO_TAG("Renderer", "Direct NRD instance created for {}x{}.", width, height);
         return true;
-#endif
     }
 
     void NRDDenoiser::Initialize(VkDevice device)
     {
         m_Device                 = device;
         m_Enabled                = false;
-        m_HelperHeadersAvailable = (VLKRT_NRD_HELPER_HEADERS_AVAILABLE != 0);
         m_RuntimeLinked          = false;
         m_DirectInstanceReady    = false;
         m_BackendInitFailed      = false;
@@ -934,40 +898,27 @@ namespace Vlkrt
         m_DirectInstance         = nullptr;
         m_LoggedDispatchPlan     = false;
 
-        // Scaffold mode: keep integration points in place while direct NRD wiring is pending.
         m_Operational = false;
 
-        if (m_HelperHeadersAvailable) {
-#if VLKRT_NRD_HELPER_HEADERS_AVAILABLE
-            const nrd::LibraryDesc* libraryDesc = nrd::GetLibraryDesc();
-            m_RuntimeLinked                     = (libraryDesc != nullptr);
-            if (m_RuntimeLinked) {
-                WL_INFO_TAG("Renderer", "NRD runtime probe successful (v{}.{}.{}).", NRD_VERSION_MAJOR,
-                        NRD_VERSION_MINOR, NRD_VERSION_BUILD);
-            }
-            else {
-                WL_WARN_TAG("Renderer", "NRD headers are present but runtime probe failed.");
-            }
-#endif
-            WL_INFO_TAG("Renderer",
-                    "NRD headers detected. Direct runtime wiring is available and activates when NRD is enabled.");
+        const nrd::LibraryDesc* libraryDesc = nrd::GetLibraryDesc();
+        m_RuntimeLinked                     = (libraryDesc != nullptr);
+        if (m_RuntimeLinked) {
+            WL_INFO_TAG("Renderer", "NRD runtime probe successful (v{}.{}.{}).", NRD_VERSION_MAJOR, NRD_VERSION_MINOR,
+                    NRD_VERSION_BUILD);
         }
         else {
-            WL_WARN_TAG("Renderer",
-                    "NRD headers not found on include path. Keep submodules synced and regenerate project files.");
+            WL_WARN_TAG("Renderer", "NRD runtime probe failed.");
         }
     }
 
     void NRDDenoiser::Shutdown()
     {
-#if VLKRT_NRD_HELPER_HEADERS_AVAILABLE
         DestroyDirectBackend();
         if (m_DirectInstance) {
             auto* instance = reinterpret_cast<nrd::Instance*>(m_DirectInstance);
             nrd::DestroyInstance(*instance);
             m_DirectInstance = nullptr;
         }
-#endif
 
         m_Device                 = VK_NULL_HANDLE;
         m_Enabled                = false;
@@ -994,8 +945,7 @@ namespace Vlkrt
         if (m_BackendReady) return "Direct NRD backend ready (reference mode resources only)";
         if (m_DirectInstanceReady) return "Direct NRD instance ready (dispatch execution backend pending)";
         if (m_RuntimeLinked) return "Runtime linked (direct dispatch pipeline pending)";
-        if (m_HelperHeadersAvailable) return "Bootstrap staged (NRD headers found, direct backend pending)";
-        return "Scaffold active (headers/runtime not wired yet)";
+        return "Runtime not linked";
     }
 
     void NRDDenoiser::Dispatch(
@@ -1007,7 +957,6 @@ namespace Vlkrt
 
         if (!m_Enabled) return;
 
-#if VLKRT_NRD_HELPER_HEADERS_AVAILABLE
         m_Operational = false;
         if (EnsureDirectInstance(params.Width, params.Height)) {
             auto* instance   = reinterpret_cast<nrd::Instance*>(m_DirectInstance);
@@ -1131,7 +1080,6 @@ namespace Vlkrt
                 WL_WARN_TAG("Renderer", "Direct NRD SetCommonSettings failed for frame {}.", params.FrameIndex);
             }
         }
-#endif
 
         if (!m_LoggedFirstPass && m_Operational) {
             WL_INFO_TAG("Renderer",
@@ -1139,24 +1087,20 @@ namespace Vlkrt
                     "placeholder guide resources. Real guide data should be populated from RT shader.");
             m_LoggedFirstPass = true;
         }
-
-        // No-op in scaffold mode.
     }
 
     void NRDDenoiser::SetGuideBuffers(const std::shared_ptr<Walnut::Image>& normalRoughness,
-                                     const std::shared_ptr<Walnut::Image>& viewZ,
-                                     const std::shared_ptr<Walnut::Image>& motionVectors,
-                                     const std::shared_ptr<Walnut::Image>& diffRadianceHitDist,
-                                     const std::shared_ptr<Walnut::Image>& specRadianceHitDist)
+            const std::shared_ptr<Walnut::Image>& viewZ, const std::shared_ptr<Walnut::Image>& motionVectors,
+            const std::shared_ptr<Walnut::Image>& diffRadianceHitDist,
+            const std::shared_ptr<Walnut::Image>& specRadianceHitDist)
     {
-        m_GuideNormalRoughness = normalRoughness;
-        m_GuideViewZ = viewZ;
-        m_GuideMotionVectors = motionVectors;
+        m_GuideNormalRoughness     = normalRoughness;
+        m_GuideViewZ               = viewZ;
+        m_GuideMotionVectors       = motionVectors;
         m_GuideDiffRadianceHitDist = diffRadianceHitDist;
         m_GuideSpecRadianceHitDist = specRadianceHitDist;
 
-        if (m_Device == VK_NULL_HANDLE)
-            return;
+        if (m_Device == VK_NULL_HANDLE) return;
 
         // Recreate NRD-specific image views using the new guide textures
         if (m_GuideViewZNrdImageView != VK_NULL_HANDLE) {

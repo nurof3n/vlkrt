@@ -6,10 +6,9 @@
 
 namespace Vlkrt
 {
-    /**
-     * @brief Class responsible for loading SPIR-V shader binaries and creating Vulkan shader modules.
-     *
-     */
+    /// <summary>
+    /// Class responsible for loading SPIR-V shader binaries and creating Vulkan shader modules.
+    /// </summary>
     class ShaderLoader
     {
     public:

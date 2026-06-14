@@ -34,7 +34,6 @@ namespace Vlkrt
         m_NRDDenoiser.Shutdown();
         if (m_FSRUpscaler) m_FSRUpscaler->Shutdown();
 
-        // Clean up Vulkan resources
         if (m_SBTBuffer != VK_NULL_HANDLE) {
             vkDestroyBuffer(m_Device, m_SBTBuffer, nullptr);
             vkFreeMemory(m_Device, m_SBTMemory, nullptr);
@@ -120,9 +119,12 @@ namespace Vlkrt
 
     void Renderer::OnFSRSettingsChanged(bool enabled, uint32_t qualityMode, float sharpness)
     {
+        // Sharpness is set immediately
         m_FSRSharpness = sharpness;
         m_FSRUpscaler->SetSharpness(sharpness);
-        bool changed   = (m_FSREnabled != enabled) || (m_FSRQuality != qualityMode);
+
+        // Quality changes require pipeline/resource updates
+        bool changed = (m_FSREnabled != enabled) || (m_FSRQuality != qualityMode);
         if (changed) {
             m_FSREnabled = enabled;
             m_FSRQuality = qualityMode;
@@ -160,7 +162,6 @@ namespace Vlkrt
         createOrResizeImage(m_FinalImage, m_RenderWidth, m_RenderHeight, Walnut::ImageFormat::RGBA);
         createOrResizeImage(m_AccumImage, m_RenderWidth, m_RenderHeight, Walnut::ImageFormat::RGBA32F);
 
-        // NRD guide buffers for REBLUR denoising (all RGBA32F for simplified descriptor binding)
         createOrResizeImage(m_GuideNormalRoughness, m_RenderWidth, m_RenderHeight, Walnut::ImageFormat::RGBA32F);
         createOrResizeImage(m_GuideViewZ, m_RenderWidth, m_RenderHeight, Walnut::ImageFormat::RGBA32F);
         createOrResizeImage(m_GuideMotionVectors, m_RenderWidth, m_RenderHeight, Walnut::ImageFormat::RGBA32F);
@@ -182,7 +183,7 @@ namespace Vlkrt
         // First-time descriptor set creation (layout never changes)
         if (m_DescriptorSetLayout == VK_NULL_HANDLE) CreateDescriptorSets();
 
-        // Update output image bindings (bindings 1, 10, 22)
+        // Update output image bindings
         if (m_DescriptorSet != VK_NULL_HANDLE) {
             VkDescriptorImageInfo outputInfo{};
             outputInfo.imageView   = m_FinalImage->GetVkImageView();
@@ -207,7 +208,6 @@ namespace Vlkrt
             writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
             writes[1].pImageInfo      = &accumInfo;
 
-
             // Guide buffer descriptors (bindings 12-16)
             VkDescriptorImageInfo guideInfos[5]{};
             guideInfos[0].imageView   = m_GuideNormalRoughness->GetVkImageView();
@@ -221,7 +221,7 @@ namespace Vlkrt
             guideInfos[4].imageView   = m_GuideSpecRadianceHitDist->GetVkImageView();
             guideInfos[4].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-            for (int i = 0; i < 5; i++) {
+            for (int i = 0; i < 5; ++i) {
                 writes[2 + i].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
                 writes[2 + i].dstSet          = m_DescriptorSet;
                 writes[2 + i].dstBinding      = 12 + i;
@@ -278,11 +278,11 @@ namespace Vlkrt
             vkUpdateDescriptorSets(m_Device, 11, writes, 0, nullptr);
         }
 
-        // Update NRD guide buffers with real renderer buffers (populated by RT shader)
+        // Update NRD denoiser with the new guide buffers
         m_NRDDenoiser.SetGuideBuffers(m_GuideNormalRoughness, m_GuideViewZ, m_GuideMotionVectors,
                 m_GuideDiffRadianceHitDist, m_GuideSpecRadianceHitDist);
 
-        // Force pipeline rebuild on next Render
+        // Force pipeline rebuild on next frame
         m_FirstFrame       = true;
         m_AccumFirstFrame  = true;
         m_GuidesFirstFrame = true;
@@ -304,7 +304,7 @@ namespace Vlkrt
         m_ActiveScene  = &scene;
         m_ActiveCamera = &camera;
 
-        // (Re)create pipeline whenever procedural count or max recursion depth changes, or first frame
+        // Rebuild pipeline and SBT if required
         uint32_t proceduralCount = (uint32_t) scene.ProceduralEntities.size();
         if (m_RTPipeline == VK_NULL_HANDLE || proceduralCount != m_LastProceduralCount
                 || scene.MaxRecursionDepth != m_LastMaxRecursionDepth) {
@@ -315,9 +315,7 @@ namespace Vlkrt
             m_LastMaxRecursionDepth = scene.MaxRecursionDepth;
         }
 
-        // Calculate current scene metrics — recompute only when the scene was invalidated
-        // (m_SceneValid==false means InvalidateScene()/InvalidateSceneStructure() was called).
-        // On steady-state frames this avoids a linear scan over all mesh vertex arrays.
+        // Recalculate current scene metrics if scene is invalidated
         if (!m_SceneValid) {
             size_t totalMeshCount = scene.StaticMeshes.size() + scene.DynamicMeshes.size();
             size_t totalVertices  = 0;
@@ -335,11 +333,11 @@ namespace Vlkrt
             m_CachedTotalIndices   = totalIndices;
         }
 
-        bool sizeChanged  = (m_CachedTotalMeshCount != m_LastMeshCount) || (m_CachedTotalVertices != m_LastVertexCount)
-                            || (m_CachedTotalIndices != m_LastIndexCount)
-                            || (scene.Materials.size() != m_LastMaterialCount);
+        // Rebuild scene buffers if the scene structure has changed
+        bool sizeChanged = (m_CachedTotalMeshCount != m_LastMeshCount) || (m_CachedTotalVertices != m_LastVertexCount)
+                           || (m_CachedTotalIndices != m_LastIndexCount)
+                           || (scene.Materials.size() != m_LastMaterialCount);
         bool needsRebuild = !m_SceneValid || sizeChanged;
-
         if (m_VertexBuffer == VK_NULL_HANDLE || needsRebuild) {
             if (needsRebuild && m_VertexBuffer != VK_NULL_HANDLE) {
                 if (m_CachedTotalMeshCount != m_LastMeshCount || m_CachedTotalVertices != m_LastVertexCount
@@ -378,7 +376,7 @@ namespace Vlkrt
                     size_t lightCount = std::max(scene.Lights.size(), (size_t) 1);
                     m_LightBufferSize = sizeof(GPULight) * lightCount;
                     m_LightBuffer     = CreateBuffer(m_LightBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_LightMemory);
+                                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_LightMemory);
                 }
             }
 
@@ -391,9 +389,7 @@ namespace Vlkrt
             m_LastMaterialCount = scene.Materials.size();
             m_LastLightCount    = scene.Lights.size();
             m_SceneValid        = true;
-            // Only reset temporal accumulation when scene geometry/layout actually changes.
-            // Material/light value edits (InvalidateScene) just re-upload GPU buffers;
-            // they should NOT break accumulation.
+
             if (sizeChanged) {
                 m_AccumFirstFrame = true;
                 m_FrameIndex      = 0;
@@ -406,17 +402,16 @@ namespace Vlkrt
         glm::mat4 currentView = camera.GetView();
         if (currentView != m_LastCameraView) {
             m_FrameIndex      = 0;
-            m_AccumFirstFrame = true;  // discard stale accum image, start fresh
+            m_AccumFirstFrame = true;
         }
 
         const auto setupEnd = Clock::now();
 
-        // Upload SceneUBO every frame
+        // Upload SceneUBO
         const auto uboStart = Clock::now();
         UpdateSceneUBO(scene, camera);
         const auto uboEnd = Clock::now();
 
-        // Get command buffer
         VkCommandBuffer cmd = Walnut::Application::GetCommandBuffer(true);
 
         // Transition final image to GENERAL layout for shader write
@@ -462,7 +457,7 @@ namespace Vlkrt
             m_AccumFirstFrame = false;
         }
 
-        // Transition guide images to GENERAL for RT shader writes.
+        // Transition guide images to GENERAL for RT shader writes
         {
             std::shared_ptr<Walnut::Image> guideImages[] = {
                 m_GuideNormalRoughness,
@@ -496,8 +491,7 @@ namespace Vlkrt
             }
 
             if (barrierCount > 0) {
-                // Source stage covers both ray tracing (prior frames) and compute (NRD) writes.
-                // On the very first frame only TOP_OF_PIPE is needed (no prior writes).
+                // On the very first frame only TOP_OF_PIPE is needed (no prior writes)
                 VkPipelineStageFlags srcStage = m_GuidesFirstFrame ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT
                                                                    : (VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR
                                                                              | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
@@ -518,7 +512,7 @@ namespace Vlkrt
         const uint32_t raygenIdx = (scene.RaytracingType == RaytracingMode::PathTracingTemporal) ? 1u : 0u;
         VkStridedDeviceAddressRegionKHR activeRaygen = m_RaygenRegion;
         activeRaygen.deviceAddress += raygenIdx * m_RaygenRegion.stride;
-        activeRaygen.size = m_RaygenRegion.stride;  // always exactly one raygen entry
+        activeRaygen.size = m_RaygenRegion.stride;
 
         const auto rtRecordStart = Clock::now();
         pvkCmdTraceRaysKHR(cmd, &activeRaygen, &m_MissRegion, &m_HitRegion, &m_CallableRegion, m_FinalImage->GetWidth(),
@@ -528,11 +522,8 @@ namespace Vlkrt
         m_NRDDenoiser.SetEnabled(scene.EnableNRDDenoiser);
         float nrdRecordMs = 0.0f;
 
-        // Transition final image back to SHADER_READ_ONLY for ImGui rendering
+        // Sync RT shader writes before NRD compute dispatches
         if (scene.EnableNRDDenoiser) {
-            // Make ALL ray tracing writes visible to compute reads/writes used by NRD.
-            // Using a global memory barrier here efficiently syncs m_FinalImage and all 5 Guide buffers,
-            // which are kept in VK_IMAGE_LAYOUT_GENERAL across both RT and Compute.
             {
                 VkMemoryBarrier memoryBarrier = { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
                 memoryBarrier.srcAccessMask   = VK_ACCESS_SHADER_WRITE_BIT;
@@ -568,7 +559,7 @@ namespace Vlkrt
             m_NRDDenoiser.Dispatch(cmd, m_FinalImage, denoiseParams);
 
             if (m_NRDDenoiser.IsOperational() && m_ComposeDenoisedPipeline != VK_NULL_HANDLE) {
-                // Ensure NRD compute dispatches finish before our custom Compose compute shader runs.
+                // Ensure NRD compute dispatches finish before our custom Compose compute shader runs
                 VkMemoryBarrier composeBarrier = { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
                 composeBarrier.srcAccessMask   = VK_ACCESS_SHADER_WRITE_BIT;
                 composeBarrier.dstAccessMask   = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
@@ -607,6 +598,7 @@ namespace Vlkrt
                     VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
         }
 
+        // FSR upscale pass
         if (m_FSREnabled && m_FSRUpscaler && m_FinalImageUpscaled) {
             {
                 VkImageMemoryBarrier barrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
@@ -649,7 +641,7 @@ namespace Vlkrt
             }
         }
 
-        // Transition guide images for ImGui debug sampling.
+        // Transition guide images for ImGui debug sampling
         {
             std::shared_ptr<Walnut::Image> guideImages[] = {
                 m_GuideNormalRoughness,
@@ -683,7 +675,6 @@ namespace Vlkrt
             }
 
             if (barrierCount > 0) {
-                // Source covers both ray tracing writes (no NRD) and compute writes (NRD post-process).
                 vkCmdPipelineBarrier(cmd,
                         VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, barrierCount, barriers);
@@ -759,7 +750,6 @@ namespace Vlkrt
         ++m_GlobalTick;
         SceneUBOData ubo{};
 
-        // Store previous frame jitter
         m_PrevCameraJitter = m_LastCameraJitter;
 
         glm::mat4 projection = camera.GetProjection();
@@ -849,19 +839,7 @@ namespace Vlkrt
         loadModule("closesthit_aabb.rchit.spv", m_ClosestHitAABBShader);
         loadModule("intersect_analytic.rint.spv", m_IntersectAnalyticShader);
         loadModule("intersect_sdf.rint.spv", m_IntersectSDFShader);
-        try {
-            loadModule("compose_denoised.comp.spv", m_ComposeDenoisedShader);
-            WL_INFO_TAG("Renderer", "Loaded compose_denoised.comp.spv shader module successfully (handle={}).",
-                    (void*) m_ComposeDenoisedShader);
-        }
-        catch (const std::exception& e) {
-            WL_ERROR_TAG("Renderer", "Failed to load compose_denoised.comp.spv shader: {}", e.what());
-            m_ComposeDenoisedShader = VK_NULL_HANDLE;
-        }
-        catch (...) {
-            WL_ERROR_TAG("Renderer", "Failed to load compose_denoised.comp.spv shader (unknown exception).");
-            m_ComposeDenoisedShader = VK_NULL_HANDLE;
-        }
+        loadModule("compose_denoised.comp.spv", m_ComposeDenoisedShader);
 
         // Stage index constants
         constexpr uint32_t IDX_RGEN      = 0;
@@ -888,7 +866,7 @@ namespace Vlkrt
         std::vector<VkRayTracingShaderGroupCreateInfoKHR> grps(totalGroups);
         const uint32_t U = VK_SHADER_UNUSED_KHR;
         auto fillGrp     = [&](uint32_t idx, VkRayTracingShaderGroupTypeKHR type, uint32_t general, uint32_t chit,
-                                   uint32_t rint) {
+                               uint32_t rint) {
             grps[idx]                    = { VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR };
             grps[idx].type               = type;
             grps[idx].generalShader      = general;
@@ -915,7 +893,7 @@ namespace Vlkrt
         layoutCI.pushConstantRangeCount     = 0;
         vkCreatePipelineLayout(m_Device, &layoutCI, nullptr, &m_RTPipelineLayout);
 
-        // Reuse same layout for compute (both use same descriptor set)
+        // Reuse the same layout for compute
         m_ComputePipelineLayout = m_RTPipelineLayout;
 
         auto tryCreatePipeline = [&](const char* const entryNames[8]) -> VkResult {
@@ -933,9 +911,9 @@ namespace Vlkrt
             stages[IDX_RINT_SDF]
                     = makeStage(VK_SHADER_STAGE_INTERSECTION_BIT_KHR, m_IntersectSDFShader, entryNames[IDX_RINT_SDF]);
 
+            // RayPayload struct: 7×float4 (112B) + 3×uint+2×float (20B) + NRD fields ~48B = 180B total
             VkRayTracingPipelineInterfaceCreateInfoKHR interfaceConfig
                     = { VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_INTERFACE_CREATE_INFO_KHR };
-            // RayPayload struct: 7×float4 (112B) + 3×uint+2×float (20B) + NRD fields ~48B = 180B total
             interfaceConfig.maxPipelineRayPayloadSize      = 180;
             interfaceConfig.maxPipelineRayHitAttributeSize = 32;
 
@@ -944,72 +922,50 @@ namespace Vlkrt
             pci.pStages                           = stages;
             pci.groupCount                        = totalGroups;
             pci.pGroups                           = grps.data();
-            pci.maxPipelineRayRecursionDepth
-                    = std::min(m_ActiveScene ? (m_ActiveScene->MaxRecursionDepth + 2u) : 16u, 16u);
-            // +2 accounts for: 1 shadow ray recursion level + 1 safety margin
+            pci.maxPipelineRayRecursionDepth      = std::min(m_ActiveScene ? (m_ActiveScene->MaxRecursionDepth + 2u)
+                                                                           : m_RTPipelineProperties.maxRayRecursionDepth,
+                    16u);
             pci.layout            = m_RTPipelineLayout;
             pci.pLibraryInterface = &interfaceConfig;
             return pvkCreateRayTracingPipelinesKHR(
                     m_Device, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &pci, nullptr, &m_RTPipeline);
         };
 
-        const char* slangEntries[8] = { "RayGenMain", "RayGenTemporalMain", "MissMain", "ShadowMissMain",
-            "ClosestHitMain", "AabbClosestHitMain", "AnalyticIntersectionMain", "SdfIntersectionMain" };
-        const char* glslEntries[8]  = { "main", "main", "main", "main", "main", "main", "main", "main" };
+        // Slang compiler exports all entry points as "main" in the SPIR-V module,
+        // regardless of the function name in the source code.
+        const char* entryPoints[8] = { "main", "main", "main", "main", "main", "main", "main", "main" };
 
-        VkResult pipelineRes = tryCreatePipeline(slangEntries);
+        VkResult pipelineRes = tryCreatePipeline(entryPoints);
         if (pipelineRes != VK_SUCCESS || m_RTPipeline == VK_NULL_HANDLE) {
             if (m_RTPipeline != VK_NULL_HANDLE) {
                 vkDestroyPipeline(m_Device, m_RTPipeline, nullptr);
                 m_RTPipeline = VK_NULL_HANDLE;
             }
-            VkResult fallbackRes = tryCreatePipeline(glslEntries);
-            if (fallbackRes != VK_SUCCESS || m_RTPipeline == VK_NULL_HANDLE) {
-                throw std::runtime_error(
-                        "Failed to create ray tracing pipeline with both Slang and GLSL entry names. "
-                        "slangRes="
-                        + std::to_string((int) pipelineRes) + ", glslRes=" + std::to_string((int) fallbackRes));
-            }
+            throw std::runtime_error(
+                    "Failed to create ray tracing pipeline. Result code: " + std::to_string((int) pipelineRes));
         }
+        WL_INFO_TAG("Renderer", "Ray tracing pipeline created successfully (handle={}).", (void*) m_RTPipeline);
 
-        if (m_ComposeDenoisedShader != VK_NULL_HANDLE) {
-            VkPipelineShaderStageCreateInfo stageInfo
-                    = makeStage(VK_SHADER_STAGE_COMPUTE_BIT, m_ComposeDenoisedShader, "ComposeDenoisedMain");
-            WL_TRACE_TAG("Renderer", "Compose stage: module={}, entry={}", (void*) stageInfo.module, stageInfo.pName);
+        // Create compose compute pipeline for NRD output composition
+        VkPipelineShaderStageCreateInfo stageInfo
+                = makeStage(VK_SHADER_STAGE_COMPUTE_BIT, m_ComposeDenoisedShader, "main");
 
-            VkComputePipelineCreateInfo composePipelineCI = { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
-            composePipelineCI.layout                      = m_ComputePipelineLayout;  // Use compute-only layout
-            composePipelineCI.stage                       = stageInfo;
+        VkComputePipelineCreateInfo composePipelineCI = { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+        composePipelineCI.layout                      = m_ComputePipelineLayout;
+        composePipelineCI.stage                       = stageInfo;
 
-            VkResult composeRes = vkCreateComputePipelines(
-                    m_Device, VK_NULL_HANDLE, 1, &composePipelineCI, nullptr, &m_ComposeDenoisedPipeline);
-            if (composeRes != VK_SUCCESS) {
-                // Slang fallback: try "main" entry point if slangc renamed it
-                composePipelineCI.stage.pName = "main";
-                composeRes                    = vkCreateComputePipelines(
-                        m_Device, VK_NULL_HANDLE, 1, &composePipelineCI, nullptr, &m_ComposeDenoisedPipeline);
-            }
-            if (composeRes != VK_SUCCESS) {
-                const char* errName = "UNKNOWN";
-                switch (composeRes) {
-                    case VK_ERROR_OUT_OF_HOST_MEMORY: errName = "OUT_OF_HOST_MEMORY"; break;
-                    case VK_ERROR_OUT_OF_DEVICE_MEMORY: errName = "OUT_OF_DEVICE_MEMORY"; break;
-                    case VK_ERROR_INVALID_SHADER_NV: errName = "INVALID_SHADER"; break;
-                    case VK_ERROR_DEVICE_LOST: errName = "DEVICE_LOST"; break;
-                    case VK_ERROR_INITIALIZATION_FAILED: errName = "INITIALIZATION_FAILED"; break;
-                    default: errName = "UNKNOWN"; break;
-                }
-                WL_ERROR_TAG("Renderer", "vkCreateComputePipelines failed with code {} ({}). Check GPU driver.",
-                        (int) composeRes, errName);
+        VkResult composeRes = vkCreateComputePipelines(
+                m_Device, VK_NULL_HANDLE, 1, &composePipelineCI, nullptr, &m_ComposeDenoisedPipeline);
+        if (composeRes != VK_SUCCESS || m_ComposeDenoisedPipeline == VK_NULL_HANDLE) {
+            if (m_ComposeDenoisedPipeline != VK_NULL_HANDLE) {
+                vkDestroyPipeline(m_Device, m_ComposeDenoisedPipeline, nullptr);
                 m_ComposeDenoisedPipeline = VK_NULL_HANDLE;
             }
-            else {
-                WL_INFO_TAG("Renderer", "Compose compute pipeline created successfully.");
-            }
+            throw std::runtime_error(
+                    "Failed to create compose compute pipeline. Result code: " + std::to_string((int) composeRes));
         }
         else {
-            WL_WARN_TAG("Renderer", "Compose shader module is NULL, skipping pipeline creation.");
-            m_ComposeDenoisedPipeline = VK_NULL_HANDLE;
+            WL_INFO_TAG("Renderer", "Compose compute pipeline created successfully.");
         }
     }
 
@@ -1125,8 +1081,8 @@ namespace Vlkrt
     void Renderer::CreateDescriptorSets()
     {
         // All RT stages used across bindings
-        const VkShaderStageFlags kAllRT        = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR
-                                                 | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_INTERSECTION_BIT_KHR;
+        const VkShaderStageFlags kAllRT = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR
+                                          | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_INTERSECTION_BIT_KHR;
         const VkShaderStageFlags kAllRTCompute = kAllRT | VK_SHADER_STAGE_COMPUTE_BIT;
 
         VkDescriptorSetLayoutBinding bindings[23] = {};
@@ -1223,55 +1179,55 @@ namespace Vlkrt
         size_t vertexCount = std::max(totalVertices, (size_t) 1);
         m_VertexBufferSize = sizeof(GPUVertex) * vertexCount;
         m_VertexBuffer     = CreateBuffer(m_VertexBufferSize,
-                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
-                        | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
-                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_VertexMemory);
+                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
+                            | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
+                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_VertexMemory);
 
         m_PrevVertexBufferSize = m_VertexBufferSize;
         m_PrevVertexBuffer     = CreateBuffer(m_PrevVertexBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_PrevVertexMemory);
+                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_PrevVertexMemory);
 
         // Create index buffer
         size_t indexCount = std::max(totalIndices, (size_t) 1);
         m_IndexBufferSize = sizeof(uint32_t) * indexCount;
         m_IndexBuffer     = CreateBuffer(m_IndexBufferSize,
-                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
-                        | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
-                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_IndexMemory);
+                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
+                            | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
+                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_IndexMemory);
 
         // Create material buffer
         size_t materialCount = std::max(scene.Materials.size(), (size_t) 1);
         m_MaterialBufferSize = sizeof(GPUPBRMaterial) * materialCount;
         m_MaterialBuffer     = CreateBuffer(m_MaterialBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_MaterialMemory);
+                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_MaterialMemory);
 
         // Create material index buffer (one uint32 per triangle)
         size_t triangleCount      = std::max(totalIndices / 3, (size_t) 1);
         m_MaterialIndexBufferSize = sizeof(uint32_t) * triangleCount;
         m_MaterialIndexBuffer     = CreateBuffer(m_MaterialIndexBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_MaterialIndexMemory);
+                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_MaterialIndexMemory);
 
         // Create AABB transform buffer
         size_t aabbCount          = std::max(scene.ProceduralEntities.size(), (size_t) 1);
         m_AABBTransformBufferSize = sizeof(AABBTransform) * aabbCount;
         m_AABBTransformBuffer     = CreateBuffer(m_AABBTransformBufferSize,
-                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_AABBTransformMemory);
+                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_AABBTransformMemory);
 
         m_PrevAABBTransformBufferSize = m_AABBTransformBufferSize;
         m_PrevAABBTransformBuffer     = CreateBuffer(m_PrevAABBTransformBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_PrevAABBTransformMemory);
+                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_PrevAABBTransformMemory);
 
         // Create AABB material buffer (one GPUPBRMaterial per procedural entity)
         m_AABBMaterialBufferSize = sizeof(GPUPBRMaterial) * aabbCount;
         m_AABBMaterialBuffer     = CreateBuffer(m_AABBMaterialBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_AABBMaterialMemory);
+                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_AABBMaterialMemory);
 
         // Create light buffer
         size_t lightCount = std::max(scene.Lights.size(), (size_t) 1);
         m_LightBufferSize = sizeof(GPULight) * lightCount;
         m_LightBuffer     = CreateBuffer(m_LightBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_LightMemory);
+                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_LightMemory);
 
         // Create Scene UBO buffer
         m_SceneUBOBuffer = CreateBuffer(sizeof(SceneUBOData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,

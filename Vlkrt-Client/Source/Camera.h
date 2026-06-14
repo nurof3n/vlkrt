@@ -9,16 +9,15 @@
 
 namespace Vlkrt
 {
-    /**
-     * @brief A simple camera class that handles projection and view matrices, as well as ray direction calculations for
-     * screen-space effects.
-     */
+    /// <summary>
+    /// A simple camera class that handles projection and view matrices, as well as ray direction calculations for
+    /// screen-space effects.
+    /// </summary>
     class Camera
     {
     public:
         Camera(float verticalFOV, float nearClip, float farClip);
 
-        // Returns true if the camera was moved or rotated, false otherwise
         auto OnUpdate(float ts) -> bool;
         void OnResize(uint32_t width, uint32_t height);
 
@@ -33,10 +32,18 @@ namespace Vlkrt
         float GetNearClip() const { return m_NearClip; }
         float GetFarClip() const { return m_FarClip; }
 
-        void SetPosition(const glm::vec3& pos) { m_Position = pos; RecalculateView(); }
-        void SetTarget(const glm::vec3& target) {
+        void SetPosition(const glm::vec3& pos)
+        {
+            m_Position = pos;
+            RecalculateView();
+        }
+        void SetTarget(const glm::vec3& target)
+        {
             glm::vec3 dir = target - m_Position;
-            if (glm::length(dir) > 1e-6f) { m_ForwardDirection = glm::normalize(dir); RecalculateView(); }
+            if (glm::length(dir) > 1e-6f) {
+                m_ForwardDirection = glm::normalize(dir);
+                RecalculateView();
+            }
         }
 
     private:

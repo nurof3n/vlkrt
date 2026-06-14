@@ -5,10 +5,9 @@
 
 namespace Vlkrt
 {
-    /**
-     * @brief Class used to load meshes (from OBJ files) and generate procedural meshes.
-     *
-     */
+    /// <summary>
+    /// Class used to load meshes (from OBJ files) and generate procedural meshes.
+    /// </summary>
     class MeshLoader
     {
     public:

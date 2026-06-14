@@ -174,15 +174,9 @@ namespace Vlkrt
             }
             if (!m_Scene.EnableNRDDenoiser) {
                 switch (m_Scene.NRDGuideDebugView) {
-                    case NRDGuideDebugViewMode::NormalRoughness:
-                        image = m_Renderer.GetGuideNormalRoughness();
-                        break;
-                    case NRDGuideDebugViewMode::ViewZ:
-                        image = m_Renderer.GetGuideViewZ();
-                        break;
-                    case NRDGuideDebugViewMode::MotionVectors:
-                        image = m_Renderer.GetGuideMotionVectors();
-                        break;
+                    case NRDGuideDebugViewMode::NormalRoughness: image = m_Renderer.GetGuideNormalRoughness(); break;
+                    case NRDGuideDebugViewMode::ViewZ: image = m_Renderer.GetGuideViewZ(); break;
+                    case NRDGuideDebugViewMode::MotionVectors: image = m_Renderer.GetGuideMotionVectors(); break;
                     case NRDGuideDebugViewMode::DiffRadianceHitDist:
                         image = m_Renderer.GetGuideDiffRadianceHitDist();
                         break;
@@ -190,14 +184,13 @@ namespace Vlkrt
                         image = m_Renderer.GetGuideSpecRadianceHitDist();
                         break;
                     case NRDGuideDebugViewMode::FinalImage:
-                    default:
-                        break;
+                    default: break;
                 }
             }
             if (image) {
                 ImGui::GetBackgroundDrawList()->AddImage(image->GetDescriptorSet(), viewport->Pos,
-                        ImVec2(viewport->Pos.x + viewport->Size.x, viewport->Pos.y + viewport->Size.y),
-                        ImVec2(0, 0), ImVec2(1, 1));
+                        ImVec2(viewport->Pos.x + viewport->Size.x, viewport->Pos.y + viewport->Size.y), ImVec2(0, 0),
+                        ImVec2(1, 1));
             }
 
             // Stats panel overlay
@@ -213,7 +206,7 @@ namespace Vlkrt
             ImGui::Text("NRD Record:       %.3f ms", passStats.NRDRecordMs);
             ImGui::Text("Cmd Submit+Wait:  %.3f ms", passStats.CommandSubmitMs);
             ImGui::Text("NRD: %s (%s)", passStats.NRDEnabled ? "enabled" : "disabled",
-                        passStats.NRDOperational ? "operational" : "not operational");
+                    passStats.NRDOperational ? "operational" : "not operational");
             ImGui::Text("Resolution: %ux%u", passStats.Width, passStats.Height);
             ImGui::Text("Player ID: %u", m_PlayerID);
             ImGui::Text("Players: %zu", m_PlayerData.size());
@@ -224,19 +217,18 @@ namespace Vlkrt
             {
                 // Rendering mode
                 const char* modeNames[] = { "Path Tracing", "Path Tracing Temporal" };
-                int rtMode = (m_Scene.RaytracingType == RaytracingMode::PathTracingTemporal) ? 1 : 0;
+                int rtMode              = (m_Scene.RaytracingType == RaytracingMode::PathTracingTemporal) ? 1 : 0;
                 if (ImGui::Combo("Mode", &rtMode, modeNames, 2)) {
-                    m_Scene.RaytracingType = (rtMode == 1)
-                        ? RaytracingMode::PathTracingTemporal
-                        : RaytracingMode::PathTracing;
+                    m_Scene.RaytracingType
+                            = (rtMode == 1) ? RaytracingMode::PathTracingTemporal : RaytracingMode::PathTracing;
                     m_Renderer.ResetAccumulation();
                 }
 
                 // Importance sampling
                 const char* isNames[] = { "Uniform", "Cosine", "BSDF" };
-                int isMode = (int)m_Scene.ImportanceSampling;
+                int isMode            = (int) m_Scene.ImportanceSampling;
                 if (ImGui::Combo("Importance Sampling", &isMode, isNames, 3)) {
-                    m_Scene.ImportanceSampling = (ImportanceSamplingMode)isMode;
+                    m_Scene.ImportanceSampling = (ImportanceSamplingMode) isMode;
                     m_Renderer.ResetAccumulation();
                 }
 
@@ -244,36 +236,36 @@ namespace Vlkrt
 
                 // Path tracing parameters
                 static constexpr int k_MaxRayDepth = 12;
-                int maxDepth = (int)m_Scene.MaxRecursionDepth;
+                int maxDepth                       = (int) m_Scene.MaxRecursionDepth;
                 if (ImGui::SliderInt("Max Ray Depth", &maxDepth, 1, k_MaxRayDepth)) {
-                    m_Scene.MaxRecursionDepth = (uint32_t)maxDepth;
+                    m_Scene.MaxRecursionDepth = (uint32_t) maxDepth;
                     uint32_t maxAllowedShadow = m_Scene.MaxRecursionDepth;
                     if (m_Scene.MaxShadowRecursionDepth > maxAllowedShadow)
                         m_Scene.MaxShadowRecursionDepth = maxAllowedShadow;
                     m_Renderer.ResetAccumulation();
                 }
 
-                int maxShadowDepth = (int)m_Scene.MaxShadowRecursionDepth;
-                if (ImGui::SliderInt("Max Shadow Depth", &maxShadowDepth, 1, (int)m_Scene.MaxRecursionDepth)) {
-                    m_Scene.MaxShadowRecursionDepth = (uint32_t)maxShadowDepth;
+                int maxShadowDepth = (int) m_Scene.MaxShadowRecursionDepth;
+                if (ImGui::SliderInt("Max Shadow Depth", &maxShadowDepth, 1, (int) m_Scene.MaxRecursionDepth)) {
+                    m_Scene.MaxShadowRecursionDepth = (uint32_t) maxShadowDepth;
                     m_Renderer.ResetAccumulation();
                 }
 
-                int sqrtSamples = (int)m_Scene.PathSqrtSamplesPerPixel;
+                int sqrtSamples = (int) m_Scene.PathSqrtSamplesPerPixel;
                 if (ImGui::SliderInt("Sqrt SPP", &sqrtSamples, 1, 8)) {
-                    m_Scene.PathSqrtSamplesPerPixel = (uint32_t)sqrtSamples;
+                    m_Scene.PathSqrtSamplesPerPixel = (uint32_t) sqrtSamples;
                     m_Renderer.ResetAccumulation();
                 }
 
-                int rrDepth = (int)m_Scene.RussianRouletteDepth;
+                int rrDepth = (int) m_Scene.RussianRouletteDepth;
                 if (ImGui::SliderInt("Russian Roulette Depth", &rrDepth, 1, 16)) {
-                    m_Scene.RussianRouletteDepth = (uint32_t)rrDepth;
+                    m_Scene.RussianRouletteDepth = (uint32_t) rrDepth;
                     m_Renderer.ResetAccumulation();
                 }
 
-                if (ImGui::Checkbox("Apply Jitter", &m_Scene.ApplyJitter))           m_Renderer.ResetAccumulation();
+                if (ImGui::Checkbox("Apply Jitter", &m_Scene.ApplyJitter)) m_Renderer.ResetAccumulation();
                 if (ImGui::Checkbox("One Light Sample", &m_Scene.OnlyOneLightSample)) m_Renderer.ResetAccumulation();
-                if (ImGui::Checkbox("Anisotropic BSDF", &m_Scene.AnisotropicBSDF))   m_Renderer.ResetAccumulation();
+                if (ImGui::Checkbox("Anisotropic BSDF", &m_Scene.AnisotropicBSDF)) m_Renderer.ResetAccumulation();
                 if (ImGui::Checkbox("Enable NRD Denoiser", &m_Scene.EnableNRDDenoiser)) m_Renderer.ResetAccumulation();
 
                 ImGui::Separator();
@@ -284,16 +276,11 @@ namespace Vlkrt
                     m_Renderer.ResetAccumulation();
                 }
                 if (m_Scene.EnableFSR) {
-                    const char* fsrQualityNames[] = {
-                        "Native AA (1.0x)",
-                        "Quality (1.5x)",
-                        "Balanced (1.7x)",
-                        "Performance (2.0x)",
-                        "Ultra Performance (3.0x)"
-                    };
-                    int fsrQuality = (int)m_Scene.FSRQualityMode;
+                    const char* fsrQualityNames[] = { "Native AA (1.0x)", "Quality (1.5x)", "Balanced (1.7x)",
+                        "Performance (2.0x)", "Ultra Performance (3.0x)" };
+                    int fsrQuality                = (int) m_Scene.FSRQualityMode;
                     if (ImGui::Combo("FSR Quality Mode", &fsrQuality, fsrQualityNames, 5)) {
-                        m_Scene.FSRQualityMode = (uint32_t)fsrQuality;
+                        m_Scene.FSRQualityMode = (uint32_t) fsrQuality;
                         m_Renderer.ResetAccumulation();
                     }
 
@@ -305,17 +292,12 @@ namespace Vlkrt
                 }
                 ImGui::Separator();
 
-                const char* nrdDebugViewNames[] = {
-                    "Final Image",
-                    "Guide: Normal + Roughness",
-                    "Guide: ViewZ",
-                    "Guide: Motion Vectors",
-                    "Guide: Diffuse Radiance + HitDist",
-                    "Guide: Specular Radiance + HitDist"
-                };
-                int nrdDebugViewMode = (int)m_Scene.NRDGuideDebugView;
+                const char* nrdDebugViewNames[]
+                        = { "Final Image", "Guide: Normal + Roughness", "Guide: ViewZ", "Guide: Motion Vectors",
+                              "Guide: Diffuse Radiance + HitDist", "Guide: Specular Radiance + HitDist" };
+                int nrdDebugViewMode = (int) m_Scene.NRDGuideDebugView;
                 if (ImGui::Combo("NRD Debug View", &nrdDebugViewMode, nrdDebugViewNames, 6)) {
-                    m_Scene.NRDGuideDebugView = (NRDGuideDebugViewMode)nrdDebugViewMode;
+                    m_Scene.NRDGuideDebugView = (NRDGuideDebugViewMode) nrdDebugViewMode;
                 }
 
                 ImGui::Text("NRD Status: %s", m_Renderer.GetNRDStatus());
@@ -325,26 +307,25 @@ namespace Vlkrt
 
                 // Demo: background color
                 if (m_Scene.SceneIndex == SceneFactory::SCENE_DEMO) {
-                    ImGui::Separator(); ImGui::Text("Background");
-                    if (ImGui::ColorEdit3("Color##bg", &m_Scene.BackgroundColor.x))
-                        m_Renderer.ResetAccumulation();
                     ImGui::Separator();
-                } else if (m_Scene.SceneIndex != SceneFactory::SCENE_PBR_SHOWCASE) {
+                    ImGui::Text("Background");
+                    if (ImGui::ColorEdit3("Color##bg", &m_Scene.BackgroundColor.x)) m_Renderer.ResetAccumulation();
+                    ImGui::Separator();
+                }
+                else if (m_Scene.SceneIndex != SceneFactory::SCENE_PBR_SHOWCASE) {
                     // Generic background color for other scenes (e.g. Cornell Box / YAML)
-                    if (ImGui::ColorEdit3("Background", &m_Scene.BackgroundColor.x))
-                        m_Renderer.ResetAccumulation();
+                    if (ImGui::ColorEdit3("Background", &m_Scene.BackgroundColor.x)) m_Renderer.ResetAccumulation();
                     ImGui::Separator();
                 }
 
-                if (ImGui::Button("Reset Temporal Accumulation"))
-                    m_Renderer.ResetAccumulation();
+                if (ImGui::Button("Reset Temporal Accumulation")) m_Renderer.ResetAccumulation();
 
                 // Show accumulated frame count in temporal mode
                 if (m_Scene.RaytracingType == RaytracingMode::PathTracingTemporal) {
                     uint32_t frames = m_Renderer.GetAccumulatedFrameCount();
                     uint32_t spp    = m_Scene.PathSqrtSamplesPerPixel * m_Scene.PathSqrtSamplesPerPixel;
-                    ImGui::Text("Accumulated frames: %u  (%.1f%% of %u SPP cycle)",
-                                frames, (spp > 0 ? 100.0f * (frames % spp) / (float)spp : 0.0f), spp);
+                    ImGui::Text("Accumulated frames: %u  (%.1f%% of %u SPP cycle)", frames,
+                            (spp > 0 ? 100.0f * (frames % spp) / (float) spp : 0.0f), spp);
                 }
             }
             ImGui::End();
@@ -425,14 +406,12 @@ namespace Vlkrt
         m_SceneRoot.Parent = nullptr;
         auto relinkParents = [&](auto&& self, SceneEntity& entity, SceneEntity* parent) -> void {
             entity.Parent = parent;
-            for (auto& child : entity.Children)
-                self(self, child, &entity);
+            for (auto& child : entity.Children) self(self, child, &entity);
         };
-        for (auto& child : m_SceneRoot.Children)
-            relinkParents(relinkParents, child, &m_SceneRoot);
+        for (auto& child : m_SceneRoot.Children) relinkParents(relinkParents, child, &m_SceneRoot);
 
-        m_CurrentScene     = sceneName;
-        m_SelectedScene    = sceneName;
+        m_CurrentScene  = sceneName;
+        m_SelectedScene = sceneName;
 
         // Apply camera hint from YAML scene_settings if present
         if (m_Scene.HasCameraHint) {
@@ -450,22 +429,16 @@ namespace Vlkrt
     {
         SceneFactory::CameraHint cam;
         switch (sceneIndex) {
-            case SceneFactory::SCENE_CORNELL_BOX:
-                m_Scene = SceneFactory::CreateCornellBox(&cam);
-                break;
-            case SceneFactory::SCENE_DEMO:
-                m_Scene = SceneFactory::CreateDemo(&cam);
-                break;
-            case SceneFactory::SCENE_PBR_SHOWCASE:
-                m_Scene = SceneFactory::CreatePbrShowcase(&cam);
-                break;
+            case SceneFactory::SCENE_CORNELL_BOX: m_Scene = SceneFactory::CreateCornellBox(&cam); break;
+            case SceneFactory::SCENE_DEMO: m_Scene = SceneFactory::CreateDemo(&cam); break;
+            case SceneFactory::SCENE_PBR_SHOWCASE: m_Scene = SceneFactory::CreatePbrShowcase(&cam); break;
             default: return;
         }
         // Move camera to canonical position
         m_Camera.SetPosition(cam.Eye);
         m_Camera.SetTarget(cam.Target);
         // Clear hierarchy — factory scenes have no YAML hierarchy
-        m_SceneRoot = SceneEntity{};
+        m_SceneRoot        = SceneEntity{};
         m_HierarchyMapping = HierarchyMapping{};
         m_Renderer.InvalidateSceneStructure();
         m_Renderer.ResetAccumulation();
@@ -522,9 +495,9 @@ namespace Vlkrt
     void ClientLayer::SaveScene()
     {
         // Update scene camera settings with current runtime camera state so they persist
-        m_Scene.HasCameraHint = true;
+        m_Scene.HasCameraHint  = true;
         m_Scene.CameraPosition = m_Camera.GetPosition();
-        m_Scene.CameraTarget = m_Camera.GetPosition() + m_Camera.GetDirection();
+        m_Scene.CameraTarget   = m_Camera.GetPosition() + m_Camera.GetDirection();
 
         // Hierarchy is already synced to flat arrays every frame in OnUpdate()
         // Just save to YAML
@@ -852,19 +825,16 @@ namespace Vlkrt
                     glm::vec3 newPos = glm::vec3(worldTransform[3]);
                     glm::vec3 newDir = glm::normalize(glm::vec3(worldTransform * glm::vec4(0.0f, 0.0f, -1.0f, 0.0f)));
                     Light& light     = m_Scene.Lights[lightIdx];
-                    if (light.Emission   != entity.LightData.Emission
-                     || light.Intensity  != entity.LightData.Intensity
-                     || light.Type       != entity.LightData.Type
-                     || light.Size       != entity.LightData.Size
-                     || light.Position   != newPos
-                     || light.Direction  != newDir) {
-                        light.Emission   = entity.LightData.Emission;
-                        light.Intensity  = entity.LightData.Intensity;
-                        light.Type       = entity.LightData.Type;
-                        light.Size       = entity.LightData.Size;
-                        light.Position   = newPos;
-                        light.Direction  = newDir;
-                        m_SceneDirty     = true;
+                    if (light.Emission != entity.LightData.Emission || light.Intensity != entity.LightData.Intensity
+                            || light.Type != entity.LightData.Type || light.Size != entity.LightData.Size
+                            || light.Position != newPos || light.Direction != newDir) {
+                        light.Emission  = entity.LightData.Emission;
+                        light.Intensity = entity.LightData.Intensity;
+                        light.Type      = entity.LightData.Type;
+                        light.Size      = entity.LightData.Size;
+                        light.Position  = newPos;
+                        light.Direction = newDir;
+                        m_SceneDirty    = true;
                     }
                 }
             }
@@ -874,13 +844,12 @@ namespace Vlkrt
             if (it != m_HierarchyMapping.EntityToProceduralIdx.end()) {
                 uint32_t procIdx = it->second;
                 if (procIdx < m_Scene.ProceduralEntities.size()) {
-                    ProceduralEntity& pe = m_Scene.ProceduralEntities[procIdx];
+                    ProceduralEntity& pe  = m_Scene.ProceduralEntities[procIdx];
                     bool structureChanged = (pe.IsAnalytic != entity.ProceduralData.IsAnalytic)
-                                         || (pe.PrimitiveType != entity.ProceduralData.PrimitiveType);
-                    if (pe.Transform     != worldTransform
-                     || pe.MaterialIndex != entity.ProceduralData.MaterialIndex
-                     || pe.IsAnalytic    != entity.ProceduralData.IsAnalytic
-                     || pe.PrimitiveType != entity.ProceduralData.PrimitiveType) {
+                                            || (pe.PrimitiveType != entity.ProceduralData.PrimitiveType);
+                    if (pe.Transform != worldTransform || pe.MaterialIndex != entity.ProceduralData.MaterialIndex
+                            || pe.IsAnalytic != entity.ProceduralData.IsAnalytic
+                            || pe.PrimitiveType != entity.ProceduralData.PrimitiveType) {
                         pe.Transform     = worldTransform;
                         pe.MaterialIndex = entity.ProceduralData.MaterialIndex;
                         pe.IsAnalytic    = entity.ProceduralData.IsAnalytic;

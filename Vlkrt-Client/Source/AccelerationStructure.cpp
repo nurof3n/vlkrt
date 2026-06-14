@@ -17,7 +17,6 @@ namespace Vlkrt
 
     AccelerationStructure::~AccelerationStructure() { Cleanup(); }
 
-    // -------------------------------------------------------------------------
     void AccelerationStructure::Build(const std::vector<Mesh>& meshes, VkBuffer vertexBuffer, VkBuffer indexBuffer,
             const std::vector<ProceduralEntity>& procedurals)
     {
@@ -27,8 +26,7 @@ namespace Vlkrt
 
         BuildTriangleBLAS(meshes, vertexBuffer, indexBuffer, cmd);
 
-        if (!procedurals.empty())
-            BuildAABBBLAS(procedurals, cmd);
+        if (!procedurals.empty()) BuildAABBBLAS(procedurals, cmd);
 
         m_ProceduralCount = static_cast<uint32_t>(procedurals.size());
         BuildTLAS(cmd);
@@ -43,7 +41,6 @@ namespace Vlkrt
         Build(meshes, vertexBuffer, indexBuffer, procedurals);
     }
 
-    // -------------------------------------------------------------------------
     void AccelerationStructure::Cleanup()
     {
         auto defer = [&](auto&& fn) { Walnut::Application::SubmitResourceFree(std::forward<decltype(fn)>(fn)); };
@@ -113,15 +110,14 @@ namespace Vlkrt
         m_ProceduralCount = 0;
     }
 
-    // -------------------------------------------------------------------------
-    void AccelerationStructure::BuildTriangleBLAS(const std::vector<Mesh>& meshes, VkBuffer vertexBuffer,
-            VkBuffer indexBuffer, VkCommandBuffer cmd)
+    void AccelerationStructure::BuildTriangleBLAS(
+            const std::vector<Mesh>& meshes, VkBuffer vertexBuffer, VkBuffer indexBuffer, VkCommandBuffer cmd)
     {
         uint32_t totalTriangles = 0;
         uint32_t totalVertices  = 0;
         for (const auto& mesh : meshes) {
             totalTriangles += static_cast<uint32_t>(mesh.Indices.size() / 3);
-            totalVertices  += static_cast<uint32_t>(mesh.Vertices.size());
+            totalVertices += static_cast<uint32_t>(mesh.Vertices.size());
         }
 
         VkAccelerationStructureGeometryTrianglesDataKHR trianglesData
@@ -166,27 +162,31 @@ namespace Vlkrt
         buildInfo.scratchData.deviceAddress = GetBufferDeviceAddress(m_ScratchBuffer);
 
         VkAccelerationStructureBuildRangeInfoKHR buildRange{};
-        buildRange.primitiveCount                           = totalTriangles;
+        buildRange.primitiveCount                              = totalTriangles;
         const VkAccelerationStructureBuildRangeInfoKHR* pRange = &buildRange;
         pvkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, &pRange);
 
-        VkMemoryBarrier barrier    = { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
-        barrier.srcAccessMask      = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
-        barrier.dstAccessMask      = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+        VkMemoryBarrier barrier = { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+        barrier.srcAccessMask   = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+        barrier.dstAccessMask   = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR;
         vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
                 VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, 0, 1, &barrier, 0, nullptr, 0, nullptr);
     }
 
-    // -------------------------------------------------------------------------
-    void AccelerationStructure::BuildAABBBLAS(
-            const std::vector<ProceduralEntity>& procedurals, VkCommandBuffer cmd)
+    void AccelerationStructure::BuildAABBBLAS(const std::vector<ProceduralEntity>& procedurals, VkCommandBuffer cmd)
     {
         uint32_t count = static_cast<uint32_t>(procedurals.size());
 
         // Compute world-space tight AABB for each entity (unit cube [-1,1]^3 transformed)
         static const glm::vec3 kCorners[8] = {
-            { -1, -1, -1 }, { +1, -1, -1 }, { -1, +1, -1 }, { +1, +1, -1 },
-            { -1, -1, +1 }, { +1, -1, +1 }, { -1, +1, +1 }, { +1, +1, +1 },
+            { -1, -1, -1 },
+            { +1, -1, -1 },
+            { -1, +1, -1 },
+            { +1, +1, -1 },
+            { -1, -1, +1 },
+            { +1, -1, +1 },
+            { -1, +1, +1 },
+            { +1, +1, +1 },
         };
 
         std::vector<VkAabbPositionsKHR> aabbs(count);
@@ -215,15 +215,15 @@ namespace Vlkrt
 
         // One VkAccelerationStructureGeometryKHR per procedural entity so each gets
         // its own SBT hit-group record (indexed by geometryIndex).
-        std::vector<VkAccelerationStructureGeometryKHR>         geometries(count);
-        std::vector<VkAccelerationStructureBuildRangeInfoKHR>   buildRanges(count);
-        std::vector<uint32_t>                                    primCounts(count, 1u);
+        std::vector<VkAccelerationStructureGeometryKHR> geometries(count);
+        std::vector<VkAccelerationStructureBuildRangeInfoKHR> buildRanges(count);
+        std::vector<uint32_t> primCounts(count, 1u);
 
         for (uint32_t i = 0; i < count; i++) {
-            auto& geom  = geometries[i];
-            geom        = { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR };
-            geom.geometryType = VK_GEOMETRY_TYPE_AABBS_KHR;
-            geom.flags        = VK_GEOMETRY_OPAQUE_BIT_KHR;
+            auto& geom          = geometries[i];
+            geom                = { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR };
+            geom.geometryType   = VK_GEOMETRY_TYPE_AABBS_KHR;
+            geom.flags          = VK_GEOMETRY_OPAQUE_BIT_KHR;
             geom.geometry.aabbs = { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR };
             geom.geometry.aabbs.data.deviceAddress = aabbBufAddr + i * sizeof(VkAabbPositionsKHR);
             geom.geometry.aabbs.stride             = sizeof(VkAabbPositionsKHR);
@@ -255,8 +255,7 @@ namespace Vlkrt
         createInfo.type                                 = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
         pvkCreateAccelerationStructureKHR(m_Device, &createInfo, nullptr, &m_AABBBLAS);
 
-        if (sizeInfo.buildScratchSize > m_ScratchBufferSize)
-            CreateScratchBuffer(sizeInfo.buildScratchSize);
+        if (sizeInfo.buildScratchSize > m_ScratchBufferSize) CreateScratchBuffer(sizeInfo.buildScratchSize);
 
         buildInfo.dstAccelerationStructure  = m_AABBBLAS;
         buildInfo.scratchData.deviceAddress = GetBufferDeviceAddress(m_ScratchBuffer);
@@ -272,13 +271,12 @@ namespace Vlkrt
                 VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, 0, 1, &barrier, 0, nullptr, 0, nullptr);
     }
 
-    // -------------------------------------------------------------------------
     void AccelerationStructure::BuildTLAS(VkCommandBuffer cmd)
     {
-        bool hasAABB = (m_AABBBLAS != VK_NULL_HANDLE);
+        bool hasAABB           = (m_AABBBLAS != VK_NULL_HANDLE);
         uint32_t instanceCount = hasAABB ? 2u : 1u;
 
-        // --- Instance 0: triangle BLAS ---
+        // Instance 0: triangle BLAS
         auto blasAddr = [&](VkAccelerationStructureKHR as) -> VkDeviceAddress {
             VkAccelerationStructureDeviceAddressInfoKHR info
                     = { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR };
@@ -289,8 +287,8 @@ namespace Vlkrt
         std::vector<VkAccelerationStructureInstanceKHR> instances(instanceCount);
 
         // Triangle instance — SBT offset 0, all faces double-sided
-        auto& tri               = instances[0];
-        tri                     = {};
+        auto& tri                                  = instances[0];
+        tri                                        = {};
         tri.transform.matrix[0][0]                 = 1.0f;
         tri.transform.matrix[1][1]                 = 1.0f;
         tri.transform.matrix[2][2]                 = 1.0f;
@@ -302,8 +300,8 @@ namespace Vlkrt
 
         // AABB instance — SBT offset 2, no face culling
         if (hasAABB) {
-            auto& aabb               = instances[1];
-            aabb                     = {};
+            auto& aabb                                  = instances[1];
+            aabb                                        = {};
             aabb.transform.matrix[0][0]                 = 1.0f;
             aabb.transform.matrix[1][1]                 = 1.0f;
             aabb.transform.matrix[2][2]                 = 1.0f;
@@ -358,14 +356,13 @@ namespace Vlkrt
         createInfo.type                                 = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
         pvkCreateAccelerationStructureKHR(m_Device, &createInfo, nullptr, &m_TLAS);
 
-        if (sizeInfo.buildScratchSize > m_ScratchBufferSize)
-            CreateScratchBuffer(sizeInfo.buildScratchSize);
+        if (sizeInfo.buildScratchSize > m_ScratchBufferSize) CreateScratchBuffer(sizeInfo.buildScratchSize);
 
         buildInfo.dstAccelerationStructure  = m_TLAS;
         buildInfo.scratchData.deviceAddress = GetBufferDeviceAddress(m_ScratchBuffer);
 
         VkAccelerationStructureBuildRangeInfoKHR buildRange{};
-        buildRange.primitiveCount                           = instanceCount;
+        buildRange.primitiveCount                              = instanceCount;
         const VkAccelerationStructureBuildRangeInfoKHR* pRange = &buildRange;
         pvkCmdBuildAccelerationStructuresKHR(cmd, 1, &buildInfo, &pRange);
 
@@ -376,25 +373,22 @@ namespace Vlkrt
                 VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 1, &barrier, 0, nullptr, 0, nullptr);
     }
 
-    // -------------------------------------------------------------------------
     void AccelerationStructure::CreateScratchBuffer(VkDeviceSize size)
     {
         if (m_ScratchBuffer != VK_NULL_HANDLE) {
-            Walnut::Application::SubmitResourceFree(
-                    [device = m_Device, b = m_ScratchBuffer, m = m_ScratchMemory]() {
-                        vkDestroyBuffer(device, b, nullptr);
-                        vkFreeMemory(device, m, nullptr);
-                    });
+            Walnut::Application::SubmitResourceFree([device = m_Device, b = m_ScratchBuffer, m = m_ScratchMemory]() {
+                vkDestroyBuffer(device, b, nullptr);
+                vkFreeMemory(device, m, nullptr);
+            });
             m_ScratchBuffer     = VK_NULL_HANDLE;
             m_ScratchBufferSize = 0;
         }
-        m_ScratchBuffer = CreateBuffer(size,
-                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_ScratchMemory);
+        m_ScratchBuffer
+                = CreateBuffer(size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_ScratchMemory);
         m_ScratchBufferSize = size;
     }
 
-    // -------------------------------------------------------------------------
     auto AccelerationStructure::CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage,
             VkMemoryPropertyFlags properties, VkDeviceMemory& bufferMemory) const -> VkBuffer
     {

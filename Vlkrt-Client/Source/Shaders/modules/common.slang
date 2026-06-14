@@ -511,4 +511,3 @@ void NRD_MaterialFactors(float3 N, float3 V, float3 albedo, float3 Rf0, float ro
     specFactor *= lerp(float3(0.01f), float3(1.0f), roughness);
     specFactor = lerp(float3(0.01f), float3(1.0f), specFactor);
 }
-
