@@ -89,9 +89,6 @@ void RayGenTemporalMain() {
         float diffHitDist = (payload.diffuseHitDist > 0.0f) ? max(payload.diffuseHitDist, 0.001f) : 0.0f;
         float specHitDist = (payload.specularHitDist > 0.0f) ? max(payload.specularHitDist, 0.001f) : 0.0f;
 
-        float normHitDistDiffuse = REBLUR_FrontEnd_GetNormHitDist(diffHitDist, depth, float3(3.0f, 0.1f, 20.0f), 1.0f);
-        float normHitDistSpecular = REBLUR_FrontEnd_GetNormHitDist(specHitDist, depth, float3(3.0f, 0.1f, 20.0f), roughness);
-
         Ray rayCenter = GenerateCameraRay(pixelCoord, float2(0.5f, 0.5f));
         float3 V = -rayCenter.direction;
         float3 Rf0 = lerp(float3(0.04f), albedo, metallic);
@@ -107,8 +104,10 @@ void RayGenTemporalMain() {
         g_guideNormalRoughness[pixelCoord] = PackNormalAndRoughness(n, roughness, materialID);
         g_guideViewZ[pixelCoord] = float4(depth, albedo);
         g_guideMotionVectors[pixelCoord] = float4(motion, metallic, 1.0f);
-        g_guideDiffRadianceHitDist[pixelCoord] = REBLUR_FrontEnd_PackRadianceAndNormHitDist(demodulatedDiffuse, normHitDistDiffuse);
-        g_guideSpecRadianceHitDist[pixelCoord] = REBLUR_FrontEnd_PackRadianceAndNormHitDist(demodulatedSpecular, normHitDistSpecular);
+        g_guideDiffRadianceHitDist[pixelCoord]
+            = RELAX_FrontEnd_PackRadianceAndHitDist(demodulatedDiffuse, diffHitDist, false);
+        g_guideSpecRadianceHitDist[pixelCoord]
+            = RELAX_FrontEnd_PackRadianceAndHitDist(demodulatedSpecular, specHitDist, false);
         g_guideEmission[pixelCoord] = float4(payload.emission, 1.0f);
         g_guideDepth[pixelCoord] = float4(ndcDepth, 0.0f, 0.0f, 1.0f);
     } else {

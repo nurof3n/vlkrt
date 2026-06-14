@@ -90,7 +90,6 @@ namespace Vlkrt
         bool m_BackendReady               = false;
         uint32_t m_ConstantSetIndex       = 0;
         uint32_t m_ResourceSetIndex       = 1;
-        bool m_LoggedUnsupportedResources = false;
 
         VkDescriptorPool m_NrdDescriptorPool  = VK_NULL_HANDLE;
         VkDescriptorSetLayout m_NrdSet0Layout = VK_NULL_HANDLE;
@@ -119,8 +118,6 @@ namespace Vlkrt
         VkImageView m_GuideMotionVectorsNrdImageView = VK_NULL_HANDLE;
         std::vector<std::shared_ptr<Walnut::Image>> m_TransientPoolImages;
         std::vector<std::shared_ptr<Walnut::Image>> m_PermanentPoolImages;
-
-        bool m_LoggedFirstPass    = false;
-        bool m_LoggedDispatchPlan = false;
+        bool m_FirstDispatchTransitionsDone = false;
     };
 }  // namespace Vlkrt

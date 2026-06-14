@@ -135,9 +135,6 @@ void RayGenMain() {
         float avgMetallic = guideMetallic * invHitCount;
         float3 avgEmission = guideEmission * invHitCount;
 
-        float normHitDistDiffuse = REBLUR_FrontEnd_GetNormHitDist(avgDiffuseHitDist, avgDepth, float3(3.0f, 0.1f, 20.0f), 1.0f);
-        float normHitDistSpecular = REBLUR_FrontEnd_GetNormHitDist(avgSpecularHitDist, avgDepth, float3(3.0f, 0.1f, 20.0f), avgRoughness);
-
         float3 avgDiffuse = guideDiffuse * invHitCount;
         float3 avgSpecular = guideSpecular * invHitCount;
 
@@ -154,8 +151,10 @@ void RayGenMain() {
         g_guideNormalRoughness[pixelCoord] = PackNormalAndRoughness(avgNormal, avgRoughness, materialID);
         g_guideViewZ[pixelCoord] = float4(avgDepth, avgAlbedo);
         g_guideMotionVectors[pixelCoord] = float4(avgMotion, avgMetallic, 1.0f);
-        g_guideDiffRadianceHitDist[pixelCoord] = REBLUR_FrontEnd_PackRadianceAndNormHitDist(demodulatedDiffuse, normHitDistDiffuse);
-        g_guideSpecRadianceHitDist[pixelCoord] = REBLUR_FrontEnd_PackRadianceAndNormHitDist(demodulatedSpecular, normHitDistSpecular);
+        g_guideDiffRadianceHitDist[pixelCoord]
+            = RELAX_FrontEnd_PackRadianceAndHitDist(demodulatedDiffuse, avgDiffuseHitDist, false);
+        g_guideSpecRadianceHitDist[pixelCoord]
+            = RELAX_FrontEnd_PackRadianceAndHitDist(demodulatedSpecular, avgSpecularHitDist, false);
         g_guideEmission[pixelCoord] = float4(avgEmission, 1.0f);
         g_guideDepth[pixelCoord] = float4(guideNdcDepth / float(numSamples), 0.0f, 0.0f, 1.0f);
     } else {

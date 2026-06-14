@@ -45,16 +45,16 @@ void ComposeDenoisedMain(uint3 dispatchThreadID : SV_DispatchThreadID)
 
     if (debugMode == 0u) // FinalImage
     {
-        float3 nrdDiff = NRD_YCoCgToLinear(g_outDiffRadianceHitDist[pixelCoord].xyz) * diffFactor;
-        float3 nrdSpec = NRD_YCoCgToLinear(g_outSpecRadianceHitDist[pixelCoord].xyz) * specFactor;
+        float3 nrdDiff = RELAX_BackEnd_UnpackRadiance(g_outDiffRadianceHitDist[pixelCoord]).xyz * diffFactor;
+        float3 nrdSpec = RELAX_BackEnd_UnpackRadiance(g_outSpecRadianceHitDist[pixelCoord]).xyz * specFactor;
         float3 emission = g_guideEmission[pixelCoord].xyz;
         float3 denoised = max(nrdDiff + nrdSpec + emission, 0.0f);
 
         // DIAGNOSTIC: if NRD output is zero, fall back to the raw guide input
         float nrdSum = dot(denoised, float3(1.0f, 1.0f, 1.0f));
         if (nrdSum < 1e-6f) {
-            float3 inDiff = NRD_YCoCgToLinear(g_guideDiffRadianceHitDist[pixelCoord].xyz) * diffFactor;
-            float3 inSpec = NRD_YCoCgToLinear(g_guideSpecRadianceHitDist[pixelCoord].xyz) * specFactor;
+            float3 inDiff = RELAX_BackEnd_UnpackRadiance(g_guideDiffRadianceHitDist[pixelCoord]).xyz * diffFactor;
+            float3 inSpec = RELAX_BackEnd_UnpackRadiance(g_guideSpecRadianceHitDist[pixelCoord]).xyz * specFactor;
             denoised = max(inDiff + inSpec + emission, 0.0f);
         }
 
@@ -78,12 +78,12 @@ void ComposeDenoisedMain(uint3 dispatchThreadID : SV_DispatchThreadID)
     }
     else if (debugMode == 4u) // DiffRadianceHitDist
     {
-        float3 diff = NRD_YCoCgToLinear(g_guideDiffRadianceHitDist[pixelCoord].xyz) * diffFactor;
+        float3 diff = RELAX_BackEnd_UnpackRadiance(g_guideDiffRadianceHitDist[pixelCoord]).xyz * diffFactor;
         g_outputImage[pixelCoord] = float4(diff, 1.0f);
     }
     else if (debugMode == 5u) // SpecRadianceHitDist
     {
-        float3 spec = NRD_YCoCgToLinear(g_guideSpecRadianceHitDist[pixelCoord].xyz) * specFactor;
+        float3 spec = RELAX_BackEnd_UnpackRadiance(g_guideSpecRadianceHitDist[pixelCoord]).xyz * specFactor;
         g_outputImage[pixelCoord] = float4(spec, 1.0f);
     }
 }

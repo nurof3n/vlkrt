@@ -177,11 +177,11 @@ namespace Vlkrt
         }
 
         m_NrdSet0s.clear();
-        m_BackendReady               = false;
-        m_Operational                = false;
-        m_LoggedUnsupportedResources = false;
-        m_ConstantSetIndex           = 0;
-        m_ResourceSetIndex           = 1;
+        m_BackendReady                 = false;
+        m_Operational                  = false;
+        m_ConstantSetIndex             = 0;
+        m_ResourceSetIndex             = 1;
+        m_FirstDispatchTransitionsDone = false;
 
         // Keep externally supplied guide buffers; renderer owns and updates these
         m_TransientPoolImages.clear();
@@ -219,9 +219,9 @@ namespace Vlkrt
         poolSizes[0]                      = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 64 };
         poolSizes[1]                      = { VK_DESCRIPTOR_TYPE_SAMPLER, instanceDesc->samplersNum * 64 };
         poolSizes[2]                      = { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-                                 std::max(32u, instanceDesc->descriptorPoolDesc.totalTexturesNum * MULTIPLIER + 8u) };
+            std::max(32u, instanceDesc->descriptorPoolDesc.totalTexturesNum * MULTIPLIER + 8u) };
         poolSizes[3]                      = { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                                 std::max(32u, instanceDesc->descriptorPoolDesc.totalStorageTexturesNum * MULTIPLIER + 8u) };
+            std::max(32u, instanceDesc->descriptorPoolDesc.totalStorageTexturesNum * MULTIPLIER + 8u) };
 
         VkDescriptorPoolCreateInfo poolInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
         poolInfo.maxSets       = (pipelineCount * MULTIPLIER) + 64;  // allow multiple dispatch instances per pipeline
@@ -567,7 +567,7 @@ namespace Vlkrt
 
         // Transition ALL internal pools and out textures to GENERAL before the first dispatch
         // oldLayout = UNDEFINED because Walnut::Image may not have been used as a storage image yet
-        if (!m_LoggedFirstPass) {
+        if (!m_FirstDispatchTransitionsDone) {
             std::vector<VkImageMemoryBarrier> initialBarriers;
             auto addBarrier = [&](const std::shared_ptr<Walnut::Image>& img) {
                 if (!img) return;
@@ -596,6 +596,8 @@ namespace Vlkrt
                 vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0,
                         nullptr, 0, nullptr, static_cast<uint32_t>(initialBarriers.size()), initialBarriers.data());
             }
+
+            m_FirstDispatchTransitionsDone = true;
         }
 
         // Reset resource set allocators for each pipeline
@@ -750,19 +752,8 @@ namespace Vlkrt
                 const nrd::ResourceDesc& r = d.resources[ri];
                 const auto& slot           = p.ResourceSlots[ri];
 
-                const std::shared_ptr<Walnut::Image> targetImage = getImageForResource(r);
-                const char* resourceName                         = nrd::GetResourceTypeString(r.type);
-
+                const std::shared_ptr<Walnut::Image> targetImage   = getImageForResource(r);
                 const std::shared_ptr<Walnut::Image> resolvedImage = targetImage ? targetImage : ioImage;
-                if (!targetImage) {
-                    if (!m_LoggedUnsupportedResources) {
-                        WL_WARN_TAG("Renderer",
-                                "NRD resource {} not available (pool index {}), using IO fallback image.",
-                                (resourceName != nullptr) ? resourceName : "<unknown>",
-                                static_cast<uint32_t>(r.indexInPool));
-                        m_LoggedUnsupportedResources = true;
-                    }
-                }
 
                 imageInfos[ri].imageView   = getImageViewForResource(r, resolvedImage);
                 imageInfos[ri].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
@@ -821,16 +812,14 @@ namespace Vlkrt
             DestroyDirectBackend();
             auto* oldInstance = reinterpret_cast<nrd::Instance*>(m_DirectInstance);
             nrd::DestroyInstance(*oldInstance);
-            m_DirectInstance             = nullptr;
-            m_DirectInstanceReady        = false;
-            m_LastPreparedDispatches     = 0;
-            m_LoggedDispatchPlan         = false;
-            m_LoggedUnsupportedResources = false;
+            m_DirectInstance         = nullptr;
+            m_DirectInstanceReady    = false;
+            m_LastPreparedDispatches = 0;
         }
 
         nrd::DenoiserDesc denoiserDesc{};
         denoiserDesc.identifier = kDenoiserId;
-        denoiserDesc.denoiser   = nrd::Denoiser::REBLUR_DIFFUSE_SPECULAR;
+        denoiserDesc.denoiser   = nrd::Denoiser::RELAX_DIFFUSE_SPECULAR;
 
         nrd::InstanceCreationDesc instanceCreationDesc{};
         instanceCreationDesc.denoisers    = &denoiserDesc;
@@ -843,20 +832,25 @@ namespace Vlkrt
             return false;
         }
 
-        nrd::ReblurSettings reblurSettings{};
-        reblurSettings.hitDistanceReconstructionMode     = nrd::HitDistanceReconstructionMode::AREA_3X3;
-        reblurSettings.minMaterialForDiffuse             = 4.0f;
-        reblurSettings.minMaterialForSpecular            = 4.0f;
-        reblurSettings.diffusePrepassBlurRadius          = 10.0f;
-        reblurSettings.specularPrepassBlurRadius         = 10.0f;
-        reblurSettings.maxBlurRadius                     = 15.0f;
-        reblurSettings.minBlurRadius                     = 0.5f;
-        reblurSettings.minHitDistanceWeight              = 0.02f;
-        reblurSettings.lobeAngleFraction                 = 0.15f;
-        reblurSettings.roughnessFraction                 = 0.15f;
-        reblurSettings.fireflySuppressorMinRelativeScale = 2.0f;
-        reblurSettings.enableAntiFirefly                 = true;
-        const nrd::Result settingsRes = nrd::SetDenoiserSettings(*instance, kDenoiserId, &reblurSettings);
+        nrd::RelaxSettings relaxSettings{};
+        relaxSettings.hitDistanceReconstructionMode      = nrd::HitDistanceReconstructionMode::AREA_3X3;
+        relaxSettings.minMaterialForDiffuse              = 4.0f;
+        relaxSettings.minMaterialForSpecular             = 4.0f;
+        relaxSettings.diffusePrepassBlurRadius           = 10.0f;
+        relaxSettings.specularPrepassBlurRadius          = 10.0f;
+        relaxSettings.minHitDistanceWeight               = 0.02f;
+        relaxSettings.lobeAngleFraction                  = 0.15f;
+        relaxSettings.roughnessFraction                  = 0.15f;
+        relaxSettings.enableAntiFirefly                  = true;
+        relaxSettings.diffuseMaxAccumulatedFrameNum      = 16;
+        relaxSettings.specularMaxAccumulatedFrameNum     = 12;
+        relaxSettings.diffuseMaxFastAccumulatedFrameNum  = 4;
+        relaxSettings.specularMaxFastAccumulatedFrameNum = 3;
+        relaxSettings.antilagSettings.accelerationAmount = 0.7f;
+        relaxSettings.antilagSettings.spatialSigmaScale  = 3.5f;
+        relaxSettings.antilagSettings.temporalSigmaScale = 0.35f;
+        relaxSettings.antilagSettings.resetAmount        = 0.8f;
+        const nrd::Result settingsRes = nrd::SetDenoiserSettings(*instance, kDenoiserId, &relaxSettings);
         if (settingsRes != nrd::Result::SUCCESS) {
             WL_WARN_TAG("Renderer", "Direct NRD SetDenoiserSettings failed. Destroying instance.");
             nrd::DestroyInstance(*instance);
@@ -880,8 +874,6 @@ namespace Vlkrt
         m_DirectInstanceReady    = true;
         m_BackendInitFailed      = false;
         m_LastPreparedDispatches = 0;
-
-        WL_INFO_TAG("Renderer", "Direct NRD instance created for {}x{}.", width, height);
         return true;
     }
 
@@ -896,7 +888,6 @@ namespace Vlkrt
         m_InstanceHeight         = 0;
         m_LastPreparedDispatches = 0;
         m_DirectInstance         = nullptr;
-        m_LoggedDispatchPlan     = false;
 
         m_Operational = false;
 
@@ -928,8 +919,6 @@ namespace Vlkrt
         m_InstanceWidth          = 0;
         m_InstanceHeight         = 0;
         m_LastPreparedDispatches = 0;
-        m_LoggedFirstPass        = false;
-        m_LoggedDispatchPlan     = false;
     }
 
     void NRDDenoiser::SetEnabled(bool enabled)
@@ -977,20 +966,22 @@ namespace Vlkrt
                 SetIdentity4x4(commonSettings.worldToViewMatrixPrev);
             }
 
-            commonSettings.resourceSize[0]     = w;
-            commonSettings.resourceSize[1]     = h;
-            commonSettings.resourceSizePrev[0] = w;
-            commonSettings.resourceSizePrev[1] = h;
-            commonSettings.rectSize[0]         = w;
-            commonSettings.rectSize[1]         = h;
-            commonSettings.rectSizePrev[0]     = w;
-            commonSettings.rectSizePrev[1]     = h;
-            commonSettings.cameraJitter[0]     = params.CameraJitter[0];
-            commonSettings.cameraJitter[1]     = params.CameraJitter[1];
-            commonSettings.cameraJitterPrev[0] = params.CameraJitterPrev[0];
-            commonSettings.cameraJitterPrev[1] = params.CameraJitterPrev[1];
-            commonSettings.frameIndex          = params.FrameIndex;
-            commonSettings.denoisingRange      = 500000.0f;
+            commonSettings.resourceSize[0]                = w;
+            commonSettings.resourceSize[1]                = h;
+            commonSettings.resourceSizePrev[0]            = w;
+            commonSettings.resourceSizePrev[1]            = h;
+            commonSettings.rectSize[0]                    = w;
+            commonSettings.rectSize[1]                    = h;
+            commonSettings.rectSizePrev[0]                = w;
+            commonSettings.rectSizePrev[1]                = h;
+            commonSettings.cameraJitter[0]                = params.CameraJitter[0];
+            commonSettings.cameraJitter[1]                = params.CameraJitter[1];
+            commonSettings.cameraJitterPrev[0]            = params.CameraJitterPrev[0];
+            commonSettings.cameraJitterPrev[1]            = params.CameraJitterPrev[1];
+            commonSettings.frameIndex                     = params.FrameIndex;
+            commonSettings.denoisingRange                 = 500000.0f;
+            commonSettings.disocclusionThreshold          = 0.015f;
+            commonSettings.disocclusionThresholdAlternate = 0.06f;
             commonSettings.accumulationMode
                     = (params.FrameIndex == 0) ? nrd::AccumulationMode::RESTART : nrd::AccumulationMode::CONTINUE;
 
@@ -1004,71 +995,6 @@ namespace Vlkrt
                 if (dispatchRes == nrd::Result::SUCCESS && dispatches != nullptr) {
                     m_LastPreparedDispatches = dispatchesNum;
 
-                    if (!m_LoggedDispatchPlan) {
-                        const nrd::InstanceDesc* instanceDesc = nrd::GetInstanceDesc(*instance);
-                        std::vector<nrd::ResourceType> requiredTypes;
-                        requiredTypes.reserve(32);
-                        uint32_t maxPermanentPoolIndex = 0;
-                        uint32_t maxTransientPoolIndex = 0;
-                        bool hasPermanentPoolRef       = false;
-                        bool hasTransientPoolRef       = false;
-
-                        for (uint32_t di = 0; di < dispatchesNum; di++) {
-                            const nrd::DispatchDesc& d = dispatches[di];
-                            for (uint32_t ri = 0; ri < d.resourcesNum; ri++) {
-                                const nrd::ResourceDesc& resource = d.resources[ri];
-                                const nrd::ResourceType t         = resource.type;
-                                const bool seen = std::find(requiredTypes.begin(), requiredTypes.end(), t)
-                                                  != requiredTypes.end();
-                                if (!seen) requiredTypes.push_back(t);
-
-                                if (t == nrd::ResourceType::PERMANENT_POOL) {
-                                    hasPermanentPoolRef   = true;
-                                    maxPermanentPoolIndex = std::max(
-                                            maxPermanentPoolIndex, static_cast<uint32_t>(resource.indexInPool));
-                                }
-                                else if (t == nrd::ResourceType::TRANSIENT_POOL) {
-                                    hasTransientPoolRef   = true;
-                                    maxTransientPoolIndex = std::max(
-                                            maxTransientPoolIndex, static_cast<uint32_t>(resource.indexInPool));
-                                }
-                            }
-                        }
-
-                        WL_INFO_TAG("Renderer", "NRD direct dispatch plan has {} passes and {} unique resource types.",
-                                dispatchesNum, (uint32_t) requiredTypes.size());
-                        if (instanceDesc != nullptr) {
-                            const uint32_t permanentPoolSize = instanceDesc->permanentPoolSize;
-                            const uint32_t transientPoolSize = instanceDesc->transientPoolSize;
-                            const int32_t permanentHeadroom
-                                    = hasPermanentPoolRef ? static_cast<int32_t>(permanentPoolSize)
-                                                                    - static_cast<int32_t>(maxPermanentPoolIndex + 1)
-                                                          : static_cast<int32_t>(permanentPoolSize);
-                            const int32_t transientHeadroom
-                                    = hasTransientPoolRef ? static_cast<int32_t>(transientPoolSize)
-                                                                    - static_cast<int32_t>(maxTransientPoolIndex + 1)
-                                                          : static_cast<int32_t>(transientPoolSize);
-
-                            WL_INFO_TAG("Renderer",
-                                    "NRD pool diagnostics: permanent size={}, max used index={} (headroom {}), "
-                                    "transient size={}, max used index={} (headroom {}).",
-                                    permanentPoolSize,
-                                    hasPermanentPoolRef ? static_cast<int32_t>(maxPermanentPoolIndex)
-                                                        : static_cast<int32_t>(-1),
-                                    permanentHeadroom, transientPoolSize,
-                                    hasTransientPoolRef ? static_cast<int32_t>(maxTransientPoolIndex)
-                                                        : static_cast<int32_t>(-1),
-                                    transientHeadroom);
-                        }
-                        for (const nrd::ResourceType t : requiredTypes) {
-                            const char* name = nrd::GetResourceTypeString(t);
-                            WL_INFO_TAG(
-                                    "Renderer", "NRD resource required: {}", (name != nullptr) ? name : "<unknown>");
-                        }
-
-                        m_LoggedDispatchPlan = true;
-                    }
-
                     m_Operational = ExecutePreparedDispatches(cmd, ioImage, dispatches, dispatchesNum);
                 }
                 else {
@@ -1079,13 +1005,6 @@ namespace Vlkrt
             else {
                 WL_WARN_TAG("Renderer", "Direct NRD SetCommonSettings failed for frame {}.", params.FrameIndex);
             }
-        }
-
-        if (!m_LoggedFirstPass && m_Operational) {
-            WL_INFO_TAG("Renderer",
-                    "NRD direct mode initialized. REBLUR_DIFFUSE_SPECULAR backend dispatch execution is active with "
-                    "placeholder guide resources. Real guide data should be populated from RT shader.");
-            m_LoggedFirstPass = true;
         }
     }
 

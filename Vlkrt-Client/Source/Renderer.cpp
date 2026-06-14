@@ -337,7 +337,8 @@ namespace Vlkrt
         bool sizeChanged = (m_CachedTotalMeshCount != m_LastMeshCount) || (m_CachedTotalVertices != m_LastVertexCount)
                            || (m_CachedTotalIndices != m_LastIndexCount)
                            || (scene.Materials.size() != m_LastMaterialCount);
-        bool needsRebuild = !m_SceneValid || sizeChanged;
+        bool resetBySceneChange = false;
+        bool needsRebuild       = !m_SceneValid || sizeChanged;
         if (m_VertexBuffer == VK_NULL_HANDLE || needsRebuild) {
             if (needsRebuild && m_VertexBuffer != VK_NULL_HANDLE) {
                 if (m_CachedTotalMeshCount != m_LastMeshCount || m_CachedTotalVertices != m_LastVertexCount
@@ -376,7 +377,7 @@ namespace Vlkrt
                     size_t lightCount = std::max(scene.Lights.size(), (size_t) 1);
                     m_LightBufferSize = sizeof(GPULight) * lightCount;
                     m_LightBuffer     = CreateBuffer(m_LightBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_LightMemory);
+                            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_LightMemory);
                 }
             }
 
@@ -391,16 +392,30 @@ namespace Vlkrt
             m_SceneValid        = true;
 
             if (sizeChanged) {
-                m_AccumFirstFrame = true;
-                m_FrameIndex      = 0;
+                m_AccumFirstFrame  = true;
+                m_FrameIndex       = 0;
+                resetBySceneChange = true;
             }
         }
 
         if (!m_AccelerationStructure->IsBuilt()) return;
 
-        // Reset temporal accumulation when camera moves
-        glm::mat4 currentView = camera.GetView();
-        if (currentView != m_LastCameraView) {
+        // Reset temporal accumulation when camera moves (epsilon compare to avoid float noise resets)
+        const glm::mat4 currentView = camera.GetView();
+        auto viewChanged            = [](const glm::mat4& a, const glm::mat4& b) {
+            constexpr float kEpsilon = 1e-6f;
+            for (int c = 0; c < 4; ++c) {
+                for (int r = 0; r < 4; ++r) {
+                    if (std::abs(a[c][r] - b[c][r]) > kEpsilon) return true;
+                }
+            }
+            return false;
+        };
+
+        const bool resetByCameraView = viewChanged(currentView, m_LastCameraView);
+        const bool allowTemporalCameraReuse
+                = scene.EnableNRDDenoiser && (scene.RaytracingType == RaytracingMode::PathTracing);
+        if (resetByCameraView && !allowTemporalCameraReuse) {
             m_FrameIndex      = 0;
             m_AccumFirstFrame = true;
         }
@@ -549,10 +564,10 @@ namespace Vlkrt
             std::memcpy(denoiseParams.WorldToViewPrev, glm::value_ptr(worldToViewPrev),
                     sizeof(denoiseParams.WorldToViewPrev));
 
-            denoiseParams.CameraJitter[0]     = 0.0f;
-            denoiseParams.CameraJitter[1]     = 0.0f;
-            denoiseParams.CameraJitterPrev[0] = 0.0f;
-            denoiseParams.CameraJitterPrev[1] = 0.0f;
+            denoiseParams.CameraJitter[0]     = m_LastCameraJitter.x;
+            denoiseParams.CameraJitter[1]     = m_LastCameraJitter.y;
+            denoiseParams.CameraJitterPrev[0] = m_PrevCameraJitter.x;
+            denoiseParams.CameraJitterPrev[1] = m_PrevCameraJitter.y;
             denoiseParams.HasValidMatrices    = true;
 
             const auto nrdRecordStart = Clock::now();
@@ -866,7 +881,7 @@ namespace Vlkrt
         std::vector<VkRayTracingShaderGroupCreateInfoKHR> grps(totalGroups);
         const uint32_t U = VK_SHADER_UNUSED_KHR;
         auto fillGrp     = [&](uint32_t idx, VkRayTracingShaderGroupTypeKHR type, uint32_t general, uint32_t chit,
-                               uint32_t rint) {
+                                   uint32_t rint) {
             grps[idx]                    = { VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR };
             grps[idx].type               = type;
             grps[idx].generalShader      = general;
@@ -922,8 +937,8 @@ namespace Vlkrt
             pci.pStages                           = stages;
             pci.groupCount                        = totalGroups;
             pci.pGroups                           = grps.data();
-            pci.maxPipelineRayRecursionDepth      = std::min(m_ActiveScene ? (m_ActiveScene->MaxRecursionDepth + 2u)
-                                                                           : m_RTPipelineProperties.maxRayRecursionDepth,
+            pci.maxPipelineRayRecursionDepth = std::min(m_ActiveScene ? (m_ActiveScene->MaxRecursionDepth + 2u)
+                                                                      : m_RTPipelineProperties.maxRayRecursionDepth,
                     16u);
             pci.layout            = m_RTPipelineLayout;
             pci.pLibraryInterface = &interfaceConfig;
@@ -1081,8 +1096,8 @@ namespace Vlkrt
     void Renderer::CreateDescriptorSets()
     {
         // All RT stages used across bindings
-        const VkShaderStageFlags kAllRT = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR
-                                          | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_INTERSECTION_BIT_KHR;
+        const VkShaderStageFlags kAllRT        = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR
+                                                 | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_INTERSECTION_BIT_KHR;
         const VkShaderStageFlags kAllRTCompute = kAllRT | VK_SHADER_STAGE_COMPUTE_BIT;
 
         VkDescriptorSetLayoutBinding bindings[23] = {};
@@ -1179,55 +1194,55 @@ namespace Vlkrt
         size_t vertexCount = std::max(totalVertices, (size_t) 1);
         m_VertexBufferSize = sizeof(GPUVertex) * vertexCount;
         m_VertexBuffer     = CreateBuffer(m_VertexBufferSize,
-                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
-                            | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
-                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_VertexMemory);
+                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
+                        | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_VertexMemory);
 
         m_PrevVertexBufferSize = m_VertexBufferSize;
         m_PrevVertexBuffer     = CreateBuffer(m_PrevVertexBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_PrevVertexMemory);
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_PrevVertexMemory);
 
         // Create index buffer
         size_t indexCount = std::max(totalIndices, (size_t) 1);
         m_IndexBufferSize = sizeof(uint32_t) * indexCount;
         m_IndexBuffer     = CreateBuffer(m_IndexBufferSize,
-                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
-                            | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
-                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_IndexMemory);
+                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
+                        | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_IndexMemory);
 
         // Create material buffer
         size_t materialCount = std::max(scene.Materials.size(), (size_t) 1);
         m_MaterialBufferSize = sizeof(GPUPBRMaterial) * materialCount;
         m_MaterialBuffer     = CreateBuffer(m_MaterialBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_MaterialMemory);
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_MaterialMemory);
 
         // Create material index buffer (one uint32 per triangle)
         size_t triangleCount      = std::max(totalIndices / 3, (size_t) 1);
         m_MaterialIndexBufferSize = sizeof(uint32_t) * triangleCount;
         m_MaterialIndexBuffer     = CreateBuffer(m_MaterialIndexBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_MaterialIndexMemory);
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_MaterialIndexMemory);
 
         // Create AABB transform buffer
         size_t aabbCount          = std::max(scene.ProceduralEntities.size(), (size_t) 1);
         m_AABBTransformBufferSize = sizeof(AABBTransform) * aabbCount;
         m_AABBTransformBuffer     = CreateBuffer(m_AABBTransformBufferSize,
-                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_AABBTransformMemory);
+                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_AABBTransformMemory);
 
         m_PrevAABBTransformBufferSize = m_AABBTransformBufferSize;
         m_PrevAABBTransformBuffer     = CreateBuffer(m_PrevAABBTransformBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_PrevAABBTransformMemory);
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_PrevAABBTransformMemory);
 
         // Create AABB material buffer (one GPUPBRMaterial per procedural entity)
         m_AABBMaterialBufferSize = sizeof(GPUPBRMaterial) * aabbCount;
         m_AABBMaterialBuffer     = CreateBuffer(m_AABBMaterialBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_AABBMaterialMemory);
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_AABBMaterialMemory);
 
         // Create light buffer
         size_t lightCount = std::max(scene.Lights.size(), (size_t) 1);
         m_LightBufferSize = sizeof(GPULight) * lightCount;
         m_LightBuffer     = CreateBuffer(m_LightBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_LightMemory);
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_LightMemory);
 
         // Create Scene UBO buffer
         m_SceneUBOBuffer = CreateBuffer(sizeof(SceneUBOData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,

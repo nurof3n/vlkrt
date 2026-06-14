@@ -449,6 +449,19 @@ float4 REBLUR_FrontEnd_PackRadianceAndNormHitDist(float3 radiance, float normHit
     return float4(NRD_LinearToYCoCg(radiance), normHitDist);
 }
 
+// RELAX helpers (equivalent to NRD.hlsli RELAX pack/unpack for radiance+hitdist)
+float4 RELAX_FrontEnd_PackRadianceAndHitDist(float3 radiance, float hitDist, bool sanitize) {
+    if (sanitize) {
+        radiance = NRD_IsInvalid(radiance) ? float3(0.0f) : clamp(radiance, 0.0f, 65504.0f);
+        hitDist = NRD_IsInvalid(hitDist) ? 0.0f : clamp(hitDist, 0.0f, 65504.0f);
+    }
+    return float4(radiance, hitDist);
+}
+
+float4 RELAX_BackEnd_UnpackRadiance(float4 color) {
+    return color;
+}
+
 float3 NRD_EncodeNormalRoughness101010(float3 n, float roughness) {
     n /= abs(n.x) + abs(n.y) + abs(n.z);
     float3 r;
