@@ -53,23 +53,23 @@ entities:
   type: light
   transform:
     position: [ -0.8, 3.882, 0.393 ]
-    rotation: [ -0.707107, 0, -0, 0.707107 ]
+    rotation: [ -0.707107, 0, 0, 0.707107 ]
     scale: [ 1, 1, 1 ]
   light_emission: [ 0.474, 0.376, 0.75 ]
   light_intensity: 5.885
   light_type: 0
-  light_direction: [ 0, -1, -5.96046e-08 ]
+  light_direction: [ 0, -1, -5.96046e-8 ]
   light_size: 1.825
 - name: light_2
   type: light
   transform:
     position: [ 2.4, 11.368, -1.275 ]
-    rotation: [ -0.707107, 0, -0, 0.707107 ]
+    rotation: [ -0.707107, 0, 0, 0.707107 ]
     scale: [ 1, 1, 1 ]
   light_emission: [ 0.78, 0.815, 0.65 ]
   light_intensity: 4.792
   light_type: 0
-  light_direction: [ 0, -1, -5.96046e-08 ]
+  light_direction: [ 0, -1, -5.96046e-8 ]
   light_size: 5.468
 - name: demo_aabb
   type: procedural
@@ -138,8 +138,8 @@ entities:
 scene_settings:
   background_color: [ 0, 0, 0 ]
   scene_index: 2
-  max_recursion_depth: 6
-  max_shadow_recursion_depth: 6
+  max_recursion_depth: 3
+  max_shadow_recursion_depth: 3
   path_sqrt_samples: 1
   russian_roulette_depth: 3
   apply_jitter: true
