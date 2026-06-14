@@ -25,7 +25,8 @@ namespace Vlkrt
         m_NRDDenoiser.Initialize(m_Device);
 
         m_FSRUpscaler = std::make_unique<FSRUpscaler>();
-        m_FSRUpscaler->Initialize(m_Device, Walnut::Application::GetPhysicalDevice(), Walnut::Application::GetGraphicsQueue(), Walnut::Application::GetGraphicsQueueFamily());
+        m_FSRUpscaler->Initialize(m_Device, Walnut::Application::GetPhysicalDevice(),
+                Walnut::Application::GetGraphicsQueue(), Walnut::Application::GetGraphicsQueueFamily());
     }
 
     Renderer::~Renderer()
@@ -96,7 +97,8 @@ namespace Vlkrt
 
         if (m_RTPipeline != VK_NULL_HANDLE) vkDestroyPipeline(m_Device, m_RTPipeline, nullptr);
 
-        if (m_ComposeDenoisedPipeline != VK_NULL_HANDLE) vkDestroyPipeline(m_Device, m_ComposeDenoisedPipeline, nullptr);
+        if (m_ComposeDenoisedPipeline != VK_NULL_HANDLE)
+            vkDestroyPipeline(m_Device, m_ComposeDenoisedPipeline, nullptr);
 
         if (m_RTPipelineLayout != VK_NULL_HANDLE) vkDestroyPipelineLayout(m_Device, m_RTPipelineLayout, nullptr);
 
@@ -109,7 +111,8 @@ namespace Vlkrt
         if (m_IntersectAnalyticShader != VK_NULL_HANDLE)
             vkDestroyShaderModule(m_Device, m_IntersectAnalyticShader, nullptr);
         if (m_IntersectSDFShader != VK_NULL_HANDLE) vkDestroyShaderModule(m_Device, m_IntersectSDFShader, nullptr);
-        if (m_ComposeDenoisedShader != VK_NULL_HANDLE) vkDestroyShaderModule(m_Device, m_ComposeDenoisedShader, nullptr);
+        if (m_ComposeDenoisedShader != VK_NULL_HANDLE)
+            vkDestroyShaderModule(m_Device, m_ComposeDenoisedShader, nullptr);
 
         m_PreviousFrameVertices.clear();
         m_PreviousFrameAABBTransforms.clear();
@@ -117,19 +120,14 @@ namespace Vlkrt
 
     void Renderer::OnFSRSettingsChanged(bool enabled, uint32_t qualityMode, float sharpness)
     {
-        bool changed = (m_FSREnabled != enabled) || 
-                       (m_FSRQuality != qualityMode) || 
-                       (m_FSRSharpness != sharpness);
-        if (changed)
-        {
+        m_FSRSharpness = sharpness;
+        m_FSRUpscaler->SetSharpness(sharpness);
+        bool changed   = (m_FSREnabled != enabled) || (m_FSRQuality != qualityMode);
+        if (changed) {
             m_FSREnabled = enabled;
             m_FSRQuality = qualityMode;
-            m_FSRSharpness = sharpness;
 
-            if (m_DisplayWidth > 0 && m_DisplayHeight > 0)
-            {
-                OnResize(m_DisplayWidth, m_DisplayHeight);
-            }
+            if (m_DisplayWidth > 0 && m_DisplayHeight > 0) { OnResize(m_DisplayWidth, m_DisplayHeight); }
         }
     }
 
@@ -142,20 +140,22 @@ namespace Vlkrt
             m_FSRUpscaler->OnResize(width, height, static_cast<FSRUpscaler::Quality>(m_FSRQuality), m_FSRSharpness);
             m_RenderWidth  = m_FSRUpscaler->GetRenderWidth();
             m_RenderHeight = m_FSRUpscaler->GetRenderHeight();
-        } else {
+        }
+        else {
             m_RenderWidth  = width;
             m_RenderHeight = height;
         }
 
-        auto createOrResizeImage = [&](std::shared_ptr<Walnut::Image>& img, uint32_t w, uint32_t h, Walnut::ImageFormat fmt) {
-            if (img) {
-                if (img->GetWidth() == w && img->GetHeight() == h) return;
-                img->Resize(w, h);
-            }
-            else {
-                img = std::make_shared<Walnut::Image>(w, h, fmt);
-            }
-        };
+        auto createOrResizeImage
+                = [&](std::shared_ptr<Walnut::Image>& img, uint32_t w, uint32_t h, Walnut::ImageFormat fmt) {
+                      if (img) {
+                          if (img->GetWidth() == w && img->GetHeight() == h) return;
+                          img->Resize(w, h);
+                      }
+                      else {
+                          img = std::make_shared<Walnut::Image>(w, h, fmt);
+                      }
+                  };
 
         createOrResizeImage(m_FinalImage, m_RenderWidth, m_RenderHeight, Walnut::ImageFormat::RGBA);
         createOrResizeImage(m_AccumImage, m_RenderWidth, m_RenderHeight, Walnut::ImageFormat::RGBA32F);
@@ -171,7 +171,8 @@ namespace Vlkrt
 
         if (m_FSREnabled) {
             createOrResizeImage(m_FinalImageUpscaled, m_DisplayWidth, m_DisplayHeight, Walnut::ImageFormat::RGBA);
-        } else {
+        }
+        else {
             m_FinalImageUpscaled = nullptr;
         }
 
@@ -192,12 +193,12 @@ namespace Vlkrt
             accumInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
             VkWriteDescriptorSet writes[11] = {};
-            writes[0].sType                = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            writes[0].dstSet               = m_DescriptorSet;
-            writes[0].dstBinding           = 1;
-            writes[0].descriptorCount      = 1;
-            writes[0].descriptorType       = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-            writes[0].pImageInfo           = &outputInfo;
+            writes[0].sType                 = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[0].dstSet                = m_DescriptorSet;
+            writes[0].dstBinding            = 1;
+            writes[0].descriptorCount       = 1;
+            writes[0].descriptorType        = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            writes[0].pImageInfo            = &outputInfo;
 
             writes[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             writes[1].dstSet          = m_DescriptorSet;
@@ -310,8 +311,8 @@ namespace Vlkrt
             DestroyPipelineObjects();
             CreateRayTracingPipeline();
             CreateShaderBindingTable(scene);
-            m_LastProceduralCount    = proceduralCount;
-            m_LastMaxRecursionDepth  = scene.MaxRecursionDepth;
+            m_LastProceduralCount   = proceduralCount;
+            m_LastMaxRecursionDepth = scene.MaxRecursionDepth;
         }
 
         // Calculate current scene metrics — recompute only when the scene was invalidated
@@ -334,8 +335,9 @@ namespace Vlkrt
             m_CachedTotalIndices   = totalIndices;
         }
 
-        bool sizeChanged = (m_CachedTotalMeshCount != m_LastMeshCount) || (m_CachedTotalVertices != m_LastVertexCount)
-                           || (m_CachedTotalIndices != m_LastIndexCount) || (scene.Materials.size() != m_LastMaterialCount);
+        bool sizeChanged  = (m_CachedTotalMeshCount != m_LastMeshCount) || (m_CachedTotalVertices != m_LastVertexCount)
+                            || (m_CachedTotalIndices != m_LastIndexCount)
+                            || (scene.Materials.size() != m_LastMaterialCount);
         bool needsRebuild = !m_SceneValid || sizeChanged;
 
         if (m_VertexBuffer == VK_NULL_HANDLE || needsRebuild) {
@@ -376,7 +378,7 @@ namespace Vlkrt
                     size_t lightCount = std::max(scene.Lights.size(), (size_t) 1);
                     m_LightBufferSize = sizeof(GPULight) * lightCount;
                     m_LightBuffer     = CreateBuffer(m_LightBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_LightMemory);
+                            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_LightMemory);
                 }
             }
 
@@ -496,12 +498,12 @@ namespace Vlkrt
             if (barrierCount > 0) {
                 // Source stage covers both ray tracing (prior frames) and compute (NRD) writes.
                 // On the very first frame only TOP_OF_PIPE is needed (no prior writes).
-                VkPipelineStageFlags srcStage = m_GuidesFirstFrame
-                    ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT
-                    : (VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
-                vkCmdPipelineBarrier(cmd, srcStage,
-                        VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr, 0, nullptr, barrierCount,
-                        barriers);
+                VkPipelineStageFlags srcStage = m_GuidesFirstFrame ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT
+                                                                   : (VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR
+                                                                             | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+                                                                             | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+                vkCmdPipelineBarrier(cmd, srcStage, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr, 0,
+                        nullptr, barrierCount, barriers);
             }
 
             m_GuidesFirstFrame = false;
@@ -533,15 +535,10 @@ namespace Vlkrt
             // which are kept in VK_IMAGE_LAYOUT_GENERAL across both RT and Compute.
             {
                 VkMemoryBarrier memoryBarrier = { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
-                memoryBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-                memoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-                vkCmdPipelineBarrier(cmd,
-                        VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
-                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                        0,
-                        1, &memoryBarrier,
-                        0, nullptr,
-                        0, nullptr);
+                memoryBarrier.srcAccessMask   = VK_ACCESS_SHADER_WRITE_BIT;
+                memoryBarrier.dstAccessMask   = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+                vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &memoryBarrier, 0, nullptr, 0, nullptr);
             }
 
             NRDDenoiseParams denoiseParams{};
@@ -573,15 +570,10 @@ namespace Vlkrt
             if (m_NRDDenoiser.IsOperational() && m_ComposeDenoisedPipeline != VK_NULL_HANDLE) {
                 // Ensure NRD compute dispatches finish before our custom Compose compute shader runs.
                 VkMemoryBarrier composeBarrier = { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
-                composeBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-                composeBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-                vkCmdPipelineBarrier(cmd,
-                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 
-                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                        0,
-                        1, &composeBarrier,
-                        0, nullptr,
-                        0, nullptr);
+                composeBarrier.srcAccessMask   = VK_ACCESS_SHADER_WRITE_BIT;
+                composeBarrier.dstAccessMask   = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+                vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0,
+                        1, &composeBarrier, 0, nullptr, 0, nullptr);
 
                 vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_ComposeDenoisedPipeline);
                 vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_ComputePipelineLayout, 0, 1,
@@ -619,54 +611,41 @@ namespace Vlkrt
             {
                 VkImageMemoryBarrier barrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
                 barrier.image                = m_FinalImageUpscaled->GetVkImage();
-                barrier.oldLayout            = m_FirstFrame ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-                barrier.newLayout            = VK_IMAGE_LAYOUT_GENERAL;
-                barrier.srcAccessMask        = m_FirstFrame ? 0 : VK_ACCESS_SHADER_READ_BIT;
-                barrier.dstAccessMask        = VK_ACCESS_SHADER_WRITE_BIT;
-                barrier.srcQueueFamilyIndex  = VK_QUEUE_FAMILY_IGNORED;
-                barrier.dstQueueFamilyIndex  = VK_QUEUE_FAMILY_IGNORED;
+                barrier.oldLayout = m_FirstFrame ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+                barrier.srcAccessMask                   = m_FirstFrame ? 0 : VK_ACCESS_SHADER_READ_BIT;
+                barrier.dstAccessMask                   = VK_ACCESS_SHADER_WRITE_BIT;
+                barrier.srcQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+                barrier.dstQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
                 barrier.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
                 barrier.subresourceRange.baseMipLevel   = 0;
                 barrier.subresourceRange.levelCount     = 1;
                 barrier.subresourceRange.baseArrayLayer = 0;
                 barrier.subresourceRange.layerCount     = 1;
-                vkCmdPipelineBarrier(cmd,
-                        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
             }
 
-            float dtMs = 16.6667f;
-
-            m_FSRUpscaler->Dispatch(
-                cmd,
-                m_FinalImage,
-                m_GuideDepth,
-                m_GuideMotionVectors,
-                m_FinalImageUpscaled,
-                m_LastCameraJitter,
-                dtMs,
-                m_FirstFrame,
-                camera.GetNearClip(),
-                camera.GetFarClip(),
-                glm::radians(camera.GetFOV())
-            );
+            m_FSRUpscaler->Dispatch(cmd, m_FinalImage, m_GuideDepth, m_GuideMotionVectors, m_FinalImageUpscaled,
+                    m_LastCameraJitter, m_LastPassStats.FrameTotalMs, m_FirstFrame, camera.GetNearClip(),
+                    camera.GetFarClip(), glm::radians(camera.GetFOV()));
 
             {
-                VkImageMemoryBarrier barrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
-                barrier.image                = m_FinalImageUpscaled->GetVkImage();
-                barrier.oldLayout            = VK_IMAGE_LAYOUT_GENERAL;
-                barrier.newLayout            = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-                barrier.srcAccessMask        = VK_ACCESS_SHADER_WRITE_BIT;
-                barrier.dstAccessMask        = VK_ACCESS_SHADER_READ_BIT;
-                barrier.srcQueueFamilyIndex  = VK_QUEUE_FAMILY_IGNORED;
-                barrier.dstQueueFamilyIndex  = VK_QUEUE_FAMILY_IGNORED;
+                VkImageMemoryBarrier barrier            = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+                barrier.image                           = m_FinalImageUpscaled->GetVkImage();
+                barrier.oldLayout                       = VK_IMAGE_LAYOUT_GENERAL;
+                barrier.newLayout                       = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                barrier.srcAccessMask                   = VK_ACCESS_SHADER_WRITE_BIT;
+                barrier.dstAccessMask                   = VK_ACCESS_SHADER_READ_BIT;
+                barrier.srcQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+                barrier.dstQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
                 barrier.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
                 barrier.subresourceRange.baseMipLevel   = 0;
                 barrier.subresourceRange.levelCount     = 1;
                 barrier.subresourceRange.baseArrayLayer = 0;
                 barrier.subresourceRange.layerCount     = 1;
-                vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+                vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                        0, 0, nullptr, 0, nullptr, 1, &barrier);
             }
         }
 
@@ -747,9 +726,7 @@ namespace Vlkrt
         }
         if (m_RTPipelineLayout != VK_NULL_HANDLE) {
             vkDestroyPipelineLayout(m_Device, m_RTPipelineLayout, nullptr);
-            if (m_ComputePipelineLayout == m_RTPipelineLayout) {
-                m_ComputePipelineLayout = VK_NULL_HANDLE;
-            }
+            if (m_ComputePipelineLayout == m_RTPipelineLayout) { m_ComputePipelineLayout = VK_NULL_HANDLE; }
             m_RTPipelineLayout = VK_NULL_HANDLE;
         }
         if (m_ComputePipelineLayout != VK_NULL_HANDLE) {
@@ -766,12 +743,12 @@ namespace Vlkrt
 
     static float Halton(int32_t index, int32_t base)
     {
-        float f = 1.0f;
-        float r = 0.0f;
+        float f      = 1.0f;
+        float r      = 0.0f;
         int32_t curr = index;
         while (curr > 0) {
-            f = f / (float)base;
-            r = r + f * (float)(curr % base);
+            f    = f / (float) base;
+            r    = r + f * (float) (curr % base);
             curr = curr / base;
         }
         return r;
@@ -786,12 +763,12 @@ namespace Vlkrt
         m_PrevCameraJitter = m_LastCameraJitter;
 
         glm::mat4 projection = camera.GetProjection();
-        float jitterX = 0.0f;
-        float jitterY = 0.0f;
+        float jitterX        = 0.0f;
+        float jitterY        = 0.0f;
 
         if (m_FSREnabled && m_FSRUpscaler) {
             // Calculate jitter phase count using FSR formula: 8.0 * (display_width / render_width)^2
-            float ratio = (float)m_DisplayWidth / (float)m_RenderWidth;
+            float ratio        = (float) m_DisplayWidth / (float) m_RenderWidth;
             int32_t phaseCount = int32_t(8.0f * ratio * ratio);
             if (phaseCount < 1) phaseCount = 1;
 
@@ -799,29 +776,30 @@ namespace Vlkrt
             jitterY = Halton((m_FrameIndex % phaseCount) + 1, 3) - 0.5f;
 
             // Apply jitter to projection matrix (unit pixels -> NDC translation)
-            float ndcOffsetX = 2.0f * jitterX / (float)m_RenderWidth;
-            float ndcOffsetY = -2.0f * jitterY / (float)m_RenderHeight;
+            float ndcOffsetX = 2.0f * jitterX / (float) m_RenderWidth;
+            float ndcOffsetY = -2.0f * jitterY / (float) m_RenderHeight;
             projection[2][0] += ndcOffsetX;
             projection[2][1] += ndcOffsetY;
 
             m_LastCameraJitter = glm::vec2(jitterX, jitterY);
-        } else {
+        }
+        else {
             m_LastCameraJitter = glm::vec2(0.0f, 0.0f);
         }
 
         const glm::mat4 worldToClipJittered = projection * camera.GetView();
-        
+
         // Compute unjittered clip space matrices for jitter-free motion vectors on the GPU
         const glm::mat4 worldToClipUnjittered = camera.GetProjection() * camera.GetView();
         const glm::mat4 worldToClipPrevUnjittered
                 = (m_FirstFrame) ? worldToClipUnjittered : (m_LastCameraProjection * m_LastCameraView);
 
         // projectionToWorld uses the jittered projection to generate jittered camera rays
-        ubo.projectionToWorld       = glm::inverse(worldToClipJittered);
-        
+        ubo.projectionToWorld = glm::inverse(worldToClipJittered);
+
         // worldToClip and worldToClipPrev use the unjittered projection for jitter-free motion vectors
-        ubo.worldToClip             = worldToClipUnjittered;
-        ubo.worldToClipPrev         = worldToClipPrevUnjittered;
+        ubo.worldToClip     = worldToClipUnjittered;
+        ubo.worldToClipPrev = worldToClipPrevUnjittered;
 
         ubo.cameraPosition          = glm::vec4(camera.GetPosition(), 1.0f);
         ubo.backgroundColor         = glm::vec4(scene.BackgroundColor, 1.0f);
@@ -834,19 +812,19 @@ namespace Vlkrt
         ubo.maxShadowRecursionDepth = scene.MaxShadowRecursionDepth;
         ubo.pathSqrtSamplesPerPixel = scene.PathSqrtSamplesPerPixel;
         ubo.pathFrameCacheIndex     = m_FrameIndex + 1;
-        
-        // Disable random per-pixel/per-sample jitter when FSR is active to prevent noise clash
-        ubo.applyJitter             = (scene.ApplyJitter && !m_FSREnabled) ? 1u : 0u;
 
-        ubo.onlyOneLightSample      = scene.OnlyOneLightSample ? 1u : 0u;
-        ubo.russianRouletteDepth    = scene.RussianRouletteDepth;
-        ubo.anisotropicBSDF         = scene.AnisotropicBSDF ? 1u : 0u;
-        ubo.sceneIndex              = scene.SceneIndex;
-        glm::vec3 camDir            = camera.GetDirection();
-        ubo.cameraForward[0]        = camDir.x;
-        ubo.cameraForward[1]        = camDir.y;
-        ubo.cameraForward[2]        = camDir.z;
-        ubo.nrdDebugViewMode        = (uint32_t) scene.NRDGuideDebugView;
+        // Disable random per-pixel/per-sample jitter when FSR is active to prevent noise clash
+        ubo.applyJitter = (scene.ApplyJitter && !m_FSREnabled) ? 1u : 0u;
+
+        ubo.onlyOneLightSample   = scene.OnlyOneLightSample ? 1u : 0u;
+        ubo.russianRouletteDepth = scene.RussianRouletteDepth;
+        ubo.anisotropicBSDF      = scene.AnisotropicBSDF ? 1u : 0u;
+        ubo.sceneIndex           = scene.SceneIndex;
+        glm::vec3 camDir         = camera.GetDirection();
+        ubo.cameraForward[0]     = camDir.x;
+        ubo.cameraForward[1]     = camDir.y;
+        ubo.cameraForward[2]     = camDir.z;
+        ubo.nrdDebugViewMode     = (uint32_t) scene.NRDGuideDebugView;
 
         void* data;
         vkMapMemory(m_Device, m_SceneUBOMemory, 0, sizeof(SceneUBOData), 0, &data);
@@ -873,11 +851,14 @@ namespace Vlkrt
         loadModule("intersect_sdf.rint.spv", m_IntersectSDFShader);
         try {
             loadModule("compose_denoised.comp.spv", m_ComposeDenoisedShader);
-            WL_INFO_TAG("Renderer", "Loaded compose_denoised.comp.spv shader module successfully (handle={}).", (void*)m_ComposeDenoisedShader);
-        } catch (const std::exception& e) {
+            WL_INFO_TAG("Renderer", "Loaded compose_denoised.comp.spv shader module successfully (handle={}).",
+                    (void*) m_ComposeDenoisedShader);
+        }
+        catch (const std::exception& e) {
             WL_ERROR_TAG("Renderer", "Failed to load compose_denoised.comp.spv shader: {}", e.what());
             m_ComposeDenoisedShader = VK_NULL_HANDLE;
-        } catch (...) {
+        }
+        catch (...) {
             WL_ERROR_TAG("Renderer", "Failed to load compose_denoised.comp.spv shader (unknown exception).");
             m_ComposeDenoisedShader = VK_NULL_HANDLE;
         }
@@ -907,7 +888,7 @@ namespace Vlkrt
         std::vector<VkRayTracingShaderGroupCreateInfoKHR> grps(totalGroups);
         const uint32_t U = VK_SHADER_UNUSED_KHR;
         auto fillGrp     = [&](uint32_t idx, VkRayTracingShaderGroupTypeKHR type, uint32_t general, uint32_t chit,
-                               uint32_t rint) {
+                                   uint32_t rint) {
             grps[idx]                    = { VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR };
             grps[idx].type               = type;
             grps[idx].generalShader      = general;
@@ -933,7 +914,7 @@ namespace Vlkrt
         layoutCI.pSetLayouts                = &m_DescriptorSetLayout;
         layoutCI.pushConstantRangeCount     = 0;
         vkCreatePipelineLayout(m_Device, &layoutCI, nullptr, &m_RTPipelineLayout);
-        
+
         // Reuse same layout for compute (both use same descriptor set)
         m_ComputePipelineLayout = m_RTPipelineLayout;
 
@@ -952,7 +933,8 @@ namespace Vlkrt
             stages[IDX_RINT_SDF]
                     = makeStage(VK_SHADER_STAGE_INTERSECTION_BIT_KHR, m_IntersectSDFShader, entryNames[IDX_RINT_SDF]);
 
-            VkRayTracingPipelineInterfaceCreateInfoKHR interfaceConfig = { VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_INTERFACE_CREATE_INFO_KHR };
+            VkRayTracingPipelineInterfaceCreateInfoKHR interfaceConfig
+                    = { VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_INTERFACE_CREATE_INFO_KHR };
             // RayPayload struct: 7×float4 (112B) + 3×uint+2×float (20B) + NRD fields ~48B = 180B total
             interfaceConfig.maxPipelineRayPayloadSize      = 180;
             interfaceConfig.maxPipelineRayHitAttributeSize = 32;
@@ -962,10 +944,11 @@ namespace Vlkrt
             pci.pStages                           = stages;
             pci.groupCount                        = totalGroups;
             pci.pGroups                           = grps.data();
-            pci.maxPipelineRayRecursionDepth      = std::min(m_ActiveScene ? (m_ActiveScene->MaxRecursionDepth + 2u) : 16u, 16u);
+            pci.maxPipelineRayRecursionDepth
+                    = std::min(m_ActiveScene ? (m_ActiveScene->MaxRecursionDepth + 2u) : 16u, 16u);
             // +2 accounts for: 1 shadow ray recursion level + 1 safety margin
-            pci.layout                            = m_RTPipelineLayout;
-            pci.pLibraryInterface                 = &interfaceConfig;
+            pci.layout            = m_RTPipelineLayout;
+            pci.pLibraryInterface = &interfaceConfig;
             return pvkCreateRayTracingPipelinesKHR(
                     m_Device, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &pci, nullptr, &m_RTPipeline);
         };
@@ -990,24 +973,25 @@ namespace Vlkrt
         }
 
         if (m_ComposeDenoisedShader != VK_NULL_HANDLE) {
-            VkPipelineShaderStageCreateInfo stageInfo = makeStage(VK_SHADER_STAGE_COMPUTE_BIT, m_ComposeDenoisedShader, "ComposeDenoisedMain");
-            WL_TRACE_TAG("Renderer", "Compose stage: module={}, entry={}", (void*)stageInfo.module, stageInfo.pName);
-            
+            VkPipelineShaderStageCreateInfo stageInfo
+                    = makeStage(VK_SHADER_STAGE_COMPUTE_BIT, m_ComposeDenoisedShader, "ComposeDenoisedMain");
+            WL_TRACE_TAG("Renderer", "Compose stage: module={}, entry={}", (void*) stageInfo.module, stageInfo.pName);
+
             VkComputePipelineCreateInfo composePipelineCI = { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
-            composePipelineCI.layout = m_ComputePipelineLayout;  // Use compute-only layout
-            composePipelineCI.stage = stageInfo;
-            
-            VkResult composeRes = vkCreateComputePipelines(m_Device, VK_NULL_HANDLE, 1, &composePipelineCI, nullptr,
-                        &m_ComposeDenoisedPipeline);
+            composePipelineCI.layout                      = m_ComputePipelineLayout;  // Use compute-only layout
+            composePipelineCI.stage                       = stageInfo;
+
+            VkResult composeRes = vkCreateComputePipelines(
+                    m_Device, VK_NULL_HANDLE, 1, &composePipelineCI, nullptr, &m_ComposeDenoisedPipeline);
             if (composeRes != VK_SUCCESS) {
                 // Slang fallback: try "main" entry point if slangc renamed it
                 composePipelineCI.stage.pName = "main";
-                composeRes = vkCreateComputePipelines(m_Device, VK_NULL_HANDLE, 1, &composePipelineCI, nullptr,
-                        &m_ComposeDenoisedPipeline);
+                composeRes                    = vkCreateComputePipelines(
+                        m_Device, VK_NULL_HANDLE, 1, &composePipelineCI, nullptr, &m_ComposeDenoisedPipeline);
             }
             if (composeRes != VK_SUCCESS) {
                 const char* errName = "UNKNOWN";
-                switch(composeRes) {
+                switch (composeRes) {
                     case VK_ERROR_OUT_OF_HOST_MEMORY: errName = "OUT_OF_HOST_MEMORY"; break;
                     case VK_ERROR_OUT_OF_DEVICE_MEMORY: errName = "OUT_OF_DEVICE_MEMORY"; break;
                     case VK_ERROR_INVALID_SHADER_NV: errName = "INVALID_SHADER"; break;
@@ -1015,12 +999,15 @@ namespace Vlkrt
                     case VK_ERROR_INITIALIZATION_FAILED: errName = "INITIALIZATION_FAILED"; break;
                     default: errName = "UNKNOWN"; break;
                 }
-                WL_ERROR_TAG("Renderer", "vkCreateComputePipelines failed with code {} ({}). Check GPU driver.", (int)composeRes, errName);
+                WL_ERROR_TAG("Renderer", "vkCreateComputePipelines failed with code {} ({}). Check GPU driver.",
+                        (int) composeRes, errName);
                 m_ComposeDenoisedPipeline = VK_NULL_HANDLE;
-            } else {
+            }
+            else {
                 WL_INFO_TAG("Renderer", "Compose compute pipeline created successfully.");
             }
-        } else {
+        }
+        else {
             WL_WARN_TAG("Renderer", "Compose shader module is NULL, skipping pipeline creation.");
             m_ComposeDenoisedPipeline = VK_NULL_HANDLE;
         }
@@ -1138,12 +1125,12 @@ namespace Vlkrt
     void Renderer::CreateDescriptorSets()
     {
         // All RT stages used across bindings
-        const VkShaderStageFlags kAllRT = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR
-                                          | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_INTERSECTION_BIT_KHR;
+        const VkShaderStageFlags kAllRT        = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR
+                                                 | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_INTERSECTION_BIT_KHR;
         const VkShaderStageFlags kAllRTCompute = kAllRT | VK_SHADER_STAGE_COMPUTE_BIT;
 
         VkDescriptorSetLayoutBinding bindings[23] = {};
- 
+
         // 0: TLAS
         bindings[0] = { 0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, kAllRTCompute, nullptr };
         // 1: output image (rgba8)
@@ -1159,8 +1146,7 @@ namespace Vlkrt
         // 6: lights
         bindings[6] = { 6, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, kAllRTCompute, nullptr };
         // 7: textures (up to 16)
-        bindings[7]
-                = { 7, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16, kAllRTCompute, nullptr };
+        bindings[7] = { 7, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16, kAllRTCompute, nullptr };
         // 8: AABB transforms
         bindings[8] = { 8, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, kAllRTCompute, nullptr };
         // 9: AABB materials
@@ -1191,17 +1177,18 @@ namespace Vlkrt
         bindings[21] = { 21, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, kAllRTCompute, nullptr };
         // 22: guide depth
         bindings[22] = { 22, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, kAllRTCompute, nullptr };
- 
+
         VkDescriptorSetLayoutCreateInfo layoutInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
         layoutInfo.bindingCount                    = 23;
         layoutInfo.pBindings                       = bindings;
         vkCreateDescriptorSetLayout(m_Device, &layoutInfo, nullptr, &m_DescriptorSetLayout);
- 
+
         // Pool
         VkDescriptorPoolSize poolSizes[5] = {};
-        poolSizes[0] = { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1 };
-        poolSizes[1] = { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 11 };  // binding 1,10,12-16,19,20,21,22
-        poolSizes[2] = { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 9 };  // vtx,idx,mat,matIdx,lights,aabbT,aabbM,prevVtx,prevAabbT
+        poolSizes[0]                      = { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1 };
+        poolSizes[1]                      = { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 11 };  // binding 1,10,12-16,19,20,21,22
+        poolSizes[2]
+                = { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 9 };  // vtx,idx,mat,matIdx,lights,aabbT,aabbM,prevVtx,prevAabbT
         poolSizes[3] = { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16 };
         poolSizes[4] = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 };
 
@@ -1236,55 +1223,55 @@ namespace Vlkrt
         size_t vertexCount = std::max(totalVertices, (size_t) 1);
         m_VertexBufferSize = sizeof(GPUVertex) * vertexCount;
         m_VertexBuffer     = CreateBuffer(m_VertexBufferSize,
-                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
-                            | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
-                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_VertexMemory);
+                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
+                        | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_VertexMemory);
 
         m_PrevVertexBufferSize = m_VertexBufferSize;
         m_PrevVertexBuffer     = CreateBuffer(m_PrevVertexBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_PrevVertexMemory);
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_PrevVertexMemory);
 
         // Create index buffer
         size_t indexCount = std::max(totalIndices, (size_t) 1);
         m_IndexBufferSize = sizeof(uint32_t) * indexCount;
         m_IndexBuffer     = CreateBuffer(m_IndexBufferSize,
-                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
-                            | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
-                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_IndexMemory);
+                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
+                        | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_IndexMemory);
 
         // Create material buffer
         size_t materialCount = std::max(scene.Materials.size(), (size_t) 1);
         m_MaterialBufferSize = sizeof(GPUPBRMaterial) * materialCount;
         m_MaterialBuffer     = CreateBuffer(m_MaterialBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_MaterialMemory);
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_MaterialMemory);
 
         // Create material index buffer (one uint32 per triangle)
         size_t triangleCount      = std::max(totalIndices / 3, (size_t) 1);
         m_MaterialIndexBufferSize = sizeof(uint32_t) * triangleCount;
         m_MaterialIndexBuffer     = CreateBuffer(m_MaterialIndexBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_MaterialIndexMemory);
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_MaterialIndexMemory);
 
         // Create AABB transform buffer
         size_t aabbCount          = std::max(scene.ProceduralEntities.size(), (size_t) 1);
         m_AABBTransformBufferSize = sizeof(AABBTransform) * aabbCount;
         m_AABBTransformBuffer     = CreateBuffer(m_AABBTransformBufferSize,
-                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
-                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_AABBTransformMemory);
+                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_AABBTransformMemory);
 
         m_PrevAABBTransformBufferSize = m_AABBTransformBufferSize;
         m_PrevAABBTransformBuffer     = CreateBuffer(m_PrevAABBTransformBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_PrevAABBTransformMemory);
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_PrevAABBTransformMemory);
 
         // Create AABB material buffer (one GPUPBRMaterial per procedural entity)
         m_AABBMaterialBufferSize = sizeof(GPUPBRMaterial) * aabbCount;
         m_AABBMaterialBuffer     = CreateBuffer(m_AABBMaterialBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_AABBMaterialMemory);
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_AABBMaterialMemory);
 
         // Create light buffer
         size_t lightCount = std::max(scene.Lights.size(), (size_t) 1);
         m_LightBufferSize = sizeof(GPULight) * lightCount;
         m_LightBuffer     = CreateBuffer(m_LightBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_LightMemory);
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_LightMemory);
 
         // Create Scene UBO buffer
         m_SceneUBOBuffer = CreateBuffer(sizeof(SceneUBOData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,

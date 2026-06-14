@@ -34,7 +34,7 @@ project "Vlkrt-Common-Headless"
       buildoptions {"/utf-8"}
 
    filter "configurations:Debug"
-      defines { "WL_DEBUG" }
+      defines { "WL_DEBUG", "_DEBUG" }
       runtime "Debug"
       symbols "On"
 
