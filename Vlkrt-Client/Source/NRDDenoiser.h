@@ -24,6 +24,22 @@ namespace Vlkrt
         float CameraJitter[2]{ 0.0f, 0.0f };
         float CameraJitterPrev[2]{ 0.0f, 0.0f };
 
+        // Runtime RELAX tuning (live-updated from UI)
+        float MinMaterialForDiffuse{ 0.0f };
+        float MinMaterialForSpecular{ 0.0f };
+        float DiffusePrepassBlurRadius{ 6.0f };
+        float SpecularPrepassBlurRadius{ 10.0f };
+        uint32_t DiffuseMaxAccumulatedFrameNum{ 10 };
+        uint32_t SpecularMaxAccumulatedFrameNum{ 12 };
+        uint32_t DiffuseMaxFastAccumulatedFrameNum{ 2 };
+        uint32_t SpecularMaxFastAccumulatedFrameNum{ 3 };
+        float AntilagAccelerationAmount{ 0.9f };
+        float AntilagSpatialSigmaScale{ 2.5f };
+        float AntilagTemporalSigmaScale{ 0.22f };
+        float AntilagResetAmount{ 1.0f };
+        float DisocclusionThreshold{ 0.010f };
+        float DisocclusionThresholdAlternate{ 0.035f };
+
         bool HasValidMatrices = false;
     };
 
@@ -119,5 +135,7 @@ namespace Vlkrt
         std::vector<std::shared_ptr<Walnut::Image>> m_TransientPoolImages;
         std::vector<std::shared_ptr<Walnut::Image>> m_PermanentPoolImages;
         bool m_FirstDispatchTransitionsDone = false;
+        NRDDenoiseParams m_LastAppliedParams{};
+        bool m_HasLastAppliedParams = false;
     };
 }  // namespace Vlkrt

@@ -568,7 +568,22 @@ namespace Vlkrt
             denoiseParams.CameraJitter[1]     = m_LastCameraJitter.y;
             denoiseParams.CameraJitterPrev[0] = m_PrevCameraJitter.x;
             denoiseParams.CameraJitterPrev[1] = m_PrevCameraJitter.y;
-            denoiseParams.HasValidMatrices    = true;
+
+            denoiseParams.MinMaterialForDiffuse              = scene.NRDMinMaterialForDiffuse;
+            denoiseParams.MinMaterialForSpecular             = scene.NRDMinMaterialForSpecular;
+            denoiseParams.DiffusePrepassBlurRadius           = scene.NRDDiffusePrepassBlurRadius;
+            denoiseParams.SpecularPrepassBlurRadius          = scene.NRDSpecularPrepassBlurRadius;
+            denoiseParams.DiffuseMaxAccumulatedFrameNum      = scene.NRDDiffuseMaxAccumulatedFrameNum;
+            denoiseParams.SpecularMaxAccumulatedFrameNum     = scene.NRDSpecularMaxAccumulatedFrameNum;
+            denoiseParams.DiffuseMaxFastAccumulatedFrameNum  = scene.NRDDiffuseMaxFastAccumulatedFrameNum;
+            denoiseParams.SpecularMaxFastAccumulatedFrameNum = scene.NRDSpecularMaxFastAccumulatedFrameNum;
+            denoiseParams.AntilagAccelerationAmount          = scene.NRDAntilagAccelerationAmount;
+            denoiseParams.AntilagSpatialSigmaScale           = scene.NRDAntilagSpatialSigmaScale;
+            denoiseParams.AntilagTemporalSigmaScale          = scene.NRDAntilagTemporalSigmaScale;
+            denoiseParams.AntilagResetAmount                 = scene.NRDAntilagResetAmount;
+            denoiseParams.DisocclusionThreshold              = scene.NRDDisocclusionThreshold;
+            denoiseParams.DisocclusionThresholdAlternate     = scene.NRDDisocclusionThresholdAlternate;
+            denoiseParams.HasValidMatrices                   = true;
 
             const auto nrdRecordStart = Clock::now();
             m_NRDDenoiser.Dispatch(cmd, m_FinalImage, denoiseParams);

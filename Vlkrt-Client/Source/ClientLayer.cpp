@@ -266,7 +266,66 @@ namespace Vlkrt
                 if (ImGui::Checkbox("Apply Jitter", &m_Scene.ApplyJitter)) m_Renderer.ResetAccumulation();
                 if (ImGui::Checkbox("One Light Sample", &m_Scene.OnlyOneLightSample)) m_Renderer.ResetAccumulation();
                 if (ImGui::Checkbox("Anisotropic BSDF", &m_Scene.AnisotropicBSDF)) m_Renderer.ResetAccumulation();
-                if (ImGui::Checkbox("Enable NRD Denoiser", &m_Scene.EnableNRDDenoiser)) m_Renderer.ResetAccumulation();
+
+                ImGui::Separator();
+                ImGui::Text("NRD Denoiser");
+                if (ImGui::Checkbox("Enable NRD Denoiser", &m_Scene.EnableNRDDenoiser)) {
+                    if (!m_Scene.EnableNRDDenoiser) m_Scene.NRDGuideDebugView = NRDGuideDebugViewMode::FinalImage;
+                    m_Renderer.ResetAccumulation();
+                }
+
+                if (m_Scene.EnableNRDDenoiser) {
+                    const char* nrdDebugViewNames[]
+                            = { "Final Image", "Guide: Normal + Roughness", "Guide: ViewZ", "Guide: Motion Vectors",
+                                  "Guide: Diffuse Radiance + HitDist", "Guide: Specular Radiance + HitDist" };
+                    int nrdDebugViewMode = (int) m_Scene.NRDGuideDebugView;
+                    if (ImGui::Combo("NRD Debug View", &nrdDebugViewMode, nrdDebugViewNames, 6)) {
+                        m_Scene.NRDGuideDebugView = (NRDGuideDebugViewMode) nrdDebugViewMode;
+                    }
+
+                    if (ImGui::TreeNode("NRD Tuning")) {
+                        ImGui::SliderFloat(
+                                "Min Material Diffuse", &m_Scene.NRDMinMaterialForDiffuse, 0.0f, 4.0f, "%.2f");
+                        ImGui::SliderFloat(
+                                "Min Material Specular", &m_Scene.NRDMinMaterialForSpecular, 0.0f, 4.0f, "%.2f");
+                        ImGui::SliderFloat(
+                                "Diffuse Prepass Radius", &m_Scene.NRDDiffusePrepassBlurRadius, 0.0f, 24.0f, "%.1f");
+                        ImGui::SliderFloat(
+                                "Specular Prepass Radius", &m_Scene.NRDSpecularPrepassBlurRadius, 0.0f, 24.0f, "%.1f");
+
+                        int diffHist = (int) m_Scene.NRDDiffuseMaxAccumulatedFrameNum;
+                        if (ImGui::SliderInt("Diffuse Max History", &diffHist, 1, 64)) {
+                            m_Scene.NRDDiffuseMaxAccumulatedFrameNum = (uint32_t) diffHist;
+                        }
+                        int specHist = (int) m_Scene.NRDSpecularMaxAccumulatedFrameNum;
+                        if (ImGui::SliderInt("Specular Max History", &specHist, 1, 64)) {
+                            m_Scene.NRDSpecularMaxAccumulatedFrameNum = (uint32_t) specHist;
+                        }
+                        int diffFastHist = (int) m_Scene.NRDDiffuseMaxFastAccumulatedFrameNum;
+                        if (ImGui::SliderInt("Diffuse Fast History", &diffFastHist, 1, 16)) {
+                            m_Scene.NRDDiffuseMaxFastAccumulatedFrameNum = (uint32_t) diffFastHist;
+                        }
+                        int specFastHist = (int) m_Scene.NRDSpecularMaxFastAccumulatedFrameNum;
+                        if (ImGui::SliderInt("Specular Fast History", &specFastHist, 1, 16)) {
+                            m_Scene.NRDSpecularMaxFastAccumulatedFrameNum = (uint32_t) specFastHist;
+                        }
+
+                        ImGui::SliderFloat(
+                                "Antilag Acceleration", &m_Scene.NRDAntilagAccelerationAmount, 0.0f, 1.0f, "%.2f");
+                        ImGui::SliderFloat(
+                                "Antilag Spatial Sigma", &m_Scene.NRDAntilagSpatialSigmaScale, 0.1f, 8.0f, "%.2f");
+                        ImGui::SliderFloat(
+                                "Antilag Temporal Sigma", &m_Scene.NRDAntilagTemporalSigmaScale, 0.05f, 2.0f, "%.2f");
+                        ImGui::SliderFloat("Antilag Reset", &m_Scene.NRDAntilagResetAmount, 0.0f, 1.0f, "%.2f");
+
+                        ImGui::SliderFloat(
+                                "Disocclusion Threshold", &m_Scene.NRDDisocclusionThreshold, 0.001f, 0.050f, "%.3f");
+                        ImGui::SliderFloat("Disocclusion Threshold Alt", &m_Scene.NRDDisocclusionThresholdAlternate,
+                                0.005f, 0.150f, "%.3f");
+
+                        ImGui::TreePop();
+                    }
+                }
 
                 ImGui::Separator();
                 ImGui::Text("FSR Upscaling");
@@ -291,16 +350,6 @@ namespace Vlkrt
                     }
                 }
                 ImGui::Separator();
-
-                const char* nrdDebugViewNames[]
-                        = { "Final Image", "Guide: Normal + Roughness", "Guide: ViewZ", "Guide: Motion Vectors",
-                              "Guide: Diffuse Radiance + HitDist", "Guide: Specular Radiance + HitDist" };
-                int nrdDebugViewMode = (int) m_Scene.NRDGuideDebugView;
-                if (ImGui::Combo("NRD Debug View", &nrdDebugViewMode, nrdDebugViewNames, 6)) {
-                    m_Scene.NRDGuideDebugView = (NRDGuideDebugViewMode) nrdDebugViewMode;
-                }
-
-                ImGui::Text("NRD Status: %s", m_Renderer.GetNRDStatus());
 
                 // PBR Showcase: adjustable sun direction
 

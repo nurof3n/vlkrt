@@ -182,6 +182,7 @@ namespace Vlkrt
         m_ConstantSetIndex             = 0;
         m_ResourceSetIndex             = 1;
         m_FirstDispatchTransitionsDone = false;
+        m_HasLastAppliedParams         = false;
 
         // Keep externally supplied guide buffers; renderer owns and updates these
         m_TransientPoolImages.clear();
@@ -815,6 +816,7 @@ namespace Vlkrt
             m_DirectInstance         = nullptr;
             m_DirectInstanceReady    = false;
             m_LastPreparedDispatches = 0;
+            m_HasLastAppliedParams   = false;
         }
 
         nrd::DenoiserDesc denoiserDesc{};
@@ -834,22 +836,22 @@ namespace Vlkrt
 
         nrd::RelaxSettings relaxSettings{};
         relaxSettings.hitDistanceReconstructionMode      = nrd::HitDistanceReconstructionMode::AREA_3X3;
-        relaxSettings.minMaterialForDiffuse              = 4.0f;
-        relaxSettings.minMaterialForSpecular             = 4.0f;
-        relaxSettings.diffusePrepassBlurRadius           = 10.0f;
+        relaxSettings.minMaterialForDiffuse              = 0.0f;
+        relaxSettings.minMaterialForSpecular             = 0.0f;
+        relaxSettings.diffusePrepassBlurRadius           = 6.0f;
         relaxSettings.specularPrepassBlurRadius          = 10.0f;
         relaxSettings.minHitDistanceWeight               = 0.02f;
         relaxSettings.lobeAngleFraction                  = 0.15f;
         relaxSettings.roughnessFraction                  = 0.15f;
         relaxSettings.enableAntiFirefly                  = true;
-        relaxSettings.diffuseMaxAccumulatedFrameNum      = 16;
+        relaxSettings.diffuseMaxAccumulatedFrameNum      = 10;
         relaxSettings.specularMaxAccumulatedFrameNum     = 12;
-        relaxSettings.diffuseMaxFastAccumulatedFrameNum  = 4;
+        relaxSettings.diffuseMaxFastAccumulatedFrameNum  = 2;
         relaxSettings.specularMaxFastAccumulatedFrameNum = 3;
-        relaxSettings.antilagSettings.accelerationAmount = 0.7f;
-        relaxSettings.antilagSettings.spatialSigmaScale  = 3.5f;
-        relaxSettings.antilagSettings.temporalSigmaScale = 0.35f;
-        relaxSettings.antilagSettings.resetAmount        = 0.8f;
+        relaxSettings.antilagSettings.accelerationAmount = 0.9f;
+        relaxSettings.antilagSettings.spatialSigmaScale  = 2.5f;
+        relaxSettings.antilagSettings.temporalSigmaScale = 0.22f;
+        relaxSettings.antilagSettings.resetAmount        = 1.0f;
         const nrd::Result settingsRes = nrd::SetDenoiserSettings(*instance, kDenoiserId, &relaxSettings);
         if (settingsRes != nrd::Result::SUCCESS) {
             WL_WARN_TAG("Renderer", "Direct NRD SetDenoiserSettings failed. Destroying instance.");
@@ -888,6 +890,7 @@ namespace Vlkrt
         m_InstanceHeight         = 0;
         m_LastPreparedDispatches = 0;
         m_DirectInstance         = nullptr;
+        m_HasLastAppliedParams   = false;
 
         m_Operational = false;
 
@@ -919,6 +922,7 @@ namespace Vlkrt
         m_InstanceWidth          = 0;
         m_InstanceHeight         = 0;
         m_LastPreparedDispatches = 0;
+        m_HasLastAppliedParams   = false;
     }
 
     void NRDDenoiser::SetEnabled(bool enabled)
@@ -952,6 +956,53 @@ namespace Vlkrt
             const uint16_t w = static_cast<uint16_t>(std::min<uint32_t>(params.Width, 65535u));
             const uint16_t h = static_cast<uint16_t>(std::min<uint32_t>(params.Height, 65535u));
 
+            const bool relaxTuningChanged
+                    = !m_HasLastAppliedParams
+                      || m_LastAppliedParams.MinMaterialForDiffuse != params.MinMaterialForDiffuse
+                      || m_LastAppliedParams.MinMaterialForSpecular != params.MinMaterialForSpecular
+                      || m_LastAppliedParams.DiffusePrepassBlurRadius != params.DiffusePrepassBlurRadius
+                      || m_LastAppliedParams.SpecularPrepassBlurRadius != params.SpecularPrepassBlurRadius
+                      || m_LastAppliedParams.DiffuseMaxAccumulatedFrameNum != params.DiffuseMaxAccumulatedFrameNum
+                      || m_LastAppliedParams.SpecularMaxAccumulatedFrameNum != params.SpecularMaxAccumulatedFrameNum
+                      || m_LastAppliedParams.DiffuseMaxFastAccumulatedFrameNum
+                                 != params.DiffuseMaxFastAccumulatedFrameNum
+                      || m_LastAppliedParams.SpecularMaxFastAccumulatedFrameNum
+                                 != params.SpecularMaxFastAccumulatedFrameNum
+                      || m_LastAppliedParams.AntilagAccelerationAmount != params.AntilagAccelerationAmount
+                      || m_LastAppliedParams.AntilagSpatialSigmaScale != params.AntilagSpatialSigmaScale
+                      || m_LastAppliedParams.AntilagTemporalSigmaScale != params.AntilagTemporalSigmaScale
+                      || m_LastAppliedParams.AntilagResetAmount != params.AntilagResetAmount;
+
+            if (relaxTuningChanged) {
+                nrd::RelaxSettings relaxSettings{};
+                relaxSettings.hitDistanceReconstructionMode      = nrd::HitDistanceReconstructionMode::AREA_3X3;
+                relaxSettings.minMaterialForDiffuse              = params.MinMaterialForDiffuse;
+                relaxSettings.minMaterialForSpecular             = params.MinMaterialForSpecular;
+                relaxSettings.diffusePrepassBlurRadius           = params.DiffusePrepassBlurRadius;
+                relaxSettings.specularPrepassBlurRadius          = params.SpecularPrepassBlurRadius;
+                relaxSettings.minHitDistanceWeight               = 0.02f;
+                relaxSettings.lobeAngleFraction                  = 0.15f;
+                relaxSettings.roughnessFraction                  = 0.15f;
+                relaxSettings.enableAntiFirefly                  = true;
+                relaxSettings.diffuseMaxAccumulatedFrameNum      = params.DiffuseMaxAccumulatedFrameNum;
+                relaxSettings.specularMaxAccumulatedFrameNum     = params.SpecularMaxAccumulatedFrameNum;
+                relaxSettings.diffuseMaxFastAccumulatedFrameNum  = params.DiffuseMaxFastAccumulatedFrameNum;
+                relaxSettings.specularMaxFastAccumulatedFrameNum = params.SpecularMaxFastAccumulatedFrameNum;
+                relaxSettings.antilagSettings.accelerationAmount = params.AntilagAccelerationAmount;
+                relaxSettings.antilagSettings.spatialSigmaScale  = params.AntilagSpatialSigmaScale;
+                relaxSettings.antilagSettings.temporalSigmaScale = params.AntilagTemporalSigmaScale;
+                relaxSettings.antilagSettings.resetAmount        = params.AntilagResetAmount;
+
+                const nrd::Result settingsRes = nrd::SetDenoiserSettings(*instance, kDenoiserId, &relaxSettings);
+                if (settingsRes != nrd::Result::SUCCESS) {
+                    WL_WARN_TAG("Renderer", "Direct NRD SetDenoiserSettings failed for runtime tuning update.");
+                }
+                else {
+                    m_LastAppliedParams    = params;
+                    m_HasLastAppliedParams = true;
+                }
+            }
+
             nrd::CommonSettings commonSettings{};
             if (params.HasValidMatrices) {
                 Copy16(commonSettings.viewToClipMatrix, params.ViewToClip);
@@ -966,22 +1017,23 @@ namespace Vlkrt
                 SetIdentity4x4(commonSettings.worldToViewMatrixPrev);
             }
 
-            commonSettings.resourceSize[0]                = w;
-            commonSettings.resourceSize[1]                = h;
-            commonSettings.resourceSizePrev[0]            = w;
-            commonSettings.resourceSizePrev[1]            = h;
-            commonSettings.rectSize[0]                    = w;
-            commonSettings.rectSize[1]                    = h;
-            commonSettings.rectSizePrev[0]                = w;
-            commonSettings.rectSizePrev[1]                = h;
-            commonSettings.cameraJitter[0]                = params.CameraJitter[0];
-            commonSettings.cameraJitter[1]                = params.CameraJitter[1];
-            commonSettings.cameraJitterPrev[0]            = params.CameraJitterPrev[0];
-            commonSettings.cameraJitterPrev[1]            = params.CameraJitterPrev[1];
-            commonSettings.frameIndex                     = params.FrameIndex;
-            commonSettings.denoisingRange                 = 500000.0f;
-            commonSettings.disocclusionThreshold          = 0.015f;
-            commonSettings.disocclusionThresholdAlternate = 0.06f;
+            commonSettings.resourceSize[0]     = w;
+            commonSettings.resourceSize[1]     = h;
+            commonSettings.resourceSizePrev[0] = w;
+            commonSettings.resourceSizePrev[1] = h;
+            commonSettings.rectSize[0]         = w;
+            commonSettings.rectSize[1]         = h;
+            commonSettings.rectSizePrev[0]     = w;
+            commonSettings.rectSizePrev[1]     = h;
+            commonSettings.cameraJitter[0]     = params.CameraJitter[0];
+            commonSettings.cameraJitter[1]     = params.CameraJitter[1];
+            commonSettings.cameraJitterPrev[0] = params.CameraJitterPrev[0];
+            commonSettings.cameraJitterPrev[1] = params.CameraJitterPrev[1];
+            commonSettings.frameIndex          = params.FrameIndex;
+            commonSettings.denoisingRange      = 500000.0f;
+            // Stricter disocclusion rejection helps shadow edges shed stale history faster.
+            commonSettings.disocclusionThreshold          = params.DisocclusionThreshold;
+            commonSettings.disocclusionThresholdAlternate = params.DisocclusionThresholdAlternate;
             commonSettings.accumulationMode
                     = (params.FrameIndex == 0) ? nrd::AccumulationMode::RESTART : nrd::AccumulationMode::CONTINUE;
 

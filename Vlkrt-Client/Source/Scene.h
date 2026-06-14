@@ -253,6 +253,21 @@ namespace Vlkrt
         bool AnisotropicBSDF{ true };
         bool EnableNRDDenoiser{ false };
         NRDGuideDebugViewMode NRDGuideDebugView{ NRDGuideDebugViewMode::FinalImage };
+        // Live RELAX tuning (applied at runtime without restart)
+        float NRDMinMaterialForDiffuse{ 0.0f };
+        float NRDMinMaterialForSpecular{ 0.0f };
+        float NRDDiffusePrepassBlurRadius{ 6.0f };
+        float NRDSpecularPrepassBlurRadius{ 10.0f };
+        uint32_t NRDDiffuseMaxAccumulatedFrameNum{ 10 };
+        uint32_t NRDSpecularMaxAccumulatedFrameNum{ 12 };
+        uint32_t NRDDiffuseMaxFastAccumulatedFrameNum{ 2 };
+        uint32_t NRDSpecularMaxFastAccumulatedFrameNum{ 3 };
+        float NRDAntilagAccelerationAmount{ 0.9f };
+        float NRDAntilagSpatialSigmaScale{ 2.5f };
+        float NRDAntilagTemporalSigmaScale{ 0.22f };
+        float NRDAntilagResetAmount{ 1.0f };
+        float NRDDisocclusionThreshold{ 0.010f };
+        float NRDDisocclusionThresholdAlternate{ 0.035f };
         bool EnableFSR{ false };
         uint32_t FSRQualityMode{ 1 };  // 1 = Quality
         float FSRSharpness{ 0.0f };
