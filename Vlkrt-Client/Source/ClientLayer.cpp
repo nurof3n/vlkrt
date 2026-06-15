@@ -218,6 +218,7 @@ namespace Vlkrt
                 // Rendering mode
                 const char* modeNames[] = { "Path Tracing", "Path Tracing Temporal" };
                 int rtMode              = (m_Scene.RaytracingType == RaytracingMode::PathTracingTemporal) ? 1 : 0;
+                ImGui::SetNextItemWidth(200.0f);
                 if (ImGui::Combo("Mode", &rtMode, modeNames, 2)) {
                     m_Scene.RaytracingType
                             = (rtMode == 1) ? RaytracingMode::PathTracingTemporal : RaytracingMode::PathTracing;
@@ -227,6 +228,7 @@ namespace Vlkrt
                 // Importance sampling
                 const char* isNames[] = { "Uniform", "Cosine", "BSDF" };
                 int isMode            = (int) m_Scene.ImportanceSampling;
+                ImGui::SetNextItemWidth(200.0f);
                 if (ImGui::Combo("Importance Sampling", &isMode, isNames, 3)) {
                     m_Scene.ImportanceSampling = (ImportanceSamplingMode) isMode;
                     m_Renderer.ResetAccumulation();
@@ -237,6 +239,7 @@ namespace Vlkrt
                 // Path tracing parameters
                 static constexpr int k_MaxRayDepth = 12;
                 int maxDepth                       = (int) m_Scene.MaxRecursionDepth;
+                ImGui::SetNextItemWidth(200.0f);
                 if (ImGui::SliderInt("Max Ray Depth", &maxDepth, 1, k_MaxRayDepth)) {
                     m_Scene.MaxRecursionDepth = (uint32_t) maxDepth;
                     uint32_t maxAllowedShadow = m_Scene.MaxRecursionDepth;
@@ -246,18 +249,21 @@ namespace Vlkrt
                 }
 
                 int maxShadowDepth = (int) m_Scene.MaxShadowRecursionDepth;
+                ImGui::SetNextItemWidth(200.0f);
                 if (ImGui::SliderInt("Max Shadow Depth", &maxShadowDepth, 1, (int) m_Scene.MaxRecursionDepth)) {
                     m_Scene.MaxShadowRecursionDepth = (uint32_t) maxShadowDepth;
                     m_Renderer.ResetAccumulation();
                 }
 
                 int sqrtSamples = (int) m_Scene.PathSqrtSamplesPerPixel;
+                ImGui::SetNextItemWidth(200.0f);
                 if (ImGui::SliderInt("Sqrt SPP", &sqrtSamples, 1, 8)) {
                     m_Scene.PathSqrtSamplesPerPixel = (uint32_t) sqrtSamples;
                     m_Renderer.ResetAccumulation();
                 }
 
                 int rrDepth = (int) m_Scene.RussianRouletteDepth;
+                ImGui::SetNextItemWidth(200.0f);
                 if (ImGui::SliderInt("Russian Roulette Depth", &rrDepth, 1, 16)) {
                     m_Scene.RussianRouletteDepth = (uint32_t) rrDepth;
                     m_Renderer.ResetAccumulation();
@@ -279,47 +285,62 @@ namespace Vlkrt
                             = { "Final Image", "Guide: Normal + Roughness", "Guide: ViewZ", "Guide: Motion Vectors",
                                   "Guide: Diffuse Radiance + HitDist", "Guide: Specular Radiance + HitDist" };
                     int nrdDebugViewMode = (int) m_Scene.NRDGuideDebugView;
+                    ImGui::SetNextItemWidth(200.0f);
                     if (ImGui::Combo("NRD Debug View", &nrdDebugViewMode, nrdDebugViewNames, 6)) {
                         m_Scene.NRDGuideDebugView = (NRDGuideDebugViewMode) nrdDebugViewMode;
                     }
 
                     if (ImGui::TreeNode("NRD Tuning")) {
+                        ImGui::SetNextItemWidth(200.0f);
                         ImGui::SliderFloat(
                                 "Min Material Diffuse", &m_Scene.NRDMinMaterialForDiffuse, 0.0f, 4.0f, "%.2f");
+                        ImGui::SetNextItemWidth(200.0f);
                         ImGui::SliderFloat(
                                 "Min Material Specular", &m_Scene.NRDMinMaterialForSpecular, 0.0f, 4.0f, "%.2f");
+                        ImGui::SetNextItemWidth(200.0f);
                         ImGui::SliderFloat(
                                 "Diffuse Prepass Radius", &m_Scene.NRDDiffusePrepassBlurRadius, 0.0f, 24.0f, "%.1f");
+                        ImGui::SetNextItemWidth(200.0f);
                         ImGui::SliderFloat(
                                 "Specular Prepass Radius", &m_Scene.NRDSpecularPrepassBlurRadius, 0.0f, 24.0f, "%.1f");
 
                         int diffHist = (int) m_Scene.NRDDiffuseMaxAccumulatedFrameNum;
+                        ImGui::SetNextItemWidth(200.0f);
                         if (ImGui::SliderInt("Diffuse Max History", &diffHist, 1, 64)) {
                             m_Scene.NRDDiffuseMaxAccumulatedFrameNum = (uint32_t) diffHist;
                         }
                         int specHist = (int) m_Scene.NRDSpecularMaxAccumulatedFrameNum;
+                        ImGui::SetNextItemWidth(200.0f);
                         if (ImGui::SliderInt("Specular Max History", &specHist, 1, 64)) {
                             m_Scene.NRDSpecularMaxAccumulatedFrameNum = (uint32_t) specHist;
                         }
                         int diffFastHist = (int) m_Scene.NRDDiffuseMaxFastAccumulatedFrameNum;
+                        ImGui::SetNextItemWidth(200.0f);
                         if (ImGui::SliderInt("Diffuse Fast History", &diffFastHist, 1, 16)) {
                             m_Scene.NRDDiffuseMaxFastAccumulatedFrameNum = (uint32_t) diffFastHist;
                         }
                         int specFastHist = (int) m_Scene.NRDSpecularMaxFastAccumulatedFrameNum;
+                        ImGui::SetNextItemWidth(200.0f);
                         if (ImGui::SliderInt("Specular Fast History", &specFastHist, 1, 16)) {
                             m_Scene.NRDSpecularMaxFastAccumulatedFrameNum = (uint32_t) specFastHist;
                         }
 
+                        ImGui::SetNextItemWidth(200.0f);
                         ImGui::SliderFloat(
                                 "Antilag Acceleration", &m_Scene.NRDAntilagAccelerationAmount, 0.0f, 1.0f, "%.2f");
+                        ImGui::SetNextItemWidth(200.0f);
                         ImGui::SliderFloat(
                                 "Antilag Spatial Sigma", &m_Scene.NRDAntilagSpatialSigmaScale, 0.1f, 8.0f, "%.2f");
+                        ImGui::SetNextItemWidth(200.0f);
                         ImGui::SliderFloat(
                                 "Antilag Temporal Sigma", &m_Scene.NRDAntilagTemporalSigmaScale, 0.05f, 2.0f, "%.2f");
+                        ImGui::SetNextItemWidth(200.0f);
                         ImGui::SliderFloat("Antilag Reset", &m_Scene.NRDAntilagResetAmount, 0.0f, 1.0f, "%.2f");
 
+                        ImGui::SetNextItemWidth(200.0f);
                         ImGui::SliderFloat(
                                 "Disocclusion Threshold", &m_Scene.NRDDisocclusionThreshold, 0.001f, 0.050f, "%.3f");
+                        ImGui::SetNextItemWidth(200.0f);
                         ImGui::SliderFloat("Disocclusion Threshold Alt", &m_Scene.NRDDisocclusionThresholdAlternate,
                                 0.005f, 0.150f, "%.3f");
 
@@ -338,12 +359,14 @@ namespace Vlkrt
                     const char* fsrQualityNames[] = { "Native AA (1.0x)", "Quality (1.5x)", "Balanced (1.7x)",
                         "Performance (2.0x)", "Ultra Performance (3.0x)" };
                     int fsrQuality                = (int) m_Scene.FSRQualityMode;
+                    ImGui::SetNextItemWidth(200.0f);
                     if (ImGui::Combo("FSR Quality Mode", &fsrQuality, fsrQualityNames, 5)) {
                         m_Scene.FSRQualityMode = (uint32_t) fsrQuality;
                         m_Renderer.ResetAccumulation();
                     }
 
                     float fsrSharpness = m_Scene.FSRSharpness;
+                    ImGui::SetNextItemWidth(200.0f);
                     if (ImGui::SliderFloat("FSR Sharpness", &fsrSharpness, 0.0f, 1.0f)) {
                         m_Scene.FSRSharpness = fsrSharpness;
                         m_Renderer.ResetAccumulation();
@@ -358,11 +381,13 @@ namespace Vlkrt
                 if (m_Scene.SceneIndex == SceneFactory::SCENE_DEMO) {
                     ImGui::Separator();
                     ImGui::Text("Background");
+                    ImGui::SetNextItemWidth(200.0f);
                     if (ImGui::ColorEdit3("Color##bg", &m_Scene.BackgroundColor.x)) m_Renderer.ResetAccumulation();
                     ImGui::Separator();
                 }
                 else if (m_Scene.SceneIndex != SceneFactory::SCENE_PBR_SHOWCASE) {
                     // Generic background color for other scenes (e.g. Cornell Box / YAML)
+                    ImGui::SetNextItemWidth(200.0f);
                     if (ImGui::ColorEdit3("Background", &m_Scene.BackgroundColor.x)) m_Renderer.ResetAccumulation();
                     ImGui::Separator();
                 }
@@ -630,6 +655,7 @@ namespace Vlkrt
     {
         // Position drag controls
         glm::vec3 pos = localTransform.Position;
+        ImGui::SetNextItemWidth(200.0f);
         if (ImGui::DragFloat3(("Position##" + id).c_str(), &pos.x, 0.1f, -100.0f, 100.0f)) {
             localTransform.Position = pos;
         }
@@ -637,6 +663,7 @@ namespace Vlkrt
         // Rotation - display as direction for intuitive control
         glm::vec3 direction = glm::normalize(
                 glm::vec3(glm::mat4_cast(localTransform.Rotation) * glm::vec4(0.0f, 0.0f, -1.0f, 0.0f)));
+        ImGui::SetNextItemWidth(200.0f);
         if (ImGui::DragFloat3(("Direction##" + id).c_str(), &direction.x, 0.01f, -1.0f, 1.0f)) {
             direction                  = glm::normalize(direction);
             glm::vec3 defaultDirection = glm::vec3(0.0f, 0.0f, -1.0f);
@@ -657,6 +684,7 @@ namespace Vlkrt
 
         // Scale drag controls
         glm::vec3 scale = localTransform.Scale;
+        ImGui::SetNextItemWidth(200.0f);
         if (ImGui::DragFloat3(("Scale##" + id).c_str(), &scale.x, 0.1f, 0.01f, 100.0f)) {
             localTransform.Scale = scale;
         }
@@ -686,6 +714,7 @@ namespace Vlkrt
 
                 // Size for square lights
                 if (entity.LightData.Type == LightType::Square) {
+                    ImGui::SetNextItemWidth(200.0f);
                     if (ImGui::DragFloat(("Size##" + idStr).c_str(), &entity.LightData.Size, 0.05f, 0.01f, 50.0f))
                         m_Renderer.ResetAccumulation();
                 }
@@ -695,6 +724,7 @@ namespace Vlkrt
             case EntityType::Mesh: {
                 // Material index
                 int matIdx = entity.MeshData.MaterialIndex;
+                ImGui::SetNextItemWidth(200.0f);
                 if (ImGui::DragInt(("Material Index##" + idStr).c_str(), &matIdx, 1.0f, 0,
                             (int) m_Scene.Materials.size() - 1)) {
                     entity.MeshData.MaterialIndex = matIdx;
@@ -708,20 +738,57 @@ namespace Vlkrt
                     ImGui::Text("Material: %s", mat.Name.c_str());
 
                     // Disney BSDF properties
+                    ImGui::SetNextItemWidth(200.0f);
                     if (ImGui::ColorEdit3(("Albedo##" + idStr).c_str(), glm::value_ptr(mat.Albedo)))
                         m_Renderer.ResetAccumulation();
+                    ImGui::SetNextItemWidth(200.0f);
+                    if (ImGui::ColorEdit3(("Emission##" + idStr).c_str(), glm::value_ptr(mat.Emission)))
+                        m_Renderer.ResetAccumulation();
+                    ImGui::SetNextItemWidth(200.0f);
+                    if (ImGui::ColorEdit3(("Extinction##" + idStr).c_str(), glm::value_ptr(mat.Extinction)))
+                        m_Renderer.ResetAccumulation();
+                    ImGui::SetNextItemWidth(200.0f);
                     if (ImGui::SliderFloat(("Roughness##" + idStr).c_str(), &mat.Roughness, 0.0f, 1.0f))
                         m_Renderer.ResetAccumulation();
+                    ImGui::SetNextItemWidth(200.0f);
                     if (ImGui::SliderFloat(("Metallic##" + idStr).c_str(), &mat.Metallic, 0.0f, 1.0f))
                         m_Renderer.ResetAccumulation();
+                    ImGui::SetNextItemWidth(200.0f);
+                    if (ImGui::SliderFloat(("Subsurface##" + idStr).c_str(), &mat.Subsurface, 0.0f, 1.0f))
+                        m_Renderer.ResetAccumulation();
+                    ImGui::SetNextItemWidth(200.0f);
+                    if (ImGui::SliderFloat(("Anisotropic##" + idStr).c_str(), &mat.Anisotropic, 0.0f, 1.0f))
+                        m_Renderer.ResetAccumulation();
+                    ImGui::SetNextItemWidth(200.0f);
+                    if (ImGui::SliderFloat(("Sheen##" + idStr).c_str(), &mat.Sheen, 0.0f, 1.0f))
+                        m_Renderer.ResetAccumulation();
+                    ImGui::SetNextItemWidth(200.0f);
+                    if (ImGui::SliderFloat(("Sheen Tint##" + idStr).c_str(), &mat.SheenTint, 0.0f, 1.0f))
+                        m_Renderer.ResetAccumulation();
+                    ImGui::SetNextItemWidth(200.0f);
+                    if (ImGui::SliderFloat(("Specular Tint##" + idStr).c_str(), &mat.SpecularTint, 0.0f, 1.0f))
+                        m_Renderer.ResetAccumulation();
+                    ImGui::SetNextItemWidth(200.0f);
                     if (ImGui::SliderFloat(("Spec. Trans.##" + idStr).c_str(), &mat.SpecularTransmission, 0.0f, 1.0f))
                         m_Renderer.ResetAccumulation();
+                    ImGui::SetNextItemWidth(200.0f);
                     if (ImGui::SliderFloat(("Clearcoat##" + idStr).c_str(), &mat.Clearcoat, 0.0f, 1.0f))
                         m_Renderer.ResetAccumulation();
+                    ImGui::SetNextItemWidth(200.0f);
+                    if (ImGui::SliderFloat(("Clearcoat Gloss##" + idStr).c_str(), &mat.ClearcoatGloss, 0.0f, 1.0f))
+                        m_Renderer.ResetAccumulation();
+                    ImGui::SetNextItemWidth(200.0f);
                     if (ImGui::SliderFloat(("Eta##" + idStr).c_str(), &mat.Eta, 1.0f, 3.0f))
+                        m_Renderer.ResetAccumulation();
+                    ImGui::SetNextItemWidth(200.0f);
+                    if (ImGui::SliderFloat(("At Distance##" + idStr).c_str(), &mat.AtDistance, 0.01f, 10.0f))
+                        m_Renderer.ResetAccumulation();
+                    ImGui::SetNextItemWidth(200.0f);
+                    if (ImGui::SliderFloat(("Step Scale##" + idStr).c_str(), &mat.StepScale, 0.01f, 2.0f))
                         m_Renderer.ResetAccumulation();
 
                     // Tiling factor
+                    ImGui::SetNextItemWidth(200.0f);
                     if (ImGui::DragFloat(("Tiling##" + idStr).c_str(), &mat.Tiling, 0.1f, 0.01f, 100.0f))
                         m_Renderer.ResetAccumulation();
 
@@ -775,6 +842,7 @@ namespace Vlkrt
 
             case EntityType::Procedural: {
                 int matIdx = entity.ProceduralData.MaterialIndex;
+                ImGui::SetNextItemWidth(200.0f);
                 if (ImGui::DragInt(("Material Index##" + idStr).c_str(), &matIdx, 1.0f, 0,
                             (int) m_Scene.Materials.size() - 1)) {
                     entity.ProceduralData.MaterialIndex = matIdx;
@@ -787,17 +855,53 @@ namespace Vlkrt
                     ImGui::Separator();
                     ImGui::Text("Material: %s", mat.Name.c_str());
 
+                    ImGui::SetNextItemWidth(200.0f);
                     if (ImGui::ColorEdit3(("Albedo##" + idStr).c_str(), glm::value_ptr(mat.Albedo)))
                         m_Renderer.ResetAccumulation();
+                    ImGui::SetNextItemWidth(200.0f);
+                    if (ImGui::ColorEdit3(("Emission##" + idStr).c_str(), glm::value_ptr(mat.Emission)))
+                        m_Renderer.ResetAccumulation();
+                    ImGui::SetNextItemWidth(200.0f);
+                    if (ImGui::ColorEdit3(("Extinction##" + idStr).c_str(), glm::value_ptr(mat.Extinction)))
+                        m_Renderer.ResetAccumulation();
+                    ImGui::SetNextItemWidth(200.0f);
                     if (ImGui::SliderFloat(("Roughness##" + idStr).c_str(), &mat.Roughness, 0.0f, 1.0f))
                         m_Renderer.ResetAccumulation();
+                    ImGui::SetNextItemWidth(200.0f);
                     if (ImGui::SliderFloat(("Metallic##" + idStr).c_str(), &mat.Metallic, 0.0f, 1.0f))
                         m_Renderer.ResetAccumulation();
+                    ImGui::SetNextItemWidth(200.0f);
+                    if (ImGui::SliderFloat(("Subsurface##" + idStr).c_str(), &mat.Subsurface, 0.0f, 1.0f))
+                        m_Renderer.ResetAccumulation();
+                    ImGui::SetNextItemWidth(200.0f);
+                    if (ImGui::SliderFloat(("Anisotropic##" + idStr).c_str(), &mat.Anisotropic, 0.0f, 1.0f))
+                        m_Renderer.ResetAccumulation();
+                    ImGui::SetNextItemWidth(200.0f);
+                    if (ImGui::SliderFloat(("Sheen##" + idStr).c_str(), &mat.Sheen, 0.0f, 1.0f))
+                        m_Renderer.ResetAccumulation();
+                    ImGui::SetNextItemWidth(200.0f);
+                    if (ImGui::SliderFloat(("Sheen Tint##" + idStr).c_str(), &mat.SheenTint, 0.0f, 1.0f))
+                        m_Renderer.ResetAccumulation();
+                    ImGui::SetNextItemWidth(200.0f);
+                    if (ImGui::SliderFloat(("Specular Tint##" + idStr).c_str(), &mat.SpecularTint, 0.0f, 1.0f))
+                        m_Renderer.ResetAccumulation();
+                    ImGui::SetNextItemWidth(200.0f);
                     if (ImGui::SliderFloat(("Spec. Trans.##" + idStr).c_str(), &mat.SpecularTransmission, 0.0f, 1.0f))
                         m_Renderer.ResetAccumulation();
+                    ImGui::SetNextItemWidth(200.0f);
                     if (ImGui::SliderFloat(("Clearcoat##" + idStr).c_str(), &mat.Clearcoat, 0.0f, 1.0f))
                         m_Renderer.ResetAccumulation();
+                    ImGui::SetNextItemWidth(200.0f);
+                    if (ImGui::SliderFloat(("Clearcoat Gloss##" + idStr).c_str(), &mat.ClearcoatGloss, 0.0f, 1.0f))
+                        m_Renderer.ResetAccumulation();
+                    ImGui::SetNextItemWidth(200.0f);
                     if (ImGui::SliderFloat(("Eta##" + idStr).c_str(), &mat.Eta, 1.0f, 3.0f))
+                        m_Renderer.ResetAccumulation();
+                    ImGui::SetNextItemWidth(200.0f);
+                    if (ImGui::SliderFloat(("At Distance##" + idStr).c_str(), &mat.AtDistance, 0.01f, 10.0f))
+                        m_Renderer.ResetAccumulation();
+                    ImGui::SetNextItemWidth(200.0f);
+                    if (ImGui::SliderFloat(("Step Scale##" + idStr).c_str(), &mat.StepScale, 0.01f, 2.0f))
                         m_Renderer.ResetAccumulation();
                 }
 
@@ -805,6 +909,7 @@ namespace Vlkrt
                     m_Renderer.ResetAccumulation();
 
                 int primitiveType = (int) entity.ProceduralData.PrimitiveType;
+                ImGui::SetNextItemWidth(200.0f);
                 if (ImGui::DragInt(("Primitive Type##" + idStr).c_str(), &primitiveType, 1.0f, 0, 8)) {
                     entity.ProceduralData.PrimitiveType = (uint32_t) primitiveType;
                     m_Renderer.ResetAccumulation();
