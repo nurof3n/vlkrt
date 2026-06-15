@@ -8,8 +8,10 @@ import sdf;
 
 [shader("intersection")]
 void SdfIntersectionMain() {
-    AABBTransform t = g_aabbTransforms[g_shaderRecord.instanceIndex];
-    AABBTransform tPrev = g_aabbTransformsPrev[g_shaderRecord.instanceIndex];
+    uint instanceIdx = g_shaderRecord.GetInstanceIndex();
+    uint primType = g_shaderRecord.GetPrimitiveType();
+    AABBTransform t = g_aabbTransforms[instanceIdx];
+    AABBTransform tPrev = g_aabbTransformsPrev[instanceIdx];
 
     // Transform ray to primitive local space
     Ray localRay;
@@ -22,11 +24,11 @@ void SdfIntersectionMain() {
     float  localDirLen = max(length(localDirRaw), 1e-8f);
     localRay.direction = localDirRaw / localDirLen;
 
-    float stepScale = g_aabbMaterials[g_shaderRecord.instanceIndex].stepScale;
+    float stepScale = g_aabbMaterials[instanceIdx].stepScale;
 
     float  thit;
     float3 localNormal;
-    if (!RaySDFTest(localRay, g_shaderRecord.primitiveType, stepScale,
+    if (!RaySDFTest(localRay, primType, stepScale,
                     thit, localNormal))
         return;
 

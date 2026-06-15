@@ -163,12 +163,12 @@ namespace Vlkrt
         createOrResizeImage(m_AccumImage, m_RenderWidth, m_RenderHeight, Walnut::ImageFormat::RGBA32F);
 
         createOrResizeImage(m_GuideNormalRoughness, m_RenderWidth, m_RenderHeight, Walnut::ImageFormat::RGBA32F);
-        createOrResizeImage(m_GuideViewZ, m_RenderWidth, m_RenderHeight, Walnut::ImageFormat::RGBA32F);
-        createOrResizeImage(m_GuideMotionVectors, m_RenderWidth, m_RenderHeight, Walnut::ImageFormat::RGBA32F);
+        createOrResizeImage(m_GuideViewZ, m_RenderWidth, m_RenderHeight, Walnut::ImageFormat::RGBA16F);
+        createOrResizeImage(m_GuideMotionVectors, m_RenderWidth, m_RenderHeight, Walnut::ImageFormat::RGBA16F);
         createOrResizeImage(m_GuideDiffRadianceHitDist, m_RenderWidth, m_RenderHeight, Walnut::ImageFormat::RGBA32F);
         createOrResizeImage(m_GuideSpecRadianceHitDist, m_RenderWidth, m_RenderHeight, Walnut::ImageFormat::RGBA32F);
-        createOrResizeImage(m_GuideEmission, m_RenderWidth, m_RenderHeight, Walnut::ImageFormat::RGBA32F);
-        createOrResizeImage(m_GuideDepth, m_RenderWidth, m_RenderHeight, Walnut::ImageFormat::RGBA32F);
+        createOrResizeImage(m_GuideEmission, m_RenderWidth, m_RenderHeight, Walnut::ImageFormat::RGBA16F);
+        createOrResizeImage(m_GuideDepth, m_RenderWidth, m_RenderHeight, Walnut::ImageFormat::R32F);
 
         if (m_FSREnabled) {
             createOrResizeImage(m_FinalImageUpscaled, m_DisplayWidth, m_DisplayHeight, Walnut::ImageFormat::RGBA);
@@ -286,6 +286,7 @@ namespace Vlkrt
         m_FirstFrame       = true;
         m_AccumFirstFrame  = true;
         m_GuidesFirstFrame = true;
+        m_GuidesInReadOnly = false;
     }
 
     void Renderer::Render(const Scene& scene, const Camera& camera)
@@ -306,13 +307,11 @@ namespace Vlkrt
 
         // Rebuild pipeline and SBT if required
         uint32_t proceduralCount = (uint32_t) scene.ProceduralEntities.size();
-        if (m_RTPipeline == VK_NULL_HANDLE || proceduralCount != m_LastProceduralCount
-                || scene.MaxRecursionDepth != m_LastMaxRecursionDepth) {
+        if (m_RTPipeline == VK_NULL_HANDLE || proceduralCount != m_LastProceduralCount) {
             DestroyPipelineObjects();
             CreateRayTracingPipeline();
             CreateShaderBindingTable(scene);
-            m_LastProceduralCount   = proceduralCount;
-            m_LastMaxRecursionDepth = scene.MaxRecursionDepth;
+            m_LastProceduralCount = proceduralCount;
         }
 
         // Recalculate current scene metrics if scene is invalidated
@@ -481,7 +480,7 @@ namespace Vlkrt
                 m_GuideDiffRadianceHitDist,
                 m_GuideSpecRadianceHitDist,
                 m_GuideEmission,
-                m_GuideDepth,
+                m_FSREnabled ? m_GuideDepth : nullptr,
             };
 
             VkImageMemoryBarrier barriers[7]{};
@@ -492,9 +491,12 @@ namespace Vlkrt
                 VkImageMemoryBarrier& b = barriers[barrierCount++];
                 b                       = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
                 b.image                 = guideImage->GetVkImage();
-                b.oldLayout = m_GuidesFirstFrame ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                b.oldLayout = m_GuidesFirstFrame ? VK_IMAGE_LAYOUT_UNDEFINED
+                                                 : (m_GuidesInReadOnly ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                                                                       : VK_IMAGE_LAYOUT_GENERAL);
                 b.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-                b.srcAccessMask                   = m_GuidesFirstFrame ? 0 : VK_ACCESS_SHADER_READ_BIT;
+                b.srcAccessMask = m_GuidesFirstFrame ? 0 : (m_GuidesInReadOnly ? VK_ACCESS_SHADER_READ_BIT
+                                                                                 : VK_ACCESS_SHADER_WRITE_BIT);
                 b.dstAccessMask                   = VK_ACCESS_SHADER_WRITE_BIT;
                 b.srcQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
                 b.dstQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
@@ -508,14 +510,17 @@ namespace Vlkrt
             if (barrierCount > 0) {
                 // On the very first frame only TOP_OF_PIPE is needed (no prior writes)
                 VkPipelineStageFlags srcStage = m_GuidesFirstFrame ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT
-                                                                   : (VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR
-                                                                             | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
-                                                                             | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+                                                                   : (m_GuidesInReadOnly
+                                                                                     ? (VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR
+                                                                                               | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+                                                                                               | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT)
+                                                                                     : VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR);
                 vkCmdPipelineBarrier(cmd, srcStage, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr, 0,
                         nullptr, barrierCount, barriers);
             }
 
             m_GuidesFirstFrame = false;
+            m_GuidesInReadOnly = false;
         }
 
         // Bind pipeline and descriptor set
@@ -528,6 +533,20 @@ namespace Vlkrt
         VkStridedDeviceAddressRegionKHR activeRaygen = m_RaygenRegion;
         activeRaygen.deviceAddress += raygenIdx * m_RaygenRegion.stride;
         activeRaygen.size = m_RaygenRegion.stride;
+
+        // Push constants: hot scene parameters
+        struct PushConstantsData {
+            uint32_t numLights;
+            uint32_t onlyOneLightSample;
+            uint32_t russianRouletteDepth;
+            uint32_t sceneIndex;
+        } pc{};
+        pc.numLights              = static_cast<uint32_t>(scene.Lights.size());
+        pc.onlyOneLightSample     = scene.OnlyOneLightSample ? 1u : 0u;
+        pc.russianRouletteDepth   = scene.RussianRouletteDepth;
+        pc.sceneIndex             = static_cast<uint32_t>(scene.SceneIndex);
+
+        vkCmdPushConstants(cmd, m_RTPipelineLayout, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_INTERSECTION_BIT_KHR, 0, sizeof(pc), &pc);
 
         const auto rtRecordStart = Clock::now();
         pvkCmdTraceRaysKHR(cmd, &activeRaygen, &m_MissRegion, &m_HitRegion, &m_CallableRegion, m_FinalImage->GetWidth(),
@@ -588,7 +607,7 @@ namespace Vlkrt
             const auto nrdRecordStart = Clock::now();
             m_NRDDenoiser.Dispatch(cmd, m_FinalImage, denoiseParams);
 
-            if (m_NRDDenoiser.IsOperational() && m_ComposeDenoisedPipeline != VK_NULL_HANDLE) {
+            if (m_ComposeDenoisedPipeline != VK_NULL_HANDLE) {
                 // Ensure NRD compute dispatches finish before our custom Compose compute shader runs
                 VkMemoryBarrier composeBarrier = { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
                 composeBarrier.srcAccessMask   = VK_ACCESS_SHADER_WRITE_BIT;
@@ -671,43 +690,38 @@ namespace Vlkrt
             }
         }
 
-        // Transition guide images for ImGui debug sampling
-        {
-            std::shared_ptr<Walnut::Image> guideImages[] = {
-                m_GuideNormalRoughness,
-                m_GuideViewZ,
-                m_GuideMotionVectors,
-                m_GuideDiffRadianceHitDist,
-                m_GuideSpecRadianceHitDist,
-                m_GuideEmission,
-                m_GuideDepth,
-            };
-
-            VkImageMemoryBarrier barriers[7]{};
-            uint32_t barrierCount = 0;
-            for (const auto& guideImage : guideImages) {
-                if (!guideImage) continue;
-
-                VkImageMemoryBarrier& b           = barriers[barrierCount++];
-                b                                 = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
-                b.image                           = guideImage->GetVkImage();
-                b.oldLayout                       = VK_IMAGE_LAYOUT_GENERAL;
-                b.newLayout                       = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-                b.srcAccessMask                   = VK_ACCESS_SHADER_WRITE_BIT;
-                b.dstAccessMask                   = VK_ACCESS_SHADER_READ_BIT;
-                b.srcQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
-                b.dstQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
-                b.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
-                b.subresourceRange.baseMipLevel   = 0;
-                b.subresourceRange.levelCount     = 1;
-                b.subresourceRange.baseArrayLayer = 0;
-                b.subresourceRange.layerCount     = 1;
+        // Transition only the active debug guide for ImGui sampling.
+        // In FinalImage mode, skip guide readback transitions entirely.
+        if (scene.NRDGuideDebugView != NRDGuideDebugViewMode::FinalImage) {
+            std::shared_ptr<Walnut::Image> debugGuide;
+            switch (scene.NRDGuideDebugView) {
+                case NRDGuideDebugViewMode::NormalRoughness: debugGuide = m_GuideNormalRoughness; break;
+                case NRDGuideDebugViewMode::ViewZ: debugGuide = m_GuideViewZ; break;
+                case NRDGuideDebugViewMode::MotionVectors: debugGuide = m_GuideMotionVectors; break;
+                case NRDGuideDebugViewMode::DiffRadianceHitDist: debugGuide = m_GuideDiffRadianceHitDist; break;
+                case NRDGuideDebugViewMode::SpecRadianceHitDist: debugGuide = m_GuideSpecRadianceHitDist; break;
+                default: break;
             }
 
-            if (barrierCount > 0) {
+            if (debugGuide) {
+                VkImageMemoryBarrier barrier            = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+                barrier.image                           = debugGuide->GetVkImage();
+                barrier.oldLayout                       = VK_IMAGE_LAYOUT_GENERAL;
+                barrier.newLayout                       = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                barrier.srcAccessMask                   = VK_ACCESS_SHADER_WRITE_BIT;
+                barrier.dstAccessMask                   = VK_ACCESS_SHADER_READ_BIT;
+                barrier.srcQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+                barrier.dstQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+                barrier.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+                barrier.subresourceRange.baseMipLevel   = 0;
+                barrier.subresourceRange.levelCount     = 1;
+                barrier.subresourceRange.baseArrayLayer = 0;
+                barrier.subresourceRange.layerCount     = 1;
+
                 vkCmdPipelineBarrier(cmd,
                         VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, barrierCount, barriers);
+                        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+                m_GuidesInReadOnly = true;
             }
         }
 
@@ -845,6 +859,8 @@ namespace Vlkrt
         ubo.cameraForward[1]     = camDir.y;
         ubo.cameraForward[2]     = camDir.z;
         ubo.nrdDebugViewMode     = (uint32_t) scene.NRDGuideDebugView;
+        ubo._pad[0]              = scene.EnableNRDDenoiser ? 1.0f : 0.0f;
+        ubo._pad[1]              = m_FSREnabled ? 1.0f : 0.0f;
 
         void* data;
         vkMapMemory(m_Device, m_SceneUBOMemory, 0, sizeof(SceneUBOData), 0, &data);
@@ -920,7 +936,17 @@ namespace Vlkrt
         VkPipelineLayoutCreateInfo layoutCI = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
         layoutCI.setLayoutCount             = 1;
         layoutCI.pSetLayouts                = &m_DescriptorSetLayout;
-        layoutCI.pushConstantRangeCount     = 0;
+        
+        // Push constants: 16 bytes for hot scene parameters
+        VkPushConstantRange pcRange{};
+        pcRange.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | 
+                             VK_SHADER_STAGE_ANY_HIT_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | 
+                             VK_SHADER_STAGE_INTERSECTION_BIT_KHR;
+        pcRange.offset     = 0;
+        pcRange.size       = 16;  // sizeof(numLights + onlyOneLightSample + russianRouletteDepth + sceneIndex)
+        
+        layoutCI.pushConstantRangeCount = 1;
+        layoutCI.pPushConstantRanges    = &pcRange;
         vkCreatePipelineLayout(m_Device, &layoutCI, nullptr, &m_RTPipelineLayout);
 
         // Reuse the same layout for compute
@@ -952,9 +978,9 @@ namespace Vlkrt
             pci.pStages                           = stages;
             pci.groupCount                        = totalGroups;
             pci.pGroups                           = grps.data();
-            pci.maxPipelineRayRecursionDepth = std::min(m_ActiveScene ? (m_ActiveScene->MaxRecursionDepth + 2u)
-                                                                      : m_RTPipelineProperties.maxRayRecursionDepth,
-                    16u);
+            // Keep pipeline recursion fixed to device capability to avoid pipeline+SBT rebuilds
+            // when users tweak the global recursion setting from UI.
+            pci.maxPipelineRayRecursionDepth = std::min(m_RTPipelineProperties.maxRayRecursionDepth, 16u);
             pci.layout            = m_RTPipelineLayout;
             pci.pLibraryInterface = &interfaceConfig;
             return pvkCreateRayTracingPipelinesKHR(
@@ -1012,11 +1038,11 @@ namespace Vlkrt
 
         // All entries in a region share one stride.
         // Raygen/Miss: no record data → stride = alignUp(handleSize, handleAlignment)
-        // Hit: AABB groups have 8-byte records (instanceIndex + primitiveType)
-        //      → stride = alignUp(handleSize + 8, handleAlignment)
+        // Hit: AABB groups have 4-byte packed records (instanceIndex<<4 | primitiveType)
+        //      → stride = alignUp(handleSize + 4, handleAlignment)
         const uint32_t raygenStride = alignUp(handleSize, handleAlignment);
         const uint32_t missStride   = alignUp(handleSize, handleAlignment);
-        const uint32_t hitStride    = alignUp(handleSize + 8u, handleAlignment);
+        const uint32_t hitStride    = alignUp(handleSize + 4u, handleAlignment);
 
         // Region sizes must be multiples of baseAlignment
         const uint32_t raygenRegionSize = alignUp(2u * raygenStride, baseAlignment);
@@ -1063,22 +1089,17 @@ namespace Vlkrt
         // Triangle hit groups (entries 0 and 1, groups 4 and 5) — no record data
         memcpy(pHit + 0 * hitStride, handle(4), handleSize);
         memcpy(pHit + 1 * hitStride, handle(5), handleSize);
-        // AABB hit groups — per-entry record: {instanceIndex, primitiveType}
-        struct SBTRecord
-        {
-            uint32_t instanceIndex;
-            uint32_t primitiveType;
-        };
+        // AABB hit groups — per-entry record: packed uint32_t (instanceIndex<<4 | primitiveType)
         for (uint32_t i = 0; i < N; ++i) {
-            SBTRecord rec{ i, scene.ProceduralEntities[i].PrimitiveType };
+            uint32_t packed = (i << 4u) | (scene.ProceduralEntities[i].PrimitiveType & 0xFu);
             // Radiance group (entry 2 + i*2)
             uint8_t* pRadiance = pHit + (2u + i * 2u) * hitStride;
             memcpy(pRadiance, handle(6u + i * 2u), handleSize);
-            memcpy(pRadiance + handleSize, &rec, sizeof(rec));
+            memcpy(pRadiance + handleSize, &packed, sizeof(packed));
             // Shadow group (entry 3 + i*2)
             uint8_t* pShadow = pHit + (3u + i * 2u) * hitStride;
             memcpy(pShadow, handle(6u + i * 2u + 1u), handleSize);
-            memcpy(pShadow + handleSize, &rec, sizeof(rec));
+            memcpy(pShadow + handleSize, &packed, sizeof(packed));
         }
 
         VkMappedMemoryRange range = { VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE };

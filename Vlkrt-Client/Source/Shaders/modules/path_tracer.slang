@@ -6,6 +6,9 @@ import common;
 import bsdf;
 import disney_bsdf;
 
+// Push constants: hot scene parameters (16B)
+[[vk::push_constant]] PushConstants pc;
+
 // ------------------------------------------------------------------ //
 // Light sampling structures
 // ------------------------------------------------------------------ //
@@ -212,18 +215,18 @@ float3 DoPathTracing(inout RayPayload payload,
     // ---- Direct lighting (NEE + MIS) ----
     if (true) {
         if (payload.recursionDepth == 0u) {
-            if (g_scene.onlyOneLightSample != 0u) {
-                uint idx = uint(Random(payload.rngState) * float(g_scene.numLights));
+            if (pc.onlyOneLightSample != 0u) {
+                uint idx = uint(Random(payload.rngState) * float(pc.numLights));
                 float3 d, s;
                 MIS_DirectLight_Split(payload.rngState, payload.recursionDepth,
                                       mat, eta, aniso, hitPos, g_lights[idx], normalSide, wo,
                                       d, s, directHitDist);
-                directDiffuse += d * float(g_scene.numLights);
-                directSpecular += s * float(g_scene.numLights);
+                directDiffuse += d * float(pc.numLights);
+                directSpecular += s * float(pc.numLights);
             } else {
                 float directHitDistSum = 0.0f;
                 float directHitWeightSum = 0.0f;
-                for (uint i = 0u; i < g_scene.numLights; i++) {
+                for (uint i = 0u; i < pc.numLights; i++) {
                     float3 d, s;
                     float dhd = 0.0f;
                     MIS_DirectLight_Split(payload.rngState, payload.recursionDepth,
@@ -244,16 +247,15 @@ float3 DoPathTracing(inout RayPayload payload,
             payload.diffuse += throughput * directDiffuse;
             payload.specular += throughput * directSpecular;
             color += throughput * (directDiffuse + directSpecular);
-        } else {
-            // For secondary bounces, use the original fast direct lighting (keeps performance high)
-            if (g_scene.onlyOneLightSample != 0u) {
-                uint idx = uint(Random(payload.rngState) * float(g_scene.numLights));
+        } else if (payload.recursionDepth <= 2u && pc.numLights > 0u) {
+            if (pc.onlyOneLightSample != 0u) {
+                uint idx = uint(Random(payload.rngState) * float(pc.numLights));
                 color += throughput *
                          MIS_DirectLight(payload.rngState, payload.recursionDepth,
                                          mat, eta, aniso, hitPos, g_lights[idx], normalSide, wo) *
-                         float(g_scene.numLights);
+                         float(pc.numLights);
             } else {
-                for (uint i = 0u; i < g_scene.numLights; i++) {
+                for (uint i = 0u; i < pc.numLights; i++) {
                     color += throughput *
                              MIS_DirectLight(payload.rngState, payload.recursionDepth,
                                              mat, eta, aniso, hitPos, g_lights[i], normalSide, wo);
@@ -264,7 +266,7 @@ float3 DoPathTracing(inout RayPayload payload,
 
     // ---- Russian roulette ----
     float rrPdf = 1.0f;
-    if (payload.recursionDepth >= g_scene.russianRouletteDepth) {
+    if (payload.recursionDepth >= pc.russianRouletteDepth) {
         rrPdf = clamp(max(throughput.r, max(throughput.g, throughput.b)), 0.05f, 0.95f);
         if (Random(payload.rngState) > rrPdf)
             return color;
@@ -377,6 +379,11 @@ float3 DoPathTracing(inout RayPayload payload,
         
         float directHitDistContribution = directDiffLum / max(directDiffLum + indirectDiffLum, 1e-6f);
         directHitDistContribution = min(directHitDistContribution, 0.5f);
+        // One-light direct sampling introduces high-variance shadow distances frame-to-frame,
+        // which can destabilize NRD history. Keep diffuse hit distance anchored to indirect/geometry.
+        if (pc.onlyOneLightSample != 0u && pc.numLights > 1u) {
+            directHitDistContribution = 0.0f;
+        }
         
         float finalDiffHitDist = 0.0f;
         if (isDiffuseLobe) {
@@ -393,7 +400,7 @@ float3 DoPathTracing(inout RayPayload payload,
             }
         } else {
             // If diffuse lobe is skipped, we only have direct diffuse lighting
-            finalDiffHitDist = (directHitDist > 0.0f) ? directHitDist : 0.0f;
+            finalDiffHitDist = (directHitDist > 0.0f) ? directHitDist : hitDist;
         }
         
         payload.diffuseHitDist = finalDiffHitDist;
@@ -418,7 +425,7 @@ void ClosestHitHelper(inout RayPayload payload,
                       bool             isTriangle) {
     // Apply procedural checkerboard floor before setting up G-buffer / guides
     if (mat.materialIndex == 0u &&
-        (g_scene.sceneIndex == SCENE_DEMO || g_scene.sceneIndex == SCENE_PBR_SHOWCASE)) {
+        (pc.sceneIndex == SCENE_DEMO || pc.sceneIndex == SCENE_PBR_SHOWCASE)) {
         float pattern = Checkerboard(hitPos);
         mat.roughness = pattern * 0.25f;
         mat.albedo    = pattern * 0.5f * mat.albedo + 0.5f * mat.albedo;

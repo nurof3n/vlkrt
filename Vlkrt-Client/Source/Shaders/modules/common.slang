@@ -48,6 +48,85 @@ struct Ray {
     float3 direction;
 };
 
+// ------------------------------------------------------------------ //
+// Payload packing helpers (encodes NRD fields for tight storage)
+// ------------------------------------------------------------------ //
+uint PackNormalRoughnessMetallic(float3 normal, float roughness, float metallic) {
+    // Octahedral normal: encode to 2 bytes (int16 for x, int16 for y)
+    float l = length(normal);
+    float3 n = (l > 0.0f) ? (normal / l) : float3(0.0f, 1.0f, 0.0f);
+    
+    float absX = abs(n.x), absY = abs(n.y), absZ = abs(n.z);
+    float x, y;
+    if (absZ >= absX && absZ >= absY) {
+        x = n.x / max(absX + absY + absZ, 1e-6f);
+        y = n.y / max(absX + absY + absZ, 1e-6f);
+    } else if (absY >= absX) {
+        x = n.x / max(absX + absY, 1e-6f);
+        y = (n.z >= 0.0f) ? (1.0f - abs(n.x) / max(absX + absY, 1e-6f)) : (-1.0f + abs(n.x) / max(absX + absY, 1e-6f));
+    } else {
+        x = (n.y >= 0.0f) ? (1.0f - abs(n.z) / max(absX + absZ, 1e-6f)) : (-1.0f + abs(n.z) / max(absX + absZ, 1e-6f));
+        y = n.z / max(absX + absZ, 1e-6f);
+    }
+    
+    uint nx = uint((x * 0.5f + 0.5f) * 255.0f) & 0xFF;
+    uint ny = uint((y * 0.5f + 0.5f) * 255.0f) & 0xFF;
+    uint ru = uint(saturate(roughness) * 255.0f) & 0xFF;
+    uint me = uint(saturate(metallic) * 255.0f) & 0xFF;
+    
+    return (me << 24) | (ru << 16) | (ny << 8) | nx;
+}
+
+float3 UnpackNormal(uint packed) {
+    uint nx = (packed & 0xFF);
+    uint ny = ((packed >> 8) & 0xFF);
+    float x = (float(nx) / 255.0f) * 2.0f - 1.0f;
+    float y = (float(ny) / 255.0f) * 2.0f - 1.0f;
+    float z = sqrt(max(1.0f - x*x - y*y, 0.0f));
+    return normalize(float3(x, y, z));
+}
+
+float UnpackRoughness(uint packed) {
+    return float((packed >> 16) & 0xFF) / 255.0f;
+}
+
+float UnpackMetallic(uint packed) {
+    return float((packed >> 24) & 0xFF) / 255.0f;
+}
+
+uint PackAlbedoSpecular(float3 albedo, float specularWeight) {
+    // RGB565 for albedo + half for specular weight
+    uint r = uint(saturate(albedo.r) * 31.0f) & 0x1F;
+    uint g = uint(saturate(albedo.g) * 63.0f) & 0x3F;
+    uint b = uint(saturate(albedo.b) * 31.0f) & 0x1F;
+    uint rgb565 = (r << 11) | (g << 5) | b;
+    
+    uint specU = uint(min(float(asint(specularWeight)), 65535.0f)) & 0xFFFF;
+    return (specU << 16) | rgb565;
+}
+
+float3 UnpackAlbedo(uint packed) {
+    uint rgb565 = packed & 0xFFFF;
+    float r = float((rgb565 >> 11) & 0x1F) / 31.0f;
+    float g = float((rgb565 >> 5) & 0x3F) / 63.0f;
+    float b = float(rgb565 & 0x1F) / 31.0f;
+    return float3(r, g, b);
+}
+
+float UnpackSpecularWeight(uint packed) {
+    uint specU = (packed >> 16) & 0xFFFF;
+    return float(specU) / 65535.0f;
+}
+
+/// Push constants: hot scene parameters accessed frequently in ray tracing loops.
+/// Total: 16 bytes (std140-compatible layout).
+struct PushConstants {
+    uint numLights;              ///< number of lights in scene
+    uint onlyOneLightSample;     ///< sample only one random light per ray
+    uint russianRouletteDepth;   ///< depth threshold for RR termination
+    uint sceneIndex;             ///< which scene configuration
+};
+
 /// Main path-tracing payload (location 0).
 /// Total size: 180 bytes (keep maxPipelineRayPayloadSize in sync in Renderer.cpp).
 ///
@@ -190,17 +269,17 @@ struct SceneUBO {
                         RWTexture2D<float4>                    g_accumImage;
 [[vk::binding(11, 0)]] ConstantBuffer<SceneUBO>               g_scene;
 
-// NRD guide buffers (all RGBA32F for simplicity)
+// NRD guide buffers (optimized: narrower precision where possible)
 [[vk::binding(12, 0)]] [[vk::image_format("rgba32f")]]
-                        RWTexture2D<float4>                    g_guideNormalRoughness;
-[[vk::binding(13, 0)]] [[vk::image_format("rgba32f")]]
-                        RWTexture2D<float4>                    g_guideViewZ;
-[[vk::binding(14, 0)]] [[vk::image_format("rgba32f")]]
-                        RWTexture2D<float4>                    g_guideMotionVectors;
+                        RWTexture2D<float4>                    g_guideNormalRoughness;  // RGBA32F: stability-critical
+[[vk::binding(13, 0)]] [[vk::image_format("rgba16f")]]
+                        RWTexture2D<float4>                    g_guideViewZ;  // RGBA16F: depth + material (narrower)
+[[vk::binding(14, 0)]] [[vk::image_format("rgba16f")]]
+                        RWTexture2D<float4>                    g_guideMotionVectors;  // RGBA16F: motion + metallic (narrower)
 [[vk::binding(15, 0)]] [[vk::image_format("rgba32f")]]
-                        RWTexture2D<float4>                    g_guideDiffRadianceHitDist;
+                        RWTexture2D<float4>                    g_guideDiffRadianceHitDist;  // RGBA32F: stability-critical
 [[vk::binding(16, 0)]] [[vk::image_format("rgba32f")]]
-                        RWTexture2D<float4>                    g_guideSpecRadianceHitDist;
+                        RWTexture2D<float4>                    g_guideSpecRadianceHitDist;  // RGBA32F: stability-critical
 [[vk::binding(17, 0)]] StructuredBuffer<GPUVertex>            g_vtxPrev;
 [[vk::binding(18, 0)]] StructuredBuffer<AABBTransform>        g_aabbTransformsPrev;
 
@@ -208,10 +287,10 @@ struct SceneUBO {
                         RWTexture2D<float4>                    g_outDiffRadianceHitDist;
 [[vk::binding(20, 0)]] [[vk::image_format("rgba32f")]]
                         RWTexture2D<float4>                    g_outSpecRadianceHitDist;
-[[vk::binding(21, 0)]] [[vk::image_format("rgba32f")]]
-                        RWTexture2D<float4>                    g_guideEmission;
-[[vk::binding(22, 0)]] [[vk::image_format("rgba32f")]]
-                        RWTexture2D<float4>                    g_guideDepth;
+[[vk::binding(21, 0)]] [[vk::image_format("rgba16f")]]
+                        RWTexture2D<float4>                    g_guideEmission;  // RGBA16F
+[[vk::binding(22, 0)]] [[vk::image_format("r32f")]]
+                        RWTexture2D<float>                     g_guideDepth;  // R32F: scalar depth
 
 // ------------------------------------------------------------------ //
 // Math helpers
@@ -350,10 +429,13 @@ struct AabbHitAttr {
     float3 prevWorldPos; ///< previous-frame world-space hit position
 };
 
-/// Per-SBT-record payload for AABB hit groups
+/// Per-SBT-record payload for AABB hit groups (packed into single uint32_t)
+/// Format: [instanceIndex: 28 bits (upper) | primitiveType: 4 bits (lower)]
 struct ShaderRecordData {
-    uint instanceIndex;
-    uint primitiveType;
+    uint packed;
+    
+    uint GetInstanceIndex() { return packed >> 4u; }
+    uint GetPrimitiveType() { return packed & 0xFu; }
 };
 
 // ------------------------------------------------------------------ //

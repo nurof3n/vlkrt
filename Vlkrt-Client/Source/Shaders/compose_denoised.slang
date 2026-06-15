@@ -27,7 +27,8 @@ void ComposeDenoisedMain(uint3 dispatchThreadID : SV_DispatchThreadID)
 
     uint debugMode = g_scene.nrdDebugViewMode;
     float viewZ = g_guideViewZ[pixelCoord].x;
-    if (viewZ > 99999.0f)
+    // RGBA16F can't represent 1e6 miss-sentinel exactly; treat near-max half values as miss.
+    if (viewZ >= 65000.0f)
         return;
 
     float3 albedo = g_guideViewZ[pixelCoord].yzw;

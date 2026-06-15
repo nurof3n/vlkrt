@@ -8,8 +8,10 @@ import analytic;
 
 [shader("intersection")]
 void AnalyticIntersectionMain() {
-    AABBTransform t = g_aabbTransforms[g_shaderRecord.instanceIndex];
-    AABBTransform tPrev = g_aabbTransformsPrev[g_shaderRecord.instanceIndex];
+    uint instanceIdx = g_shaderRecord.GetInstanceIndex();
+    uint primType = g_shaderRecord.GetPrimitiveType();
+    AABBTransform t = g_aabbTransforms[instanceIdx];
+    AABBTransform tPrev = g_aabbTransformsPrev[instanceIdx];
 
     // Transform ray to primitive local space
     Ray localRay;
@@ -18,7 +20,7 @@ void AnalyticIntersectionMain() {
 
     float  thit;
     float3 localNormal;
-    if (!RayAnalyticTest(g_scene.sceneIndex, localRay, g_shaderRecord.primitiveType,
+    if (!RayAnalyticTest(g_scene.sceneIndex, localRay, primType,
                          thit, localNormal))
         return;
 

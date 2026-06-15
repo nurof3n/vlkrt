@@ -299,13 +299,13 @@ namespace Vlkrt
 
         // NRD
         NRDDenoiser m_NRDDenoiser;
-        std::shared_ptr<Walnut::Image> m_GuideNormalRoughness;      // RGB=normal, A=roughness (RGBA32F)
-        std::shared_ptr<Walnut::Image> m_GuideViewZ;                // R=view space depth (RGBA32F)
-        std::shared_ptr<Walnut::Image> m_GuideMotionVectors;        // RG=motion (RGBA32F)
-        std::shared_ptr<Walnut::Image> m_GuideDiffRadianceHitDist;  // RGB=diffuse, A=hit distance (RGBA32F)
-        std::shared_ptr<Walnut::Image> m_GuideSpecRadianceHitDist;  // RGB=specular, A=hit distance (RGBA32F)
-        std::shared_ptr<Walnut::Image> m_GuideEmission;             // RGB=direct emission (RGBA32F)
-        std::shared_ptr<Walnut::Image> m_GuideDepth;                // NDC depth (RGBA32F)
+        std::shared_ptr<Walnut::Image> m_GuideNormalRoughness;      // RGBA32F: packed normal+roughness+material ID
+        std::shared_ptr<Walnut::Image> m_GuideViewZ;                // RGBA16F: view depth + material data (narrower precision)
+        std::shared_ptr<Walnut::Image> m_GuideMotionVectors;        // RGBA16F: motion vectors + metallic (narrower precision)
+        std::shared_ptr<Walnut::Image> m_GuideDiffRadianceHitDist;  // RGBA16F: diffuse radiance + hit distance
+        std::shared_ptr<Walnut::Image> m_GuideSpecRadianceHitDist;  // RGBA16F: specular radiance + hit distance
+        std::shared_ptr<Walnut::Image> m_GuideEmission;             // RGBA16F: direct emission
+        std::shared_ptr<Walnut::Image> m_GuideDepth;                // R32F: NDC depth (scalar only)
 
         // FSR
         std::unique_ptr<FSRUpscaler> m_FSRUpscaler;
@@ -338,8 +338,7 @@ namespace Vlkrt
         size_t m_LastIndexCount{ 0 };
         size_t m_LastMaterialCount{ 0 };
         size_t m_LastLightCount{ 0 };
-        uint32_t m_LastProceduralCount{ UINT32_MAX };    // UINT32_MAX forces initial creation
-        uint32_t m_LastMaxRecursionDepth{ UINT32_MAX };  // UINT32_MAX forces initial creation
+        uint32_t m_LastProceduralCount{ UINT32_MAX };  // UINT32_MAX forces initial creation
 
         // Cached scene metrics
         size_t m_CachedTotalMeshCount{ 0 };
@@ -349,6 +348,7 @@ namespace Vlkrt
         bool m_FirstFrame{ true };
         bool m_AccumFirstFrame{ true };
         bool m_GuidesFirstFrame{ true };
+        bool m_GuidesInReadOnly{ false };
         glm::mat4 m_LastCameraView{ glm::mat4(0.0f) };
         glm::mat4 m_LastCameraProjection{ glm::mat4(0.0f) };
         glm::vec2 m_LastCameraJitter{ 0.0f, 0.0f };

@@ -4,8 +4,12 @@
 import common;
 import path_tracer;
 
+// Push constants: hot scene parameters (16B)
+[[vk::push_constant]] PushConstants pc;
+
 [shader("raygeneration")]
 void RayGenMain() {
+    bool fsrEnabled = (g_scene._pad3 > 0.5f);
     float3 finalColor = float3(0.0f);
     uint   numSamples = g_scene.pathSqrtSamplesPerPixel * g_scene.pathSqrtSamplesPerPixel;
     float3 guideNormal = float3(0.0f);
@@ -92,7 +96,6 @@ void RayGenMain() {
                 guideMotion += ComputeMotionVector(payload.worldPosition.xyz, payload.firstHitWorldPosPrev.xyz);
                 guideMetallic += clamp(payload.firstHitMetallic, 0.0f, 1.0f);
                 guideEmission += payload.emission;
-
                 float4 clipPos = mul(g_scene.worldToClip, float4(payload.worldPosition.xyz, 1.0f));
                 float ndcDepth = (clipPos.w > 0.0f) ? (clipPos.z / clipPos.w) : 1.0f;
                 guideNdcDepth += ndcDepth;
@@ -149,21 +152,23 @@ void RayGenMain() {
         float materialID = clamp(floor(avgMaterialClass + 0.5f), 0.0f, 3.0f);
 
         g_guideNormalRoughness[pixelCoord] = PackNormalAndRoughness(avgNormal, avgRoughness, materialID);
-        g_guideViewZ[pixelCoord] = float4(avgDepth, avgAlbedo);
-        g_guideMotionVectors[pixelCoord] = float4(avgMotion, avgMetallic, 1.0f);
+        g_guideViewZ[pixelCoord] = float4(avgDepth, avgAlbedo);  // RGBA16F
+        g_guideMotionVectors[pixelCoord] = float4(avgMotion, avgMetallic, 1.0f);  // RGBA16F
         g_guideDiffRadianceHitDist[pixelCoord]
             = RELAX_FrontEnd_PackRadianceAndHitDist(demodulatedDiffuse, avgDiffuseHitDist, false);
         g_guideSpecRadianceHitDist[pixelCoord]
             = RELAX_FrontEnd_PackRadianceAndHitDist(demodulatedSpecular, avgSpecularHitDist, false);
-        g_guideEmission[pixelCoord] = float4(avgEmission, 1.0f);
-        g_guideDepth[pixelCoord] = float4(guideNdcDepth / float(numSamples), 0.0f, 0.0f, 1.0f);
+        g_guideEmission[pixelCoord] = float4(avgEmission, 1.0f);  // RGBA16F
+        if (fsrEnabled)
+            g_guideDepth[pixelCoord] = guideNdcDepth / float(numSamples);  // R32F: scalar
     } else {
         g_guideNormalRoughness[pixelCoord] = PackNormalAndRoughness(float3(0.0f, 1.0f, 0.0f), 1.0f, 0.0f);
-        g_guideViewZ[pixelCoord] = float4(1e6f, float3(0.0f));
-        g_guideMotionVectors[pixelCoord] = float4(0.0f, 0.0f, 0.0f, 0.0f);
+        g_guideViewZ[pixelCoord] = float4(65504.0f, float3(0.0f));  // RGBA16F max sentinel
+        g_guideMotionVectors[pixelCoord] = float4(0.0f, 0.0f, 0.0f, 0.0f);  // RGBA16F
         g_guideDiffRadianceHitDist[pixelCoord] = float4(0.0f, 0.0f, 0.0f, 0.0f);
         g_guideSpecRadianceHitDist[pixelCoord] = float4(0.0f, 0.0f, 0.0f, 0.0f);
         g_guideEmission[pixelCoord] = float4(0.0f, 0.0f, 0.0f, 0.0f);
-        g_guideDepth[pixelCoord] = float4(1.0f, 0.0f, 0.0f, 1.0f);
+        if (fsrEnabled)
+            g_guideDepth[pixelCoord] = 1.0f;  // R32F: scalar
     }
 }

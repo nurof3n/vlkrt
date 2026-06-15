@@ -82,6 +82,7 @@ namespace Vlkrt
             VkPipelineLayout PipelineLayout         = VK_NULL_HANDLE;
 
             std::vector<VkDescriptorSet> ResourceSets;
+            std::vector<uint64_t> ResourceSetSignatures;
             uint32_t CurrentSetIndex = 0;
 
             // Per-resource: binding number and descriptor type, in the same order as DispatchDesc::resources[]

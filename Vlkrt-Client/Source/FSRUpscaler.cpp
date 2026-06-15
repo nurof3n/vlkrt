@@ -17,6 +17,7 @@ namespace Vlkrt
         switch (img->GetFormat()) {
             case Walnut::ImageFormat::RGBA: info.format = VK_FORMAT_R8G8B8A8_UNORM; break;
             case Walnut::ImageFormat::RGBA32F: info.format = VK_FORMAT_R32G32B32A32_SFLOAT; break;
+            case Walnut::ImageFormat::RGBA16F: info.format = VK_FORMAT_R16G16B16A16_SFLOAT; break;
             case Walnut::ImageFormat::R32F: info.format = VK_FORMAT_R32_SFLOAT; break;
             case Walnut::ImageFormat::RG16F: info.format = VK_FORMAT_R16G16_SFLOAT; break;
             case Walnut::ImageFormat::R32UI: info.format = VK_FORMAT_R32_UINT; break;

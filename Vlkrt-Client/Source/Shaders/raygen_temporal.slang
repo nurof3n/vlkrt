@@ -4,8 +4,12 @@
 import common;
 import path_tracer;
 
+// Push constants: hot scene parameters (16B)
+[[vk::push_constant]] PushConstants pc;
+
 [shader("raygeneration")]
 void RayGenTemporalMain() {
+    bool fsrEnabled = (g_scene._pad3 > 0.5f);
     uint seed = HashSeed(DispatchRaysIndex().xy, g_scene.elapsedTicks);
 
     uint   numSamples = g_scene.pathSqrtSamplesPerPixel * g_scene.pathSqrtSamplesPerPixel;
@@ -102,21 +106,23 @@ void RayGenTemporalMain() {
         float ndcDepth = (clipPos.w > 0.0f) ? (clipPos.z / clipPos.w) : 1.0f;
 
         g_guideNormalRoughness[pixelCoord] = PackNormalAndRoughness(n, roughness, materialID);
-        g_guideViewZ[pixelCoord] = float4(depth, albedo);
-        g_guideMotionVectors[pixelCoord] = float4(motion, metallic, 1.0f);
+        g_guideViewZ[pixelCoord] = float4(depth, albedo);  // RGBA16F
+        g_guideMotionVectors[pixelCoord] = float4(motion, metallic, 1.0f);  // RGBA16F
         g_guideDiffRadianceHitDist[pixelCoord]
             = RELAX_FrontEnd_PackRadianceAndHitDist(demodulatedDiffuse, diffHitDist, false);
         g_guideSpecRadianceHitDist[pixelCoord]
             = RELAX_FrontEnd_PackRadianceAndHitDist(demodulatedSpecular, specHitDist, false);
-        g_guideEmission[pixelCoord] = float4(payload.emission, 1.0f);
-        g_guideDepth[pixelCoord] = float4(ndcDepth, 0.0f, 0.0f, 1.0f);
+        g_guideEmission[pixelCoord] = float4(payload.emission, 1.0f);  // RGBA16F
+        if (fsrEnabled)
+            g_guideDepth[pixelCoord] = ndcDepth;  // R32F: scalar
     } else {
         g_guideNormalRoughness[pixelCoord] = PackNormalAndRoughness(float3(0.0f, 1.0f, 0.0f), 1.0f, 0.0f);
-        g_guideViewZ[pixelCoord] = float4(1e6f, float3(0.0f));
-        g_guideMotionVectors[pixelCoord] = float4(0.0f, 0.0f, 0.0f, 0.0f);
+        g_guideViewZ[pixelCoord] = float4(65504.0f, float3(0.0f));  // RGBA16F max sentinel
+        g_guideMotionVectors[pixelCoord] = float4(0.0f, 0.0f, 0.0f, 0.0f);  // RGBA16F
         g_guideDiffRadianceHitDist[pixelCoord] = float4(0.0f, 0.0f, 0.0f, 0.0f);
         g_guideSpecRadianceHitDist[pixelCoord] = float4(0.0f, 0.0f, 0.0f, 0.0f);
         g_guideEmission[pixelCoord] = float4(0.0f, 0.0f, 0.0f, 0.0f);
-        g_guideDepth[pixelCoord] = float4(1.0f, 0.0f, 0.0f, 1.0f);
+        if (fsrEnabled)
+            g_guideDepth[pixelCoord] = 1.0f;  // R32F: scalar
     }
 }

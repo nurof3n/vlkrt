@@ -3,6 +3,9 @@
 // ================================================================== //
 import common;
 
+// Push constants: hot scene parameters (16B)
+[[vk::push_constant]] PushConstants pc;
+
 // Radiance miss: set background colour × path throughput
 [shader("miss")]
 void MissMain([[vk::location(0)]] inout RayPayload payload) {

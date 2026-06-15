@@ -5,6 +5,7 @@
 #include "NRD.h"
 
 #include <algorithm>
+#include <limits>
 #include <cstring>
 #include <vector>
 
@@ -63,7 +64,7 @@ namespace Vlkrt
                 case nrd::Format::RGBA16_SNORM:
                 case nrd::Format::RGBA16_UINT:
                 case nrd::Format::RGBA16_SINT:
-                case nrd::Format::RGBA16_SFLOAT: return Walnut::ImageFormat::RGBA32F;
+                    case nrd::Format::RGBA16_SFLOAT: return Walnut::ImageFormat::RGBA16F;
 
                 case nrd::Format::R32_UINT:
                 case nrd::Format::R32_SINT:
@@ -84,6 +85,19 @@ namespace Vlkrt
                 case nrd::Format::RGBA32_SFLOAT: return Walnut::ImageFormat::RGBA32F;
 
                 default: return Walnut::ImageFormat::RGBA32F;
+            }
+        }
+
+        static VkFormat ImageFormatToVkFormat(Walnut::ImageFormat format)
+        {
+            switch (format) {
+                case Walnut::ImageFormat::RGBA:    return VK_FORMAT_R8G8B8A8_UNORM;
+                case Walnut::ImageFormat::RGBA32F: return VK_FORMAT_R32G32B32A32_SFLOAT;
+                case Walnut::ImageFormat::RGBA16F: return VK_FORMAT_R16G16B16A16_SFLOAT;
+                case Walnut::ImageFormat::R32F:    return VK_FORMAT_R32_SFLOAT;
+                case Walnut::ImageFormat::RG16F:   return VK_FORMAT_R16G16_SFLOAT;
+                case Walnut::ImageFormat::R32UI:   return VK_FORMAT_R32_UINT;
+                default:                            return VK_FORMAT_R32G32B32A32_SFLOAT;
             }
         }
 
@@ -362,19 +376,21 @@ namespace Vlkrt
             // IN_NORMAL_ROUGHNESS: normals in RGB, roughness in A
             if (!m_GuideNormalRoughness) {
                 m_GuideNormalRoughness = std::make_shared<Walnut::Image>(
-                        m_InstanceWidth, m_InstanceHeight, Walnut::ImageFormat::RGBA32F);
+                       m_InstanceWidth, m_InstanceHeight, Walnut::ImageFormat::RGBA32F);
                 zeroImage(m_GuideNormalRoughness);
             }
             // IN_VIEWZ: view space depth in R
+            // NOTE: Guide textures are externally provided by Renderer via SetGuideBuffers.
+            // Skip internal creation if they're already set.
             if (!m_GuideViewZ) {
                 m_GuideViewZ = std::make_shared<Walnut::Image>(
-                        m_InstanceWidth, m_InstanceHeight, Walnut::ImageFormat::RGBA32F);
+                        m_InstanceWidth, m_InstanceHeight, Walnut::ImageFormat::RGBA16F);
                 zeroImage(m_GuideViewZ);
             }
             // IN_MV: motion vectors in RG
             if (!m_GuideMotionVectors) {
                 m_GuideMotionVectors = std::make_shared<Walnut::Image>(
-                        m_InstanceWidth, m_InstanceHeight, Walnut::ImageFormat::RGBA32F);
+                        m_InstanceWidth, m_InstanceHeight, Walnut::ImageFormat::RGBA16F);
                 zeroImage(m_GuideMotionVectors);
             }
             // IN_DIFF_RADIANCE_HITDIST: diffuse radiance in RGB, hit distance in A
@@ -432,7 +448,7 @@ namespace Vlkrt
             VkImageViewCreateInfo viewInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
             viewInfo.image    = m_GuideViewZ->GetVkImage();
             viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-            viewInfo.format   = VK_FORMAT_R32G32B32A32_SFLOAT;
+            viewInfo.format   = ImageFormatToVkFormat(m_GuideViewZ->GetFormat());
             // g_guideViewZ layout: R=depth(viewZ), GBA=albedo.xyz
             // NRD reads IN_VIEWZ from the R channel - use IDENTITY swizzle.
             viewInfo.components.r                    = VK_COMPONENT_SWIZZLE_IDENTITY;
@@ -453,7 +469,7 @@ namespace Vlkrt
             VkImageViewCreateInfo viewInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
             viewInfo.image                           = m_GuideMotionVectors->GetVkImage();
             viewInfo.viewType                        = VK_IMAGE_VIEW_TYPE_2D;
-            viewInfo.format                          = VK_FORMAT_R32G32B32A32_SFLOAT;
+            viewInfo.format                          = ImageFormatToVkFormat(m_GuideMotionVectors->GetFormat());
             viewInfo.components.r                    = VK_COMPONENT_SWIZZLE_IDENTITY;
             viewInfo.components.g                    = VK_COMPONENT_SWIZZLE_IDENTITY;
             viewInfo.components.b                    = VK_COMPONENT_SWIZZLE_IDENTITY;
@@ -524,6 +540,7 @@ namespace Vlkrt
                 // of the same pipeline (e.g., REBLUR blur passes) without overwriting
                 // executing descriptor sets mid-flight.
                 state.ResourceSets.resize(MULTIPLIER, VK_NULL_HANDLE);
+                state.ResourceSetSignatures.resize(MULTIPLIER, std::numeric_limits<uint64_t>::max());
                 std::vector<VkDescriptorSetLayout> layouts(MULTIPLIER, state.ResourceSetLayout);
 
                 VkDescriptorSetAllocateInfo allocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
@@ -614,6 +631,16 @@ namespace Vlkrt
         };
         std::vector<ResourceAccess> writtenResources;
 
+        // Reuse descriptor scratch buffers across dispatches to avoid per-pass heap churn.
+        uint32_t maxResourcesPerDispatch = 0;
+        for (uint32_t di = 0; di < dispatchesNum; di++) {
+            maxResourcesPerDispatch = std::max(maxResourcesPerDispatch, dispatches[di].resourcesNum);
+        }
+        std::vector<VkDescriptorImageInfo> imageInfosScratch;
+        imageInfosScratch.resize(maxResourcesPerDispatch);
+        std::vector<VkWriteDescriptorSet> writesScratch;
+        writesScratch.reserve(maxResourcesPerDispatch);
+
         for (uint32_t di = 0; di < dispatchesNum; di++) {
             const nrd::DispatchDesc& d = dispatches[di];
             if (d.pipelineIndex >= m_NrdPipelines.size()) continue;
@@ -660,7 +687,8 @@ namespace Vlkrt
                         d.pipelineIndex, p.CurrentSetIndex, p.ResourceSets.size());
                 continue;
             }
-            VkDescriptorSet currentResourceSet = p.ResourceSets[p.CurrentSetIndex++];
+            const uint32_t currentResourceSetIndex = p.CurrentSetIndex++;
+            VkDescriptorSet currentResourceSet     = p.ResourceSets[currentResourceSetIndex];
 
             auto getImageViewForResource = [this](const nrd::ResourceDesc& resource,
                                                    const std::shared_ptr<Walnut::Image>& image) -> VkImageView {
@@ -744,9 +772,15 @@ namespace Vlkrt
                 }
             };
 
-            std::vector<VkDescriptorImageInfo> imageInfos(d.resourcesNum);
-            std::vector<VkWriteDescriptorSet> writes;
-            writes.reserve(d.resourcesNum);
+            writesScratch.clear();
+            uint64_t descriptorSignature = 1469598103934665603ull;  // FNV-1a 64-bit offset basis
+
+            auto hashU64 = [&descriptorSignature](uint64_t value) {
+                descriptorSignature ^= value;
+                descriptorSignature *= 1099511628211ull;  // FNV-1a prime
+            };
+
+            hashU64(static_cast<uint64_t>(d.resourcesNum));
 
             for (uint32_t ri = 0; ri < d.resourcesNum; ri++) {
                 if (ri >= p.ResourceSlots.size()) break;
@@ -756,8 +790,14 @@ namespace Vlkrt
                 const std::shared_ptr<Walnut::Image> targetImage   = getImageForResource(r);
                 const std::shared_ptr<Walnut::Image> resolvedImage = targetImage ? targetImage : ioImage;
 
-                imageInfos[ri].imageView   = getImageViewForResource(r, resolvedImage);
-                imageInfos[ri].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+                imageInfosScratch[ri].imageView   = getImageViewForResource(r, resolvedImage);
+                imageInfosScratch[ri].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+                const uint64_t imageViewHash = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(imageInfosScratch[ri].imageView));
+                hashU64(static_cast<uint64_t>(slot.binding));
+                hashU64(static_cast<uint64_t>(slot.type));
+                hashU64(imageViewHash);
+                hashU64(static_cast<uint64_t>(imageInfosScratch[ri].imageLayout));
 
                 VkWriteDescriptorSet w = {};
                 w.sType                = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -765,12 +805,20 @@ namespace Vlkrt
                 w.dstBinding           = slot.binding;
                 w.descriptorType       = slot.type;
                 w.descriptorCount      = 1;
-                w.pImageInfo           = &imageInfos[ri];
-                writes.push_back(w);
+                w.pImageInfo           = &imageInfosScratch[ri];
+                writesScratch.push_back(w);
             }
 
-            if (!writes.empty())
-                vkUpdateDescriptorSets(m_Device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+            const bool needsDescriptorUpdate = (currentResourceSetIndex >= p.ResourceSetSignatures.size())
+                                               || (p.ResourceSetSignatures[currentResourceSetIndex]
+                                                       != descriptorSignature);
+
+            if (needsDescriptorUpdate && !writesScratch.empty()) {
+                vkUpdateDescriptorSets(
+                        m_Device, static_cast<uint32_t>(writesScratch.size()), writesScratch.data(), 0, nullptr);
+                if (currentResourceSetIndex < p.ResourceSetSignatures.size())
+                    p.ResourceSetSignatures[currentResourceSetIndex] = descriptorSignature;
+            }
 
             if (d.constantBufferData && d.constantBufferDataSize > 0
                     && d.constantBufferDataSize <= m_NrdConstantCapacity && m_NrdConstantMapped != nullptr) {
@@ -1087,7 +1135,7 @@ namespace Vlkrt
             VkImageViewCreateInfo viewInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
             viewInfo.image                           = m_GuideViewZ->GetVkImage();
             viewInfo.viewType                        = VK_IMAGE_VIEW_TYPE_2D;
-            viewInfo.format                          = VK_FORMAT_R32G32B32A32_SFLOAT;
+            viewInfo.format                          = ImageFormatToVkFormat(m_GuideViewZ->GetFormat());
             viewInfo.components.r                    = VK_COMPONENT_SWIZZLE_IDENTITY;
             viewInfo.components.g                    = VK_COMPONENT_SWIZZLE_IDENTITY;
             viewInfo.components.b                    = VK_COMPONENT_SWIZZLE_IDENTITY;
@@ -1105,7 +1153,7 @@ namespace Vlkrt
             VkImageViewCreateInfo viewInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
             viewInfo.image                           = m_GuideMotionVectors->GetVkImage();
             viewInfo.viewType                        = VK_IMAGE_VIEW_TYPE_2D;
-            viewInfo.format                          = VK_FORMAT_R32G32B32A32_SFLOAT;
+            viewInfo.format                          = ImageFormatToVkFormat(m_GuideMotionVectors->GetFormat());
             viewInfo.components.r                    = VK_COMPONENT_SWIZZLE_IDENTITY;
             viewInfo.components.g                    = VK_COMPONENT_SWIZZLE_IDENTITY;
             viewInfo.components.b                    = VK_COMPONENT_SWIZZLE_IDENTITY;

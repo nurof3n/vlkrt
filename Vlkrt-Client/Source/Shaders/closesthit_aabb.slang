@@ -9,7 +9,8 @@ import path_tracer;
 [shader("closesthit")]
 void AabbClosestHitMain([[vk::location(0)]] inout RayPayload payload,
                         AabbHitAttr attr) {
-    GPUPBRMaterial mat    = g_aabbMaterials[g_shaderRecord.instanceIndex];
+    uint instanceIdx = g_shaderRecord.GetInstanceIndex();
+    GPUPBRMaterial mat    = g_aabbMaterials[instanceIdx];
     float3         hitPos = WorldRayOrigin() + RayTCurrent() * WorldRayDirection();
     ClosestHitHelper(payload, mat, attr.normal, hitPos, attr.prevWorldPos, false);
 }
