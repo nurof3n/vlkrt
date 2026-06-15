@@ -195,21 +195,37 @@ namespace Vlkrt
 
             // Stats panel overlay
             ImGui::Begin("Stats");
-            ImGui::Text("Last render: %.3fms", m_LastRenderTime);
-            const auto& passStats = m_Renderer.GetLastPassStats();
-            ImGui::Separator();
-            ImGui::Text("Pass Timings (CPU)");
-            ImGui::Text("Frame Total:      %.3f ms", passStats.FrameTotalMs);
-            ImGui::Text("Scene Setup:      %.3f ms", passStats.SceneSetupMs);
-            ImGui::Text("UBO Upload:       %.3f ms", passStats.UBOUploadMs);
-            ImGui::Text("RT Record:        %.3f ms", passStats.RayTraceRecordMs);
-            ImGui::Text("NRD Record:       %.3f ms", passStats.NRDRecordMs);
-            ImGui::Text("Cmd Submit+Wait:  %.3f ms", passStats.CommandSubmitMs);
-            ImGui::Text("NRD: %s (%s)", passStats.NRDEnabled ? "enabled" : "disabled",
-                    passStats.NRDOperational ? "operational" : "not operational");
-            ImGui::Text("Resolution: %ux%u", passStats.Width, passStats.Height);
             ImGui::Text("Player ID: %u", m_PlayerID);
             ImGui::Text("Players: %zu", m_PlayerData.size());
+            ImGui::Text("Camera Pos: (%.2f, %.2f, %.2f)", m_Camera.GetPosition().x, m_Camera.GetPosition().y,
+                    m_Camera.GetPosition().z);
+            ImGui::Text("Camera Forward: (%.2f, %.2f, %.2f)", m_Camera.GetDirection().x, m_Camera.GetDirection().y,
+                    m_Camera.GetDirection().z);
+            ImGui::Separator();
+
+            const auto& passStats = m_Renderer.GetLastPassStats();
+            ImGui::Text("Resolution: %ux%u", passStats.Width, passStats.Height);
+            ImGui::Text("Estimated GPU Memory: %.2f MB", passStats.EstimatedGraphicsMemoryMB);
+            ImGui::Separator();
+            ImGui::Text("Last render: %.3fms", m_LastRenderTime);
+            ImGui::Separator();
+            ImGui::Text("Frame Total: %.3f ms", passStats.FrameTotalMs);
+            ImGui::Text("Scene Setup: %.3f ms", passStats.SceneSetupMs);
+            ImGui::Text("UBO Upload: %.3f ms", passStats.UBOUploadMs);
+            ImGui::Text("RT Record: %.3f ms", passStats.RayTraceRecordMs);
+            ImGui::Text("NRD Record: %.3f ms", passStats.NRDRecordMs);
+            ImGui::Text("Cmd Submit+Wait: %.3f ms", passStats.CommandSubmitMs);
+
+            const auto& denoiseMetrics = m_Renderer.GetDenoiseComparisonMetrics();
+            if (m_Scene.EnableNRDDenoiser && denoiseMetrics.Valid) {
+                ImGui::Separator();
+                ImGui::Text("Denoise vs Raw (Luma)");
+                ImGui::Text("Samples: %u", denoiseMetrics.SampleCount);
+                ImGui::Text("MSE: %.6f", denoiseMetrics.LumaMSE);
+                ImGui::Text("RMSE: %.6f", denoiseMetrics.LumaRMSE);
+                ImGui::Text("PSNR: %.2f dB", denoiseMetrics.LumaPSNR);
+                ImGui::Text("Mean Abs Diff: %.6f", denoiseMetrics.LumaMeanAbsDiff);
+            }
             ImGui::End();
 
             // Raytracing settings panel
@@ -245,6 +261,9 @@ namespace Vlkrt
                     uint32_t maxAllowedShadow = m_Scene.MaxRecursionDepth;
                     if (m_Scene.MaxShadowRecursionDepth > maxAllowedShadow)
                         m_Scene.MaxShadowRecursionDepth = maxAllowedShadow;
+
+                    uint32_t maxAllowedRR = (m_Scene.MaxRecursionDepth > 1u) ? (m_Scene.MaxRecursionDepth - 1u) : 1u;
+                    if (m_Scene.RussianRouletteDepth > maxAllowedRR) m_Scene.RussianRouletteDepth = maxAllowedRR;
                     m_Renderer.ResetAccumulation();
                 }
 
@@ -257,14 +276,18 @@ namespace Vlkrt
 
                 int sqrtSamples = (int) m_Scene.PathSqrtSamplesPerPixel;
                 ImGui::SetNextItemWidth(200.0f);
-                if (ImGui::SliderInt("Sqrt SPP", &sqrtSamples, 1, 8)) {
+                if (ImGui::SliderInt("Sqrt SPP", &sqrtSamples, 1, 4)) {
                     m_Scene.PathSqrtSamplesPerPixel = (uint32_t) sqrtSamples;
                     m_Renderer.ResetAccumulation();
                 }
 
+                int rrMaxDepth = std::max(1, (int) m_Scene.MaxRecursionDepth - 1);
+                if ((int) m_Scene.RussianRouletteDepth > rrMaxDepth)
+                    m_Scene.RussianRouletteDepth = (uint32_t) rrMaxDepth;
+
                 int rrDepth = (int) m_Scene.RussianRouletteDepth;
                 ImGui::SetNextItemWidth(200.0f);
-                if (ImGui::SliderInt("Russian Roulette Depth", &rrDepth, 1, 16)) {
+                if (ImGui::SliderInt("Russian Roulette Depth", &rrDepth, 1, rrMaxDepth)) {
                     m_Scene.RussianRouletteDepth = (uint32_t) rrDepth;
                     m_Renderer.ResetAccumulation();
                 }
@@ -281,12 +304,12 @@ namespace Vlkrt
                 }
 
                 if (m_Scene.EnableNRDDenoiser) {
-                    const char* nrdDebugViewNames[]
-                            = { "Final Image", "Guide: Normal + Roughness", "Guide: ViewZ", "Guide: Motion Vectors",
-                                  "Guide: Diffuse Radiance + HitDist", "Guide: Specular Radiance + HitDist" };
-                    int nrdDebugViewMode = (int) m_Scene.NRDGuideDebugView;
+                    const char* nrdDebugViewNames[] = { "Final Image", "Guide: Normal + Roughness", "Guide: ViewZ",
+                        "Guide: Motion Vectors", "Guide: Diffuse Radiance + HitDist",
+                        "Guide: Specular Radiance + HitDist", "Raw (No Denoise)", "Split: Denoised | Raw" };
+                    int nrdDebugViewMode            = (int) m_Scene.NRDGuideDebugView;
                     ImGui::SetNextItemWidth(200.0f);
-                    if (ImGui::Combo("NRD Debug View", &nrdDebugViewMode, nrdDebugViewNames, 6)) {
+                    if (ImGui::Combo("NRD Debug View", &nrdDebugViewMode, nrdDebugViewNames, 8)) {
                         m_Scene.NRDGuideDebugView = (NRDGuideDebugViewMode) nrdDebugViewMode;
                     }
 

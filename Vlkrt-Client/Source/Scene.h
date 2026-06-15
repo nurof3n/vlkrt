@@ -54,6 +54,8 @@ namespace Vlkrt
         MotionVectors,
         DiffRadianceHitDist,
         SpecRadianceHitDist,
+        RawNoDenoise,
+        SplitDenoisedVsRaw,
     };
 
     /// <summary>

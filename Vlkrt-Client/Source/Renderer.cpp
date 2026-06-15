@@ -10,6 +10,7 @@
 #include "Walnut/Core/Log.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <chrono>
 #include <glm/gtc/type_ptr.hpp>
@@ -17,6 +18,29 @@
 
 namespace Vlkrt
 {
+    namespace
+    {
+        static auto BytesPerPixel(Walnut::ImageFormat format) -> uint64_t
+        {
+            switch (format) {
+                case Walnut::ImageFormat::RGBA: return 4;
+                case Walnut::ImageFormat::RGBA16F: return 8;
+                case Walnut::ImageFormat::RGBA32F: return 16;
+                case Walnut::ImageFormat::R32F: return 4;
+                case Walnut::ImageFormat::RG16F: return 4;
+                case Walnut::ImageFormat::R32UI: return 4;
+                default: return 0;
+            }
+        }
+
+        static auto EstimateImageBytes(const std::shared_ptr<Walnut::Image>& image) -> uint64_t
+        {
+            if (!image) return 0;
+            return static_cast<uint64_t>(image->GetWidth()) * static_cast<uint64_t>(image->GetHeight())
+                   * BytesPerPixel(image->GetFormat());
+        }
+    }  // namespace
+
     Renderer::Renderer()
     {
         m_Device                = Walnut::Application::GetDevice();
@@ -87,6 +111,11 @@ namespace Vlkrt
         if (m_SceneUBOBuffer != VK_NULL_HANDLE) {
             vkDestroyBuffer(m_Device, m_SceneUBOBuffer, nullptr);
             vkFreeMemory(m_Device, m_SceneUBOMemory, nullptr);
+        }
+
+        if (m_QualityMetricsBuffer != VK_NULL_HANDLE) {
+            vkDestroyBuffer(m_Device, m_QualityMetricsBuffer, nullptr);
+            vkFreeMemory(m_Device, m_QualityMetricsMemory, nullptr);
         }
 
         if (m_DescriptorPool != VK_NULL_HANDLE) vkDestroyDescriptorPool(m_Device, m_DescriptorPool, nullptr);
@@ -183,6 +212,12 @@ namespace Vlkrt
         // First-time descriptor set creation (layout never changes)
         if (m_DescriptorSetLayout == VK_NULL_HANDLE) CreateDescriptorSets();
 
+        if (m_QualityMetricsBuffer == VK_NULL_HANDLE) {
+            m_QualityMetricsBuffer = CreateBuffer(sizeof(uint32_t) * 4,
+                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_QualityMetricsMemory);
+        }
+
         // Update output image bindings
         if (m_DescriptorSet != VK_NULL_HANDLE) {
             VkDescriptorImageInfo outputInfo{};
@@ -193,7 +228,7 @@ namespace Vlkrt
             accumInfo.imageView   = m_AccumImage->GetVkImageView();
             accumInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-            VkWriteDescriptorSet writes[11] = {};
+            VkWriteDescriptorSet writes[12] = {};
             writes[0].sType                 = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             writes[0].dstSet                = m_DescriptorSet;
             writes[0].dstBinding            = 1;
@@ -275,7 +310,20 @@ namespace Vlkrt
             writes[10].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
             writes[10].pImageInfo      = &depthInfo;
 
-            vkUpdateDescriptorSets(m_Device, 11, writes, 0, nullptr);
+            // Quality metrics accumulation buffer (binding 23)
+            VkDescriptorBufferInfo metricsInfo{};
+            metricsInfo.buffer = m_QualityMetricsBuffer;
+            metricsInfo.offset = 0;
+            metricsInfo.range  = sizeof(uint32_t) * 4;
+
+            writes[11].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[11].dstSet          = m_DescriptorSet;
+            writes[11].dstBinding      = 23;
+            writes[11].descriptorCount = 1;
+            writes[11].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            writes[11].pBufferInfo     = &metricsInfo;
+
+            vkUpdateDescriptorSets(m_Device, 12, writes, 0, nullptr);
         }
 
         // Update NRD denoiser with the new guide buffers
@@ -428,6 +476,22 @@ namespace Vlkrt
 
         VkCommandBuffer cmd = Walnut::Application::GetCommandBuffer(true);
 
+        if (m_QualityMetricsBuffer != VK_NULL_HANDLE) {
+            vkCmdFillBuffer(cmd, m_QualityMetricsBuffer, 0, sizeof(uint32_t) * 4, 0);
+
+            VkBufferMemoryBarrier metricsResetBarrier = { VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER };
+            metricsResetBarrier.srcAccessMask         = VK_ACCESS_TRANSFER_WRITE_BIT;
+            metricsResetBarrier.dstAccessMask         = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+            metricsResetBarrier.srcQueueFamilyIndex   = VK_QUEUE_FAMILY_IGNORED;
+            metricsResetBarrier.dstQueueFamilyIndex   = VK_QUEUE_FAMILY_IGNORED;
+            metricsResetBarrier.buffer                = m_QualityMetricsBuffer;
+            metricsResetBarrier.offset                = 0;
+            metricsResetBarrier.size                  = sizeof(uint32_t) * 4;
+
+            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0,
+                    nullptr, 1, &metricsResetBarrier, 0, nullptr);
+        }
+
         // Transition final image to GENERAL layout for shader write
         {
             VkImageMemoryBarrier barrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
@@ -491,13 +555,14 @@ namespace Vlkrt
                 VkImageMemoryBarrier& b = barriers[barrierCount++];
                 b                       = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
                 b.image                 = guideImage->GetVkImage();
-                b.oldLayout = m_GuidesFirstFrame ? VK_IMAGE_LAYOUT_UNDEFINED
-                                                 : (m_GuidesInReadOnly ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-                                                                       : VK_IMAGE_LAYOUT_GENERAL);
-                b.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-                b.srcAccessMask = m_GuidesFirstFrame ? 0 : (m_GuidesInReadOnly ? VK_ACCESS_SHADER_READ_BIT
-                                                                                 : VK_ACCESS_SHADER_WRITE_BIT);
-                b.dstAccessMask                   = VK_ACCESS_SHADER_WRITE_BIT;
+                b.oldLayout     = m_GuidesFirstFrame ? VK_IMAGE_LAYOUT_UNDEFINED
+                                                     : (m_GuidesInReadOnly ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                                                                           : VK_IMAGE_LAYOUT_GENERAL);
+                b.newLayout     = VK_IMAGE_LAYOUT_GENERAL;
+                b.srcAccessMask = m_GuidesFirstFrame ? 0
+                                                     : (m_GuidesInReadOnly ? VK_ACCESS_SHADER_READ_BIT
+                                                                           : VK_ACCESS_SHADER_WRITE_BIT);
+                b.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
                 b.srcQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
                 b.dstQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
                 b.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -509,12 +574,12 @@ namespace Vlkrt
 
             if (barrierCount > 0) {
                 // On the very first frame only TOP_OF_PIPE is needed (no prior writes)
-                VkPipelineStageFlags srcStage = m_GuidesFirstFrame ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT
-                                                                   : (m_GuidesInReadOnly
-                                                                                     ? (VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR
-                                                                                               | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
-                                                                                               | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT)
-                                                                                     : VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR);
+                VkPipelineStageFlags srcStage
+                        = m_GuidesFirstFrame ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT
+                                             : (m_GuidesInReadOnly ? (VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR
+                                                                             | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+                                                                             | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT)
+                                                                   : VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR);
                 vkCmdPipelineBarrier(cmd, srcStage, VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR, 0, 0, nullptr, 0,
                         nullptr, barrierCount, barriers);
             }
@@ -535,18 +600,22 @@ namespace Vlkrt
         activeRaygen.size = m_RaygenRegion.stride;
 
         // Push constants: hot scene parameters
-        struct PushConstantsData {
+        struct PushConstantsData
+        {
             uint32_t numLights;
             uint32_t onlyOneLightSample;
             uint32_t russianRouletteDepth;
             uint32_t sceneIndex;
         } pc{};
-        pc.numLights              = static_cast<uint32_t>(scene.Lights.size());
-        pc.onlyOneLightSample     = scene.OnlyOneLightSample ? 1u : 0u;
-        pc.russianRouletteDepth   = scene.RussianRouletteDepth;
-        pc.sceneIndex             = static_cast<uint32_t>(scene.SceneIndex);
+        pc.numLights            = static_cast<uint32_t>(scene.Lights.size());
+        pc.onlyOneLightSample   = scene.OnlyOneLightSample ? 1u : 0u;
+        pc.russianRouletteDepth = scene.RussianRouletteDepth;
+        pc.sceneIndex           = static_cast<uint32_t>(scene.SceneIndex);
 
-        vkCmdPushConstants(cmd, m_RTPipelineLayout, VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_INTERSECTION_BIT_KHR, 0, sizeof(pc), &pc);
+        vkCmdPushConstants(cmd, m_RTPipelineLayout,
+                VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR
+                        | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_INTERSECTION_BIT_KHR,
+                0, sizeof(pc), &pc);
 
         const auto rtRecordStart = Clock::now();
         pvkCmdTraceRaysKHR(cmd, &activeRaygen, &m_MissRegion, &m_HitRegion, &m_CallableRegion, m_FinalImage->GetWidth(),
@@ -621,6 +690,20 @@ namespace Vlkrt
                 const uint32_t groupX = (m_FinalImage->GetWidth() + 7u) / 8u;
                 const uint32_t groupY = (m_FinalImage->GetHeight() + 7u) / 8u;
                 vkCmdDispatch(cmd, groupX, groupY, 1);
+
+                if (m_QualityMetricsBuffer != VK_NULL_HANDLE) {
+                    VkBufferMemoryBarrier metricsReadbackBarrier = { VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER };
+                    metricsReadbackBarrier.srcAccessMask         = VK_ACCESS_SHADER_WRITE_BIT;
+                    metricsReadbackBarrier.dstAccessMask         = VK_ACCESS_HOST_READ_BIT;
+                    metricsReadbackBarrier.srcQueueFamilyIndex   = VK_QUEUE_FAMILY_IGNORED;
+                    metricsReadbackBarrier.dstQueueFamilyIndex   = VK_QUEUE_FAMILY_IGNORED;
+                    metricsReadbackBarrier.buffer                = m_QualityMetricsBuffer;
+                    metricsReadbackBarrier.offset                = 0;
+                    metricsReadbackBarrier.size                  = sizeof(uint32_t) * 4;
+
+                    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 0,
+                            nullptr, 1, &metricsReadbackBarrier, 0, nullptr);
+                }
             }
 
             const auto nrdRecordEnd = Clock::now();
@@ -729,6 +812,37 @@ namespace Vlkrt
         Walnut::Application::FlushCommandBuffer(cmd);
         const auto submitEnd = Clock::now();
 
+        if (scene.EnableNRDDenoiser && m_QualityMetricsMemory != VK_NULL_HANDLE) {
+            uint32_t* metricsData = nullptr;
+            vkMapMemory(m_Device, m_QualityMetricsMemory, 0, sizeof(uint32_t) * 4, 0, (void**) &metricsData);
+
+            const uint32_t sumSquaredScaled = metricsData ? metricsData[0] : 0u;
+            const uint32_t sumAbsScaled     = metricsData ? metricsData[1] : 0u;
+            const uint32_t count            = metricsData ? metricsData[2] : 0u;
+
+            if (metricsData) vkUnmapMemory(m_Device, m_QualityMetricsMemory);
+
+            constexpr float kMetricScale = 256.0f;
+            if (count > 0) {
+                const float mse  = (sumSquaredScaled / kMetricScale) / (float) count;
+                const float rmse = std::sqrt(std::max(mse, 0.0f));
+                const float mad  = (sumAbsScaled / kMetricScale) / (float) count;
+
+                m_LastDenoiseMetrics.Valid           = true;
+                m_LastDenoiseMetrics.SampleCount     = count;
+                m_LastDenoiseMetrics.LumaMSE         = mse;
+                m_LastDenoiseMetrics.LumaRMSE        = rmse;
+                m_LastDenoiseMetrics.LumaMeanAbsDiff = mad;
+                m_LastDenoiseMetrics.LumaPSNR        = (mse > 1e-8f) ? (10.0f * std::log10(1.0f / mse)) : 99.0f;
+            }
+            else {
+                m_LastDenoiseMetrics = {};
+            }
+        }
+        else {
+            m_LastDenoiseMetrics = {};
+        }
+
         m_LastCameraProjection = camera.GetProjection();
         m_LastCameraView       = camera.GetView();
 
@@ -744,6 +858,37 @@ namespace Vlkrt
         m_LastPassStats.NRDOperational   = m_NRDDenoiser.IsOperational();
         m_LastPassStats.Width            = m_FinalImage->GetWidth();
         m_LastPassStats.Height           = m_FinalImage->GetHeight();
+
+        uint64_t estimatedBytes = 0;
+        estimatedBytes += static_cast<uint64_t>(m_VertexBufferSize);
+        estimatedBytes += static_cast<uint64_t>(m_PrevVertexBufferSize);
+        estimatedBytes += static_cast<uint64_t>(m_IndexBufferSize);
+        estimatedBytes += static_cast<uint64_t>(m_MaterialBufferSize);
+        estimatedBytes += static_cast<uint64_t>(m_MaterialIndexBufferSize);
+        estimatedBytes += static_cast<uint64_t>(m_LightBufferSize);
+        estimatedBytes += static_cast<uint64_t>(m_AABBTransformBufferSize);
+        estimatedBytes += static_cast<uint64_t>(m_PrevAABBTransformBufferSize);
+        estimatedBytes += static_cast<uint64_t>(m_AABBMaterialBufferSize);
+        estimatedBytes += static_cast<uint64_t>(sizeof(SceneUBOData));
+        estimatedBytes += static_cast<uint64_t>(sizeof(uint32_t) * 4);  // quality metrics buffer
+        estimatedBytes += static_cast<uint64_t>(m_SBTBufferSize);
+
+        estimatedBytes += EstimateImageBytes(m_FinalImage);
+        estimatedBytes += EstimateImageBytes(m_AccumImage);
+        estimatedBytes += EstimateImageBytes(m_GuideNormalRoughness);
+        estimatedBytes += EstimateImageBytes(m_GuideViewZ);
+        estimatedBytes += EstimateImageBytes(m_GuideMotionVectors);
+        estimatedBytes += EstimateImageBytes(m_GuideDiffRadianceHitDist);
+        estimatedBytes += EstimateImageBytes(m_GuideSpecRadianceHitDist);
+        estimatedBytes += EstimateImageBytes(m_GuideEmission);
+        estimatedBytes += EstimateImageBytes(m_GuideDepth);
+        estimatedBytes += EstimateImageBytes(m_FinalImageUpscaled);
+        estimatedBytes += EstimateImageBytes(m_NRDDenoiser.GetOutDiffRadianceHitDist());
+        estimatedBytes += EstimateImageBytes(m_NRDDenoiser.GetOutSpecRadianceHitDist());
+
+        for (const auto& [_, tex] : m_TextureCache) { estimatedBytes += EstimateImageBytes(tex); }
+
+        m_LastPassStats.EstimatedGraphicsMemoryMB = static_cast<float>(estimatedBytes / (1024.0 * 1024.0));
 
         m_FirstFrame = false;
         ++m_FrameIndex;
@@ -769,6 +914,7 @@ namespace Vlkrt
             m_ComputePipelineLayout = VK_NULL_HANDLE;
         }
         if (m_SBTBuffer != VK_NULL_HANDLE) {
+            m_SBTBufferSize = 0;
             vkDestroyBuffer(m_Device, m_SBTBuffer, nullptr);
             vkFreeMemory(m_Device, m_SBTMemory, nullptr);
             m_SBTBuffer = VK_NULL_HANDLE;
@@ -936,15 +1082,15 @@ namespace Vlkrt
         VkPipelineLayoutCreateInfo layoutCI = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
         layoutCI.setLayoutCount             = 1;
         layoutCI.pSetLayouts                = &m_DescriptorSetLayout;
-        
+
         // Push constants: 16 bytes for hot scene parameters
         VkPushConstantRange pcRange{};
-        pcRange.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR | 
-                             VK_SHADER_STAGE_ANY_HIT_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | 
-                             VK_SHADER_STAGE_INTERSECTION_BIT_KHR;
+        pcRange.stageFlags = VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR
+                             | VK_SHADER_STAGE_ANY_HIT_BIT_KHR | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR
+                             | VK_SHADER_STAGE_INTERSECTION_BIT_KHR;
         pcRange.offset     = 0;
         pcRange.size       = 16;  // sizeof(numLights + onlyOneLightSample + russianRouletteDepth + sceneIndex)
-        
+
         layoutCI.pushConstantRangeCount = 1;
         layoutCI.pPushConstantRanges    = &pcRange;
         vkCreatePipelineLayout(m_Device, &layoutCI, nullptr, &m_RTPipelineLayout);
@@ -981,8 +1127,8 @@ namespace Vlkrt
             // Keep pipeline recursion fixed to device capability to avoid pipeline+SBT rebuilds
             // when users tweak the global recursion setting from UI.
             pci.maxPipelineRayRecursionDepth = std::min(m_RTPipelineProperties.maxRayRecursionDepth, 16u);
-            pci.layout            = m_RTPipelineLayout;
-            pci.pLibraryInterface = &interfaceConfig;
+            pci.layout                       = m_RTPipelineLayout;
+            pci.pLibraryInterface            = &interfaceConfig;
             return pvkCreateRayTracingPipelinesKHR(
                     m_Device, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &pci, nullptr, &m_RTPipeline);
         };
@@ -1051,6 +1197,7 @@ namespace Vlkrt
         const uint32_t hitRegionSize    = alignUp(hitEntries * hitStride, baseAlignment);
 
         const VkDeviceSize sbtSize = raygenRegionSize + missRegionSize + hitRegionSize;
+        m_SBTBufferSize            = sbtSize;
         // Some drivers do not expose HOST_VISIBLE|HOST_COHERENT for SBT-compatible memory.
         // Request HOST_VISIBLE and explicitly flush after CPU writes.
         m_SBTBuffer = CreateBuffer(sbtSize,
@@ -1136,7 +1283,7 @@ namespace Vlkrt
                                                  | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_INTERSECTION_BIT_KHR;
         const VkShaderStageFlags kAllRTCompute = kAllRT | VK_SHADER_STAGE_COMPUTE_BIT;
 
-        VkDescriptorSetLayoutBinding bindings[23] = {};
+        VkDescriptorSetLayoutBinding bindings[24] = {};
 
         // 0: TLAS
         bindings[0] = { 0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, kAllRTCompute, nullptr };
@@ -1184,9 +1331,11 @@ namespace Vlkrt
         bindings[21] = { 21, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, kAllRTCompute, nullptr };
         // 22: guide depth
         bindings[22] = { 22, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, kAllRTCompute, nullptr };
+        // 23: denoise metrics accumulation buffer
+        bindings[23] = { 23, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, kAllRTCompute, nullptr };
 
         VkDescriptorSetLayoutCreateInfo layoutInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-        layoutInfo.bindingCount                    = 23;
+        layoutInfo.bindingCount                    = 24;
         layoutInfo.pBindings                       = bindings;
         vkCreateDescriptorSetLayout(m_Device, &layoutInfo, nullptr, &m_DescriptorSetLayout);
 
@@ -1194,10 +1343,10 @@ namespace Vlkrt
         VkDescriptorPoolSize poolSizes[5] = {};
         poolSizes[0]                      = { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1 };
         poolSizes[1]                      = { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 11 };  // binding 1,10,12-16,19,20,21,22
-        poolSizes[2]
-                = { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 9 };  // vtx,idx,mat,matIdx,lights,aabbT,aabbM,prevVtx,prevAabbT
-        poolSizes[3] = { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16 };
-        poolSizes[4] = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 };
+        poolSizes[2]                      = { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            10 };  // vtx,idx,mat,matIdx,lights,aabbT,aabbM,prevVtx,prevAabbT,qualityMetrics
+        poolSizes[3]                      = { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16 };
+        poolSizes[4]                      = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 };
 
         VkDescriptorPoolCreateInfo poolInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
         poolInfo.maxSets                    = 1;

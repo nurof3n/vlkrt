@@ -256,7 +256,7 @@ struct SceneUBO {
 // ------------------------------------------------------------------ //
 [[vk::binding(0,  0)]] RaytracingAccelerationStructure        g_tlas;
 [[vk::binding(1,  0)]] [[vk::image_format("rgba8")]]
-                        RWTexture2D<float4>                    g_outputImage;
+                       RWTexture2D<float4>                    g_outputImage;
 [[vk::binding(2,  0)]] StructuredBuffer<GPUVertex>            g_vtx;
 [[vk::binding(3,  0)]] StructuredBuffer<uint>                 g_idx;
 [[vk::binding(4,  0)]] StructuredBuffer<GPUPBRMaterial>       g_materials;
@@ -266,31 +266,32 @@ struct SceneUBO {
 [[vk::binding(8,  0)]] StructuredBuffer<AABBTransform>        g_aabbTransforms;
 [[vk::binding(9,  0)]] StructuredBuffer<GPUPBRMaterial>       g_aabbMaterials;
 [[vk::binding(10, 0)]] [[vk::image_format("rgba32f")]]
-                        RWTexture2D<float4>                    g_accumImage;
+                       RWTexture2D<float4>                    g_accumImage;
 [[vk::binding(11, 0)]] ConstantBuffer<SceneUBO>               g_scene;
 
 // NRD guide buffers (optimized: narrower precision where possible)
 [[vk::binding(12, 0)]] [[vk::image_format("rgba32f")]]
-                        RWTexture2D<float4>                    g_guideNormalRoughness;  // RGBA32F: stability-critical
+                       RWTexture2D<float4>                    g_guideNormalRoughness;  // RGBA32F: stability-critical
 [[vk::binding(13, 0)]] [[vk::image_format("rgba16f")]]
-                        RWTexture2D<float4>                    g_guideViewZ;  // RGBA16F: depth + material (narrower)
+                       RWTexture2D<float4>                    g_guideViewZ;  // RGBA16F: depth + material (narrower)
 [[vk::binding(14, 0)]] [[vk::image_format("rgba16f")]]
-                        RWTexture2D<float4>                    g_guideMotionVectors;  // RGBA16F: motion + metallic (narrower)
+                       RWTexture2D<float4>                    g_guideMotionVectors;  // RGBA16F: motion + metallic (narrower)
 [[vk::binding(15, 0)]] [[vk::image_format("rgba32f")]]
-                        RWTexture2D<float4>                    g_guideDiffRadianceHitDist;  // RGBA32F: stability-critical
+                       RWTexture2D<float4>                    g_guideDiffRadianceHitDist;  // RGBA32F: stability-critical
 [[vk::binding(16, 0)]] [[vk::image_format("rgba32f")]]
-                        RWTexture2D<float4>                    g_guideSpecRadianceHitDist;  // RGBA32F: stability-critical
+                       RWTexture2D<float4>                    g_guideSpecRadianceHitDist;  // RGBA32F: stability-critical
 [[vk::binding(17, 0)]] StructuredBuffer<GPUVertex>            g_vtxPrev;
 [[vk::binding(18, 0)]] StructuredBuffer<AABBTransform>        g_aabbTransformsPrev;
 
 [[vk::binding(19, 0)]] [[vk::image_format("rgba32f")]]
-                        RWTexture2D<float4>                    g_outDiffRadianceHitDist;
+                       RWTexture2D<float4>                    g_outDiffRadianceHitDist;
 [[vk::binding(20, 0)]] [[vk::image_format("rgba32f")]]
-                        RWTexture2D<float4>                    g_outSpecRadianceHitDist;
+                       RWTexture2D<float4>                    g_outSpecRadianceHitDist;
 [[vk::binding(21, 0)]] [[vk::image_format("rgba16f")]]
-                        RWTexture2D<float4>                    g_guideEmission;  // RGBA16F
+                       RWTexture2D<float4>                    g_guideEmission;  // RGBA16F
 [[vk::binding(22, 0)]] [[vk::image_format("r32f")]]
-                        RWTexture2D<float>                     g_guideDepth;  // R32F: scalar depth
+                       RWTexture2D<float>                     g_guideDepth;  // R32F: scalar depth
+[[vk::binding(23, 0)]] RWStructuredBuffer<uint>               g_qualityMetrics;
 
 // ------------------------------------------------------------------ //
 // Math helpers

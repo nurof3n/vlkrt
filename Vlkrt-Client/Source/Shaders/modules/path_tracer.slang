@@ -247,7 +247,7 @@ float3 DoPathTracing(inout RayPayload payload,
             payload.diffuse += throughput * directDiffuse;
             payload.specular += throughput * directSpecular;
             color += throughput * (directDiffuse + directSpecular);
-        } else if (payload.recursionDepth <= 2u && pc.numLights > 0u) {
+        } else if (pc.numLights > 0u) {
             if (pc.onlyOneLightSample != 0u) {
                 uint idx = uint(Random(payload.rngState) * float(pc.numLights));
                 color += throughput *

@@ -139,6 +139,20 @@ namespace Vlkrt
         bool NRDOperational{ false };
         uint32_t Width{ 0 };
         uint32_t Height{ 0 };
+        float EstimatedGraphicsMemoryMB{ 0.0f };
+    };
+
+    /// <summary>
+    /// Runtime quality metrics comparing denoised output against raw (non-denoised) output.
+    /// </summary>
+    struct DenoiseComparisonMetrics
+    {
+        bool Valid{ false };
+        uint32_t SampleCount{ 0 };
+        float LumaMSE{ 0.0f };
+        float LumaRMSE{ 0.0f };
+        float LumaPSNR{ 0.0f };
+        float LumaMeanAbsDiff{ 0.0f };
     };
 
     /// <summary>
@@ -170,31 +184,24 @@ namespace Vlkrt
         auto IsNRDOperational() const -> bool { return m_NRDDenoiser.IsOperational(); }
 
         void MarkDirtyMeshes(const std::vector<uint32_t>& meshIndices)
-        {
-            m_DirtyMeshIndices.insert(m_DirtyMeshIndices.end(), meshIndices.begin(), meshIndices.end());
-        }
+        { m_DirtyMeshIndices.insert(m_DirtyMeshIndices.end(), meshIndices.begin(), meshIndices.end()); }
 
         void MarkDirtyLights(const std::vector<uint32_t>& lightIndices)
-        {
-            m_DirtyLightIndices.insert(m_DirtyLightIndices.end(), lightIndices.begin(), lightIndices.end());
-        }
+        { m_DirtyLightIndices.insert(m_DirtyLightIndices.end(), lightIndices.begin(), lightIndices.end()); }
 
         auto GetFinalImage() const -> std::shared_ptr<Walnut::Image> { return m_FinalImage; }
         auto GetGuideNormalRoughness() const -> std::shared_ptr<Walnut::Image> { return m_GuideNormalRoughness; }
         auto GetGuideViewZ() const -> std::shared_ptr<Walnut::Image> { return m_GuideViewZ; }
         auto GetGuideMotionVectors() const -> std::shared_ptr<Walnut::Image> { return m_GuideMotionVectors; }
         auto GetGuideDiffRadianceHitDist() const -> std::shared_ptr<Walnut::Image>
-        {
-            return m_GuideDiffRadianceHitDist;
-        }
+        { return m_GuideDiffRadianceHitDist; }
         auto GetGuideSpecRadianceHitDist() const -> std::shared_ptr<Walnut::Image>
-        {
-            return m_GuideSpecRadianceHitDist;
-        }
+        { return m_GuideSpecRadianceHitDist; }
         auto GetGuideEmission() const -> std::shared_ptr<Walnut::Image> { return m_GuideEmission; }
         auto GetGuideDepth() const -> std::shared_ptr<Walnut::Image> { return m_GuideDepth; }
         auto GetUpscaledImage() const -> std::shared_ptr<Walnut::Image> { return m_FinalImageUpscaled; }
         auto GetLastPassStats() const -> const RenderPassStats& { return m_LastPassStats; }
+        auto GetDenoiseComparisonMetrics() const -> const DenoiseComparisonMetrics& { return m_LastDenoiseMetrics; }
 
         void OnFSRSettingsChanged(bool enabled, uint32_t qualityMode, float sharpness);
 
@@ -240,6 +247,7 @@ namespace Vlkrt
         // Shader binding table
         VkBuffer m_SBTBuffer{ VK_NULL_HANDLE };
         VkDeviceMemory m_SBTMemory{ VK_NULL_HANDLE };
+        VkDeviceSize m_SBTBufferSize{ 0 };
         VkStridedDeviceAddressRegionKHR m_RaygenRegion{};
         VkStridedDeviceAddressRegionKHR m_MissRegion{};
         VkStridedDeviceAddressRegionKHR m_HitRegion{};
@@ -294,14 +302,18 @@ namespace Vlkrt
         VkBuffer m_SceneUBOBuffer{ VK_NULL_HANDLE };
         VkDeviceMemory m_SceneUBOMemory{ VK_NULL_HANDLE };
 
+        // Denoise quality metric accumulation buffer (updated by compose compute shader)
+        VkBuffer m_QualityMetricsBuffer{ VK_NULL_HANDLE };
+        VkDeviceMemory m_QualityMetricsMemory{ VK_NULL_HANDLE };
+
         // Temporal accumulation image
         std::shared_ptr<Walnut::Image> m_AccumImage;
 
         // NRD
         NRDDenoiser m_NRDDenoiser;
-        std::shared_ptr<Walnut::Image> m_GuideNormalRoughness;      // RGBA32F: packed normal+roughness+material ID
-        std::shared_ptr<Walnut::Image> m_GuideViewZ;                // RGBA16F: view depth + material data (narrower precision)
-        std::shared_ptr<Walnut::Image> m_GuideMotionVectors;        // RGBA16F: motion vectors + metallic (narrower precision)
+        std::shared_ptr<Walnut::Image> m_GuideNormalRoughness;  // RGBA32F: packed normal+roughness+material ID
+        std::shared_ptr<Walnut::Image> m_GuideViewZ;  // RGBA16F: view depth + material data (narrower precision)
+        std::shared_ptr<Walnut::Image> m_GuideMotionVectors;  // RGBA16F: motion vectors + metallic (narrower precision)
         std::shared_ptr<Walnut::Image> m_GuideDiffRadianceHitDist;  // RGBA16F: diffuse radiance + hit distance
         std::shared_ptr<Walnut::Image> m_GuideSpecRadianceHitDist;  // RGBA16F: specular radiance + hit distance
         std::shared_ptr<Walnut::Image> m_GuideEmission;             // RGBA16F: direct emission
@@ -355,6 +367,7 @@ namespace Vlkrt
         glm::vec2 m_PrevCameraJitter{ 0.0f, 0.0f };
         float m_ElapsedTime{ 0.0f };
         RenderPassStats m_LastPassStats{};
+        DenoiseComparisonMetrics m_LastDenoiseMetrics{};
 
         std::vector<GPUVertex> m_PreviousFrameVertices;
         std::vector<AABBTransform> m_PreviousFrameAABBTransforms;

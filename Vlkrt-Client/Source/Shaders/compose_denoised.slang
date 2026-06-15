@@ -44,23 +44,41 @@ void ComposeDenoisedMain(uint3 dispatchThreadID : SV_DispatchThreadID)
     float3 diffFactor, specFactor;
     NRD_MaterialFactors(normal, V, albedo, Rf0, roughness, diffFactor, specFactor);
 
+    float3 nrdDiff = RELAX_BackEnd_UnpackRadiance(g_outDiffRadianceHitDist[pixelCoord]).xyz * diffFactor;
+    float3 nrdSpec = RELAX_BackEnd_UnpackRadiance(g_outSpecRadianceHitDist[pixelCoord]).xyz * specFactor;
+    float3 emission = g_guideEmission[pixelCoord].xyz;
+    float3 denoised = max(nrdDiff + nrdSpec + emission, 0.0f);
+
+    // Fallback to raw guides if NRD outputs are currently unavailable.
+    float nrdSum = dot(denoised, float3(1.0f, 1.0f, 1.0f));
+    if (nrdSum < 1e-6f) {
+        float3 inDiff = RELAX_BackEnd_UnpackRadiance(g_guideDiffRadianceHitDist[pixelCoord]).xyz * diffFactor;
+        float3 inSpec = RELAX_BackEnd_UnpackRadiance(g_guideSpecRadianceHitDist[pixelCoord]).xyz * specFactor;
+        denoised = max(inDiff + inSpec + emission, 0.0f);
+    }
+
+    float3 rawDiff = RELAX_BackEnd_UnpackRadiance(g_guideDiffRadianceHitDist[pixelCoord]).xyz * diffFactor;
+    float3 rawSpec = RELAX_BackEnd_UnpackRadiance(g_guideSpecRadianceHitDist[pixelCoord]).xyz * specFactor;
+    float3 rawNoisy = max(rawDiff + rawSpec + emission, 0.0f);
+
+    const float gammaPow = 1.0f / 2.2f;
+    float3 denoisedDisplay = pow(ACES(denoised), float3(gammaPow));
+    float3 rawDisplay      = pow(ACES(rawNoisy), float3(gammaPow));
+
+    // Accumulate luma delta statistics for CPU-side metrics.
+    float rawLuma       = GetLuminance(rawDisplay);
+    float denoisedLuma  = GetLuminance(denoisedDisplay);
+    float lumaDiff      = abs(rawLuma - denoisedLuma);
+    float lumaDiffSq    = lumaDiff * lumaDiff;
+    uint sumSqIncrement = (uint) (saturate(lumaDiffSq) * 256.0f + 0.5f);
+    uint sumAbsIncrement = (uint) (saturate(lumaDiff) * 256.0f + 0.5f);
+    InterlockedAdd(g_qualityMetrics[0], sumSqIncrement);
+    InterlockedAdd(g_qualityMetrics[1], sumAbsIncrement);
+    InterlockedAdd(g_qualityMetrics[2], 1u);
+
     if (debugMode == 0u) // FinalImage
     {
-        float3 nrdDiff = RELAX_BackEnd_UnpackRadiance(g_outDiffRadianceHitDist[pixelCoord]).xyz * diffFactor;
-        float3 nrdSpec = RELAX_BackEnd_UnpackRadiance(g_outSpecRadianceHitDist[pixelCoord]).xyz * specFactor;
-        float3 emission = g_guideEmission[pixelCoord].xyz;
-        float3 denoised = max(nrdDiff + nrdSpec + emission, 0.0f);
-
-        // DIAGNOSTIC: if NRD output is zero, fall back to the raw guide input
-        float nrdSum = dot(denoised, float3(1.0f, 1.0f, 1.0f));
-        if (nrdSum < 1e-6f) {
-            float3 inDiff = RELAX_BackEnd_UnpackRadiance(g_guideDiffRadianceHitDist[pixelCoord]).xyz * diffFactor;
-            float3 inSpec = RELAX_BackEnd_UnpackRadiance(g_guideSpecRadianceHitDist[pixelCoord]).xyz * specFactor;
-            denoised = max(inDiff + inSpec + emission, 0.0f);
-        }
-
-        const float gammaPow = 1.0f / 2.2f;
-        g_outputImage[pixelCoord] = float4(pow(ACES(denoised), float3(gammaPow)), 1.0f);
+        g_outputImage[pixelCoord] = float4(denoisedDisplay, 1.0f);
     }
     else if (debugMode == 1u) // NormalRoughness
     {
@@ -86,5 +104,19 @@ void ComposeDenoisedMain(uint3 dispatchThreadID : SV_DispatchThreadID)
     {
         float3 spec = RELAX_BackEnd_UnpackRadiance(g_guideSpecRadianceHitDist[pixelCoord]).xyz * specFactor;
         g_outputImage[pixelCoord] = float4(spec, 1.0f);
+    }
+    else if (debugMode == 6u) // RawNoDenoise
+    {
+        g_outputImage[pixelCoord] = float4(rawDisplay, 1.0f);
+    }
+    else if (debugMode == 7u) // SplitDenoisedVsRaw
+    {
+        bool leftSide = pixelCoord.x < (width / 2u);
+        float3 color  = leftSide ? denoisedDisplay : rawDisplay;
+
+        // 1px separator for easier visual comparison
+        if (abs(int(pixelCoord.x) - int(width / 2u)) <= 1) color = float3(1.0f, 1.0f, 1.0f);
+
+        g_outputImage[pixelCoord] = float4(color, 1.0f);
     }
 }
