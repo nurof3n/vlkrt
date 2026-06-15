@@ -198,6 +198,7 @@ namespace Vlkrt
         createOrResizeImage(m_GuideSpecRadianceHitDist, m_RenderWidth, m_RenderHeight, Walnut::ImageFormat::RGBA32F);
         createOrResizeImage(m_GuideEmission, m_RenderWidth, m_RenderHeight, Walnut::ImageFormat::RGBA16F);
         createOrResizeImage(m_GuideDepth, m_RenderWidth, m_RenderHeight, Walnut::ImageFormat::R32F);
+        createOrResizeImage(m_DenoiseReferenceImage, m_RenderWidth, m_RenderHeight, Walnut::ImageFormat::RGBA);
 
         if (m_FSREnabled) {
             createOrResizeImage(m_FinalImageUpscaled, m_DisplayWidth, m_DisplayHeight, Walnut::ImageFormat::RGBA);
@@ -213,7 +214,7 @@ namespace Vlkrt
         if (m_DescriptorSetLayout == VK_NULL_HANDLE) CreateDescriptorSets();
 
         if (m_QualityMetricsBuffer == VK_NULL_HANDLE) {
-            m_QualityMetricsBuffer = CreateBuffer(sizeof(uint32_t) * 4,
+            m_QualityMetricsBuffer = CreateBuffer(sizeof(uint32_t) * 6,
                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_QualityMetricsMemory);
         }
@@ -228,7 +229,7 @@ namespace Vlkrt
             accumInfo.imageView   = m_AccumImage->GetVkImageView();
             accumInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-            VkWriteDescriptorSet writes[12] = {};
+            VkWriteDescriptorSet writes[13] = {};
             writes[0].sType                 = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             writes[0].dstSet                = m_DescriptorSet;
             writes[0].dstBinding            = 1;
@@ -314,7 +315,7 @@ namespace Vlkrt
             VkDescriptorBufferInfo metricsInfo{};
             metricsInfo.buffer = m_QualityMetricsBuffer;
             metricsInfo.offset = 0;
-            metricsInfo.range  = sizeof(uint32_t) * 4;
+            metricsInfo.range  = sizeof(uint32_t) * 6;
 
             writes[11].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             writes[11].dstSet          = m_DescriptorSet;
@@ -323,7 +324,19 @@ namespace Vlkrt
             writes[11].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
             writes[11].pBufferInfo     = &metricsInfo;
 
-            vkUpdateDescriptorSets(m_Device, 12, writes, 0, nullptr);
+            // Reference image for denoise metrics (binding 24)
+            VkDescriptorImageInfo referenceInfo{};
+            referenceInfo.imageView   = m_DenoiseReferenceImage->GetVkImageView();
+            referenceInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+            writes[12].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[12].dstSet          = m_DescriptorSet;
+            writes[12].dstBinding      = 24;
+            writes[12].descriptorCount = 1;
+            writes[12].descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            writes[12].pImageInfo      = &referenceInfo;
+
+            vkUpdateDescriptorSets(m_Device, 13, writes, 0, nullptr);
         }
 
         // Update NRD denoiser with the new guide buffers
@@ -331,10 +344,33 @@ namespace Vlkrt
                 m_GuideDiffRadianceHitDist, m_GuideSpecRadianceHitDist);
 
         // Force pipeline rebuild on next frame
-        m_FirstFrame       = true;
-        m_AccumFirstFrame  = true;
-        m_GuidesFirstFrame = true;
-        m_GuidesInReadOnly = false;
+        m_FirstFrame                     = true;
+        m_AccumFirstFrame                = true;
+        m_GuidesFirstFrame               = true;
+        m_GuidesInReadOnly               = false;
+        m_HasDenoiseReference            = false;
+        m_ReferenceImageInitialized      = false;
+        m_ReferenceCaptureInProgress     = false;
+        m_ReferenceCaptureTargetFrames   = 0;
+        m_ReferenceCaptureCapturedFrames = 0;
+    }
+
+    void Renderer::StartReferenceCapture(uint32_t frameCount)
+    {
+        m_ReferenceCaptureTargetFrames   = std::max(frameCount, 1u);
+        m_ReferenceCaptureCapturedFrames = 0;
+        m_ReferenceCaptureInProgress     = true;
+        m_HasDenoiseReference            = false;
+        m_ReferenceImageInitialized      = false;
+        ResetAccumulation();
+    }
+
+    void Renderer::ClearReferenceImage()
+    {
+        m_HasDenoiseReference            = false;
+        m_ReferenceCaptureInProgress     = false;
+        m_ReferenceCaptureTargetFrames   = 0;
+        m_ReferenceCaptureCapturedFrames = 0;
     }
 
     void Renderer::Render(const Scene& scene, const Camera& camera)
@@ -459,9 +495,11 @@ namespace Vlkrt
             return false;
         };
 
-        const bool resetByCameraView = viewChanged(currentView, m_LastCameraView);
+        const bool forceTemporalReferenceCapture = m_ReferenceCaptureInProgress;
+        const bool resetByCameraView             = viewChanged(currentView, m_LastCameraView);
         const bool allowTemporalCameraReuse
-                = scene.EnableNRDDenoiser && (scene.RaytracingType == RaytracingMode::PathTracing);
+                = (scene.EnableNRDDenoiser && (scene.RaytracingType == RaytracingMode::PathTracing))
+                  || forceTemporalReferenceCapture;
         if (resetByCameraView && !allowTemporalCameraReuse) {
             m_FrameIndex      = 0;
             m_AccumFirstFrame = true;
@@ -471,13 +509,15 @@ namespace Vlkrt
 
         // Upload SceneUBO
         const auto uboStart = Clock::now();
-        UpdateSceneUBO(scene, camera);
+        UpdateSceneUBO(scene, camera, forceTemporalReferenceCapture);
         const auto uboEnd = Clock::now();
 
         VkCommandBuffer cmd = Walnut::Application::GetCommandBuffer(true);
 
-        if (m_QualityMetricsBuffer != VK_NULL_HANDLE) {
-            vkCmdFillBuffer(cmd, m_QualityMetricsBuffer, 0, sizeof(uint32_t) * 4, 0);
+        const bool collectDenoiseMetrics = scene.EnableNRDDenoiser && scene.EnableDenoiseMetrics
+                                           && !m_ReferenceCaptureInProgress && m_QualityMetricsBuffer != VK_NULL_HANDLE;
+        if (collectDenoiseMetrics) {
+            vkCmdFillBuffer(cmd, m_QualityMetricsBuffer, 0, sizeof(uint32_t) * 6, 0);
 
             VkBufferMemoryBarrier metricsResetBarrier = { VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER };
             metricsResetBarrier.srcAccessMask         = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -486,7 +526,7 @@ namespace Vlkrt
             metricsResetBarrier.dstQueueFamilyIndex   = VK_QUEUE_FAMILY_IGNORED;
             metricsResetBarrier.buffer                = m_QualityMetricsBuffer;
             metricsResetBarrier.offset                = 0;
-            metricsResetBarrier.size                  = sizeof(uint32_t) * 4;
+            metricsResetBarrier.size                  = sizeof(uint32_t) * 6;
 
             vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0,
                     nullptr, 1, &metricsResetBarrier, 0, nullptr);
@@ -594,7 +634,9 @@ namespace Vlkrt
                 cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, m_RTPipelineLayout, 0, 1, &m_DescriptorSet, 0, nullptr);
 
         // Select raygen SBT entry: 0=PathTracing, 1=PathTracingTemporal
-        const uint32_t raygenIdx = (scene.RaytracingType == RaytracingMode::PathTracingTemporal) ? 1u : 0u;
+        const uint32_t raygenIdx
+                = (scene.RaytracingType == RaytracingMode::PathTracingTemporal || forceTemporalReferenceCapture) ? 1u
+                                                                                                                 : 0u;
         VkStridedDeviceAddressRegionKHR activeRaygen = m_RaygenRegion;
         activeRaygen.deviceAddress += raygenIdx * m_RaygenRegion.stride;
         activeRaygen.size = m_RaygenRegion.stride;
@@ -622,11 +664,12 @@ namespace Vlkrt
                 m_FinalImage->GetHeight(), 1);
         const auto rtRecordEnd = Clock::now();
 
-        m_NRDDenoiser.SetEnabled(scene.EnableNRDDenoiser);
+        const bool enableNRDThisFrame = scene.EnableNRDDenoiser && !forceTemporalReferenceCapture;
+        m_NRDDenoiser.SetEnabled(enableNRDThisFrame);
         float nrdRecordMs = 0.0f;
 
         // Sync RT shader writes before NRD compute dispatches
-        if (scene.EnableNRDDenoiser) {
+        if (enableNRDThisFrame) {
             {
                 VkMemoryBarrier memoryBarrier = { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
                 memoryBarrier.srcAccessMask   = VK_ACCESS_SHADER_WRITE_BIT;
@@ -691,7 +734,7 @@ namespace Vlkrt
                 const uint32_t groupY = (m_FinalImage->GetHeight() + 7u) / 8u;
                 vkCmdDispatch(cmd, groupX, groupY, 1);
 
-                if (m_QualityMetricsBuffer != VK_NULL_HANDLE) {
+                if (collectDenoiseMetrics) {
                     VkBufferMemoryBarrier metricsReadbackBarrier = { VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER };
                     metricsReadbackBarrier.srcAccessMask         = VK_ACCESS_SHADER_WRITE_BIT;
                     metricsReadbackBarrier.dstAccessMask         = VK_ACCESS_HOST_READ_BIT;
@@ -699,7 +742,7 @@ namespace Vlkrt
                     metricsReadbackBarrier.dstQueueFamilyIndex   = VK_QUEUE_FAMILY_IGNORED;
                     metricsReadbackBarrier.buffer                = m_QualityMetricsBuffer;
                     metricsReadbackBarrier.offset                = 0;
-                    metricsReadbackBarrier.size                  = sizeof(uint32_t) * 4;
+                    metricsReadbackBarrier.size                  = sizeof(uint32_t) * 6;
 
                     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 0,
                             nullptr, 1, &metricsReadbackBarrier, 0, nullptr);
@@ -728,6 +771,97 @@ namespace Vlkrt
             vkCmdPipelineBarrier(cmd,
                     VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                     VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+        }
+
+        const bool captureReferenceThisFrame
+                = m_ReferenceCaptureInProgress
+                  && (m_ReferenceCaptureCapturedFrames + 1u >= m_ReferenceCaptureTargetFrames)
+                  && m_DenoiseReferenceImage != nullptr;
+        if (captureReferenceThisFrame) {
+            VkImageMemoryBarrier copyBarriers[2] = {};
+
+            copyBarriers[0].sType                           = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            copyBarriers[0].image                           = m_FinalImage->GetVkImage();
+            copyBarriers[0].oldLayout                       = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            copyBarriers[0].newLayout                       = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+            copyBarriers[0].srcAccessMask                   = VK_ACCESS_SHADER_READ_BIT;
+            copyBarriers[0].dstAccessMask                   = VK_ACCESS_TRANSFER_READ_BIT;
+            copyBarriers[0].srcQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+            copyBarriers[0].dstQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+            copyBarriers[0].subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+            copyBarriers[0].subresourceRange.baseMipLevel   = 0;
+            copyBarriers[0].subresourceRange.levelCount     = 1;
+            copyBarriers[0].subresourceRange.baseArrayLayer = 0;
+            copyBarriers[0].subresourceRange.layerCount     = 1;
+
+            copyBarriers[1].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            copyBarriers[1].image = m_DenoiseReferenceImage->GetVkImage();
+            copyBarriers[1].oldLayout
+                    = m_ReferenceImageInitialized ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_UNDEFINED;
+            copyBarriers[1].newLayout                     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+            copyBarriers[1].srcAccessMask                 = m_ReferenceImageInitialized ? VK_ACCESS_SHADER_READ_BIT : 0;
+            copyBarriers[1].dstAccessMask                 = VK_ACCESS_TRANSFER_WRITE_BIT;
+            copyBarriers[1].srcQueueFamilyIndex           = VK_QUEUE_FAMILY_IGNORED;
+            copyBarriers[1].dstQueueFamilyIndex           = VK_QUEUE_FAMILY_IGNORED;
+            copyBarriers[1].subresourceRange.aspectMask   = VK_IMAGE_ASPECT_COLOR_BIT;
+            copyBarriers[1].subresourceRange.baseMipLevel = 0;
+            copyBarriers[1].subresourceRange.levelCount   = 1;
+            copyBarriers[1].subresourceRange.baseArrayLayer = 0;
+            copyBarriers[1].subresourceRange.layerCount     = 1;
+
+            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 2, copyBarriers);
+
+            VkImageCopy copyRegion{};
+            copyRegion.srcSubresource.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+            copyRegion.srcSubresource.mipLevel       = 0;
+            copyRegion.srcSubresource.baseArrayLayer = 0;
+            copyRegion.srcSubresource.layerCount     = 1;
+            copyRegion.dstSubresource.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+            copyRegion.dstSubresource.mipLevel       = 0;
+            copyRegion.dstSubresource.baseArrayLayer = 0;
+            copyRegion.dstSubresource.layerCount     = 1;
+            copyRegion.extent.width                  = m_FinalImage->GetWidth();
+            copyRegion.extent.height                 = m_FinalImage->GetHeight();
+            copyRegion.extent.depth                  = 1;
+
+            vkCmdCopyImage(cmd, m_FinalImage->GetVkImage(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    m_DenoiseReferenceImage->GetVkImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+
+            VkImageMemoryBarrier restoreBarriers[2] = {};
+
+            restoreBarriers[0].sType                           = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            restoreBarriers[0].image                           = m_FinalImage->GetVkImage();
+            restoreBarriers[0].oldLayout                       = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+            restoreBarriers[0].newLayout                       = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            restoreBarriers[0].srcAccessMask                   = VK_ACCESS_TRANSFER_READ_BIT;
+            restoreBarriers[0].dstAccessMask                   = VK_ACCESS_SHADER_READ_BIT;
+            restoreBarriers[0].srcQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+            restoreBarriers[0].dstQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+            restoreBarriers[0].subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+            restoreBarriers[0].subresourceRange.baseMipLevel   = 0;
+            restoreBarriers[0].subresourceRange.levelCount     = 1;
+            restoreBarriers[0].subresourceRange.baseArrayLayer = 0;
+            restoreBarriers[0].subresourceRange.layerCount     = 1;
+
+            restoreBarriers[1].sType                           = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            restoreBarriers[1].image                           = m_DenoiseReferenceImage->GetVkImage();
+            restoreBarriers[1].oldLayout                       = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+            restoreBarriers[1].newLayout                       = VK_IMAGE_LAYOUT_GENERAL;
+            restoreBarriers[1].srcAccessMask                   = VK_ACCESS_TRANSFER_WRITE_BIT;
+            restoreBarriers[1].dstAccessMask                   = VK_ACCESS_SHADER_READ_BIT;
+            restoreBarriers[1].srcQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+            restoreBarriers[1].dstQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+            restoreBarriers[1].subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+            restoreBarriers[1].subresourceRange.baseMipLevel   = 0;
+            restoreBarriers[1].subresourceRange.levelCount     = 1;
+            restoreBarriers[1].subresourceRange.baseArrayLayer = 0;
+            restoreBarriers[1].subresourceRange.layerCount     = 1;
+
+            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0,
+                    nullptr, 2, restoreBarriers);
+            m_ReferenceImageInitialized = true;
         }
 
         // FSR upscale pass
@@ -812,13 +946,16 @@ namespace Vlkrt
         Walnut::Application::FlushCommandBuffer(cmd);
         const auto submitEnd = Clock::now();
 
-        if (scene.EnableNRDDenoiser && m_QualityMetricsMemory != VK_NULL_HANDLE) {
+        if (collectDenoiseMetrics && m_QualityMetricsMemory != VK_NULL_HANDLE) {
             uint32_t* metricsData = nullptr;
-            vkMapMemory(m_Device, m_QualityMetricsMemory, 0, sizeof(uint32_t) * 4, 0, (void**) &metricsData);
+            vkMapMemory(m_Device, m_QualityMetricsMemory, 0, sizeof(uint32_t) * 6, 0, (void**) &metricsData);
 
-            const uint32_t sumSquaredScaled = metricsData ? metricsData[0] : 0u;
-            const uint32_t sumAbsScaled     = metricsData ? metricsData[1] : 0u;
-            const uint32_t count            = metricsData ? metricsData[2] : 0u;
+            const uint32_t sumSquaredScaled    = metricsData ? metricsData[0] : 0u;
+            const uint32_t sumAbsScaled        = metricsData ? metricsData[1] : 0u;
+            const uint32_t count               = metricsData ? metricsData[2] : 0u;
+            const uint32_t rawSumSquaredScaled = metricsData ? metricsData[3] : 0u;
+            const uint32_t rawSumAbsScaled     = metricsData ? metricsData[4] : 0u;
+            const uint32_t rawCount            = metricsData ? metricsData[5] : 0u;
 
             if (metricsData) vkUnmapMemory(m_Device, m_QualityMetricsMemory);
 
@@ -836,11 +973,44 @@ namespace Vlkrt
                 m_LastDenoiseMetrics.LumaPSNR        = (mse > 1e-8f) ? (10.0f * std::log10(1.0f / mse)) : 99.0f;
             }
             else {
-                m_LastDenoiseMetrics = {};
+                m_LastDenoiseMetrics.Valid           = false;
+                m_LastDenoiseMetrics.SampleCount     = 0;
+                m_LastDenoiseMetrics.LumaMSE         = 0.0f;
+                m_LastDenoiseMetrics.LumaRMSE        = 0.0f;
+                m_LastDenoiseMetrics.LumaPSNR        = 0.0f;
+                m_LastDenoiseMetrics.LumaMeanAbsDiff = 0.0f;
+            }
+            if (rawCount > 0) {
+                const float rawMse  = (rawSumSquaredScaled / kMetricScale) / (float) rawCount;
+                const float rawRmse = std::sqrt(std::max(rawMse, 0.0f));
+                const float rawMad  = (rawSumAbsScaled / kMetricScale) / (float) rawCount;
+
+                m_LastDenoiseMetrics.RawValid           = true;
+                m_LastDenoiseMetrics.RawSampleCount     = rawCount;
+                m_LastDenoiseMetrics.RawLumaMSE         = rawMse;
+                m_LastDenoiseMetrics.RawLumaRMSE        = rawRmse;
+                m_LastDenoiseMetrics.RawLumaMeanAbsDiff = rawMad;
+                m_LastDenoiseMetrics.RawLumaPSNR = (rawMse > 1e-8f) ? (10.0f * std::log10(1.0f / rawMse)) : 99.0f;
+            }
+            else {
+                m_LastDenoiseMetrics.RawValid           = false;
+                m_LastDenoiseMetrics.RawSampleCount     = 0;
+                m_LastDenoiseMetrics.RawLumaMSE         = 0.0f;
+                m_LastDenoiseMetrics.RawLumaRMSE        = 0.0f;
+                m_LastDenoiseMetrics.RawLumaPSNR        = 0.0f;
+                m_LastDenoiseMetrics.RawLumaMeanAbsDiff = 0.0f;
             }
         }
         else {
             m_LastDenoiseMetrics = {};
+        }
+
+        if (m_ReferenceCaptureInProgress) {
+            ++m_ReferenceCaptureCapturedFrames;
+            if (m_ReferenceCaptureCapturedFrames >= m_ReferenceCaptureTargetFrames) {
+                m_ReferenceCaptureInProgress = false;
+                m_HasDenoiseReference        = m_ReferenceImageInitialized;
+            }
         }
 
         m_LastCameraProjection = camera.GetProjection();
@@ -870,7 +1040,7 @@ namespace Vlkrt
         estimatedBytes += static_cast<uint64_t>(m_PrevAABBTransformBufferSize);
         estimatedBytes += static_cast<uint64_t>(m_AABBMaterialBufferSize);
         estimatedBytes += static_cast<uint64_t>(sizeof(SceneUBOData));
-        estimatedBytes += static_cast<uint64_t>(sizeof(uint32_t) * 4);  // quality metrics buffer
+        estimatedBytes += static_cast<uint64_t>(sizeof(uint32_t) * 6);  // quality metrics buffer
         estimatedBytes += static_cast<uint64_t>(m_SBTBufferSize);
 
         estimatedBytes += EstimateImageBytes(m_FinalImage);
@@ -935,7 +1105,7 @@ namespace Vlkrt
         return r;
     }
 
-    void Renderer::UpdateSceneUBO(const Scene& scene, const Camera& camera)
+    void Renderer::UpdateSceneUBO(const Scene& scene, const Camera& camera, bool forceTemporalMode)
     {
         ++m_GlobalTick;
         SceneUBOData ubo{};
@@ -981,12 +1151,13 @@ namespace Vlkrt
         ubo.worldToClip     = worldToClipUnjittered;
         ubo.worldToClipPrev = worldToClipPrevUnjittered;
 
-        ubo.cameraPosition          = glm::vec4(camera.GetPosition(), 1.0f);
-        ubo.backgroundColor         = glm::vec4(scene.BackgroundColor, 1.0f);
-        ubo.numLights               = (uint32_t) scene.Lights.size();
-        ubo.elapsedTime             = m_ElapsedTime;
-        ubo.elapsedTicks            = m_GlobalTick;
-        ubo.raytracingType          = (uint32_t) scene.RaytracingType;
+        ubo.cameraPosition  = glm::vec4(camera.GetPosition(), 1.0f);
+        ubo.backgroundColor = glm::vec4(scene.BackgroundColor, 1.0f);
+        ubo.numLights       = (uint32_t) scene.Lights.size();
+        ubo.elapsedTime     = m_ElapsedTime;
+        ubo.elapsedTicks    = m_GlobalTick;
+        ubo.raytracingType
+                = forceTemporalMode ? (uint32_t) RaytracingMode::PathTracingTemporal : (uint32_t) scene.RaytracingType;
         ubo.importanceSamplingType  = (uint32_t) scene.ImportanceSampling;
         ubo.maxRecursionDepth       = scene.MaxRecursionDepth;
         ubo.maxShadowRecursionDepth = scene.MaxShadowRecursionDepth;
@@ -1005,8 +1176,9 @@ namespace Vlkrt
         ubo.cameraForward[1]     = camDir.y;
         ubo.cameraForward[2]     = camDir.z;
         ubo.nrdDebugViewMode     = (uint32_t) scene.NRDGuideDebugView;
-        ubo._pad[0]              = scene.EnableNRDDenoiser ? 1.0f : 0.0f;
-        ubo._pad[1]              = m_FSREnabled ? 1.0f : 0.0f;
+        ubo.enableDenoiseMetrics = scene.EnableDenoiseMetrics ? 1u : 0u;
+        ubo.fsrEnabled           = m_FSREnabled ? 1u : 0u;
+        ubo.useReferenceMetrics  = m_HasDenoiseReference ? 1u : 0u;
 
         void* data;
         vkMapMemory(m_Device, m_SceneUBOMemory, 0, sizeof(SceneUBOData), 0, &data);
@@ -1283,7 +1455,7 @@ namespace Vlkrt
                                                  | VK_SHADER_STAGE_MISS_BIT_KHR | VK_SHADER_STAGE_INTERSECTION_BIT_KHR;
         const VkShaderStageFlags kAllRTCompute = kAllRT | VK_SHADER_STAGE_COMPUTE_BIT;
 
-        VkDescriptorSetLayoutBinding bindings[24] = {};
+        VkDescriptorSetLayoutBinding bindings[25] = {};
 
         // 0: TLAS
         bindings[0] = { 0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, kAllRTCompute, nullptr };
@@ -1333,20 +1505,22 @@ namespace Vlkrt
         bindings[22] = { 22, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, kAllRTCompute, nullptr };
         // 23: denoise metrics accumulation buffer
         bindings[23] = { 23, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, kAllRTCompute, nullptr };
+        // 24: denoise reference image
+        bindings[24] = { 24, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, kAllRTCompute, nullptr };
 
         VkDescriptorSetLayoutCreateInfo layoutInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-        layoutInfo.bindingCount                    = 24;
+        layoutInfo.bindingCount                    = 25;
         layoutInfo.pBindings                       = bindings;
         vkCreateDescriptorSetLayout(m_Device, &layoutInfo, nullptr, &m_DescriptorSetLayout);
 
         // Pool
         VkDescriptorPoolSize poolSizes[5] = {};
         poolSizes[0]                      = { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1 };
-        poolSizes[1]                      = { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 11 };  // binding 1,10,12-16,19,20,21,22
-        poolSizes[2]                      = { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        poolSizes[1] = { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 12 };  // binding 1,10,12-16,19,20,21,22,24
+        poolSizes[2] = { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
             10 };  // vtx,idx,mat,matIdx,lights,aabbT,aabbM,prevVtx,prevAabbT,qualityMetrics
-        poolSizes[3]                      = { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16 };
-        poolSizes[4]                      = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 };
+        poolSizes[3] = { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16 };
+        poolSizes[4] = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 };
 
         VkDescriptorPoolCreateInfo poolInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
         poolInfo.maxSets                    = 1;

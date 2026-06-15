@@ -217,14 +217,24 @@ namespace Vlkrt
             ImGui::Text("Cmd Submit+Wait: %.3f ms", passStats.CommandSubmitMs);
 
             const auto& denoiseMetrics = m_Renderer.GetDenoiseComparisonMetrics();
-            if (m_Scene.EnableNRDDenoiser && denoiseMetrics.Valid) {
+            if (m_Scene.EnableNRDDenoiser && m_Scene.EnableDenoiseMetrics && denoiseMetrics.Valid) {
                 ImGui::Separator();
-                ImGui::Text("Denoise vs Raw (Luma)");
+                ImGui::Text(m_Renderer.HasReferenceImage() ? "Denoised vs Reference" : "Denoised vs Raw");
                 ImGui::Text("Samples: %u", denoiseMetrics.SampleCount);
                 ImGui::Text("MSE: %.6f", denoiseMetrics.LumaMSE);
                 ImGui::Text("RMSE: %.6f", denoiseMetrics.LumaRMSE);
                 ImGui::Text("PSNR: %.2f dB", denoiseMetrics.LumaPSNR);
                 ImGui::Text("Mean Abs Diff: %.6f", denoiseMetrics.LumaMeanAbsDiff);
+
+                if (denoiseMetrics.RawValid) {
+                    ImGui::Separator();
+                    ImGui::Text("Raw vs Reference");
+                    ImGui::Text("Samples: %u", denoiseMetrics.RawSampleCount);
+                    ImGui::Text("MSE: %.6f", denoiseMetrics.RawLumaMSE);
+                    ImGui::Text("RMSE: %.6f", denoiseMetrics.RawLumaRMSE);
+                    ImGui::Text("PSNR: %.2f dB", denoiseMetrics.RawLumaPSNR);
+                    ImGui::Text("Mean Abs Diff: %.6f", denoiseMetrics.RawLumaMeanAbsDiff);
+                }
             }
             ImGui::End();
 
@@ -304,6 +314,31 @@ namespace Vlkrt
                 }
 
                 if (m_Scene.EnableNRDDenoiser) {
+                    if (ImGui::Checkbox("Collect Denoise Metrics", &m_Scene.EnableDenoiseMetrics)) {
+                        m_Renderer.ResetAccumulation();
+                    }
+
+                    static int referenceCaptureFrames = 64;
+                    ImGui::SetNextItemWidth(200.0f);
+                    if (ImGui::InputInt("Reference Frames", &referenceCaptureFrames, 1, 32)) {
+                        referenceCaptureFrames = std::clamp(referenceCaptureFrames, 1, 2048);
+                    }
+
+                    if (ImGui::Button("Record Reference")) {
+                        m_Renderer.StartReferenceCapture((uint32_t) referenceCaptureFrames);
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Clear Reference")) { m_Renderer.ClearReferenceImage(); }
+
+                    if (m_Renderer.IsReferenceCaptureInProgress()) {
+                        uint32_t captured = m_Renderer.GetReferenceCaptureCapturedFrames();
+                        uint32_t target   = m_Renderer.GetReferenceCaptureTargetFrames();
+                        ImGui::Text("Recording reference: %u / %u", captured, target);
+                    }
+                    else {
+                        ImGui::Text("Reference status: %s", m_Renderer.HasReferenceImage() ? "Ready" : "Not captured");
+                    }
+
                     const char* nrdDebugViewNames[] = { "Final Image", "Guide: Normal + Roughness", "Guide: ViewZ",
                         "Guide: Motion Vectors", "Guide: Diffuse Radiance + HitDist",
                         "Guide: Specular Radiance + HitDist", "Raw (No Denoise)", "Split: Denoised | Raw" };

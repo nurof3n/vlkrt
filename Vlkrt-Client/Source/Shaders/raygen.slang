@@ -9,7 +9,7 @@ import path_tracer;
 
 [shader("raygeneration")]
 void RayGenMain() {
-    bool fsrEnabled = (g_scene._pad3 > 0.5f);
+    bool fsrEnabled = (g_scene.fsrEnabled > 0.5f);
     float3 finalColor = float3(0.0f);
     uint   numSamples = g_scene.pathSqrtSamplesPerPixel * g_scene.pathSqrtSamplesPerPixel;
     float3 guideNormal = float3(0.0f);

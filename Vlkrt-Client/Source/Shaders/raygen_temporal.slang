@@ -9,7 +9,7 @@ import path_tracer;
 
 [shader("raygeneration")]
 void RayGenTemporalMain() {
-    bool fsrEnabled = (g_scene._pad3 > 0.5f);
+    bool fsrEnabled = (g_scene.fsrEnabled > 0.5f);
     uint seed = HashSeed(DispatchRaysIndex().xy, g_scene.elapsedTicks);
 
     uint   numSamples = g_scene.pathSqrtSamplesPerPixel * g_scene.pathSqrtSamplesPerPixel;

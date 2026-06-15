@@ -244,7 +244,9 @@ struct SceneUBO {
     float    cameraForwardY;
     float    cameraForwardZ;
     uint     nrdDebugViewMode;
-    float    _pad2, _pad3;
+    uint     enableDenoiseMetrics;
+    uint     fsrEnabled;
+    uint     useReferenceMetrics;
 
     float3 GetCameraForward() {
         return float3(cameraForwardX, cameraForwardY, cameraForwardZ);
@@ -292,6 +294,8 @@ struct SceneUBO {
 [[vk::binding(22, 0)]] [[vk::image_format("r32f")]]
                        RWTexture2D<float>                     g_guideDepth;  // R32F: scalar depth
 [[vk::binding(23, 0)]] RWStructuredBuffer<uint>               g_qualityMetrics;
+[[vk::binding(24, 0)]] [[vk::image_format("rgba8")]]
+                       RWTexture2D<float4>                    g_denoiseReferenceImage;
 
 // ------------------------------------------------------------------ //
 // Math helpers

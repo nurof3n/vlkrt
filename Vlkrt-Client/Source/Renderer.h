@@ -119,10 +119,12 @@ namespace Vlkrt
         uint32_t sceneIndex;               // 276
         float cameraForward[3];            // 280
         uint32_t nrdDebugViewMode;         // 292
-        float _pad[2];                     // 296
-        // 304
+        uint32_t enableDenoiseMetrics;     // 296
+        uint32_t fsrEnabled;               // 300
+        uint32_t useReferenceMetrics;      // 304
+        // 308
     };
-    static_assert(sizeof(SceneUBOData) == 304, "SceneUBOData size mismatch");
+    static_assert(sizeof(SceneUBOData) == 308, "SceneUBOData size mismatch");
 
     /// <summary>
     /// Struct to hold render pass statistics for performance monitoring.
@@ -143,7 +145,7 @@ namespace Vlkrt
     };
 
     /// <summary>
-    /// Runtime quality metrics comparing denoised output against raw (non-denoised) output.
+    /// Runtime quality metrics comparing denoised output against a baseline (raw or captured reference).
     /// </summary>
     struct DenoiseComparisonMetrics
     {
@@ -153,6 +155,13 @@ namespace Vlkrt
         float LumaRMSE{ 0.0f };
         float LumaPSNR{ 0.0f };
         float LumaMeanAbsDiff{ 0.0f };
+        // Raw vs reference (only populated when a reference image is captured)
+        bool RawValid{ false };
+        uint32_t RawSampleCount{ 0 };
+        float RawLumaMSE{ 0.0f };
+        float RawLumaRMSE{ 0.0f };
+        float RawLumaPSNR{ 0.0f };
+        float RawLumaMeanAbsDiff{ 0.0f };
     };
 
     /// <summary>
@@ -202,6 +211,12 @@ namespace Vlkrt
         auto GetUpscaledImage() const -> std::shared_ptr<Walnut::Image> { return m_FinalImageUpscaled; }
         auto GetLastPassStats() const -> const RenderPassStats& { return m_LastPassStats; }
         auto GetDenoiseComparisonMetrics() const -> const DenoiseComparisonMetrics& { return m_LastDenoiseMetrics; }
+        void StartReferenceCapture(uint32_t frameCount);
+        void ClearReferenceImage();
+        auto HasReferenceImage() const -> bool { return m_HasDenoiseReference; }
+        auto IsReferenceCaptureInProgress() const -> bool { return m_ReferenceCaptureInProgress; }
+        auto GetReferenceCaptureTargetFrames() const -> uint32_t { return m_ReferenceCaptureTargetFrames; }
+        auto GetReferenceCaptureCapturedFrames() const -> uint32_t { return m_ReferenceCaptureCapturedFrames; }
 
         void OnFSRSettingsChanged(bool enabled, uint32_t qualityMode, float sharpness);
 
@@ -216,7 +231,7 @@ namespace Vlkrt
         void CreateDescriptorSets();
         void CreateSceneBuffers(const Scene& scene);
         void UpdateSceneData(const Scene& scene);
-        void UpdateSceneUBO(const Scene& scene, const Camera& camera);
+        void UpdateSceneUBO(const Scene& scene, const Camera& camera, bool forceTemporalMode);
         auto CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties,
                 VkDeviceMemory& bufferMemory) const -> VkBuffer;
 
@@ -308,6 +323,7 @@ namespace Vlkrt
 
         // Temporal accumulation image
         std::shared_ptr<Walnut::Image> m_AccumImage;
+        std::shared_ptr<Walnut::Image> m_DenoiseReferenceImage;
 
         // NRD
         NRDDenoiser m_NRDDenoiser;
@@ -368,6 +384,11 @@ namespace Vlkrt
         float m_ElapsedTime{ 0.0f };
         RenderPassStats m_LastPassStats{};
         DenoiseComparisonMetrics m_LastDenoiseMetrics{};
+        bool m_HasDenoiseReference{ false };
+        bool m_ReferenceCaptureInProgress{ false };
+        bool m_ReferenceImageInitialized{ false };
+        uint32_t m_ReferenceCaptureTargetFrames{ 0 };
+        uint32_t m_ReferenceCaptureCapturedFrames{ 0 };
 
         std::vector<GPUVertex> m_PreviousFrameVertices;
         std::vector<AABBTransform> m_PreviousFrameAABBTransforms;

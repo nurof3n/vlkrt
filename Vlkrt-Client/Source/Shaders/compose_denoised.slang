@@ -65,16 +65,31 @@ void ComposeDenoisedMain(uint3 dispatchThreadID : SV_DispatchThreadID)
     float3 denoisedDisplay = pow(ACES(denoised), float3(gammaPow));
     float3 rawDisplay      = pow(ACES(rawNoisy), float3(gammaPow));
 
-    // Accumulate luma delta statistics for CPU-side metrics.
-    float rawLuma       = GetLuminance(rawDisplay);
-    float denoisedLuma  = GetLuminance(denoisedDisplay);
-    float lumaDiff      = abs(rawLuma - denoisedLuma);
-    float lumaDiffSq    = lumaDiff * lumaDiff;
-    uint sumSqIncrement = (uint) (saturate(lumaDiffSq) * 256.0f + 0.5f);
-    uint sumAbsIncrement = (uint) (saturate(lumaDiff) * 256.0f + 0.5f);
-    InterlockedAdd(g_qualityMetrics[0], sumSqIncrement);
-    InterlockedAdd(g_qualityMetrics[1], sumAbsIncrement);
-    InterlockedAdd(g_qualityMetrics[2], 1u);
+    if (g_scene.enableDenoiseMetrics != 0u) {
+        // Accumulate luma delta statistics for CPU-side metrics.
+        float3 baselineDisplay = rawDisplay;
+        if (g_scene.useReferenceMetrics != 0u) {
+            baselineDisplay = g_denoiseReferenceImage[pixelCoord].xyz;
+        }
+
+        float baselineLuma   = GetLuminance(baselineDisplay);
+        float denoisedLuma   = GetLuminance(denoisedDisplay);
+        float lumaDiff       = abs(baselineLuma - denoisedLuma);
+        float lumaDiffSq     = lumaDiff * lumaDiff;
+        InterlockedAdd(g_qualityMetrics[0], (uint)(saturate(lumaDiffSq) * 256.0f + 0.5f));
+        InterlockedAdd(g_qualityMetrics[1], (uint)(saturate(lumaDiff)   * 256.0f + 0.5f));
+        InterlockedAdd(g_qualityMetrics[2], 1u);
+
+        // Raw vs reference (slots 3-5): only meaningful when a reference image exists.
+        if (g_scene.useReferenceMetrics != 0u) {
+            float rawLuma    = GetLuminance(rawDisplay);
+            float rawDiff    = abs(baselineLuma - rawLuma);
+            float rawDiffSq  = rawDiff * rawDiff;
+            InterlockedAdd(g_qualityMetrics[3], (uint)(saturate(rawDiffSq) * 256.0f + 0.5f));
+            InterlockedAdd(g_qualityMetrics[4], (uint)(saturate(rawDiff)   * 256.0f + 0.5f));
+            InterlockedAdd(g_qualityMetrics[5], 1u);
+        }
+    }
 
     if (debugMode == 0u) // FinalImage
     {

@@ -254,6 +254,7 @@ namespace Vlkrt
         uint32_t RussianRouletteDepth{ 3 };
         bool AnisotropicBSDF{ true };
         bool EnableNRDDenoiser{ false };
+        bool EnableDenoiseMetrics{ false };
         NRDGuideDebugViewMode NRDGuideDebugView{ NRDGuideDebugViewMode::FinalImage };
         // Live RELAX tuning (applied at runtime without restart)
         float NRDMinMaterialForDiffuse{ 0.0f };

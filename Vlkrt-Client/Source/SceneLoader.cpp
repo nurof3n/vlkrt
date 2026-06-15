@@ -124,6 +124,9 @@ namespace Vlkrt
                 if (ss["russian_roulette_depth"]) {
                     scene.RussianRouletteDepth = ss["russian_roulette_depth"].as<uint32_t>();
                 }
+                if (ss["enable_denoise_metrics"]) {
+                    scene.EnableDenoiseMetrics = ss["enable_denoise_metrics"].as<bool>();
+                }
                 if (ss["apply_jitter"]) { scene.ApplyJitter = ss["apply_jitter"].as<bool>(); }
                 if (ss["anisotropic_bsdf"]) { scene.AnisotropicBSDF = ss["anisotropic_bsdf"].as<bool>(); }
                 if (ss["enable_fsr"]) { scene.EnableFSR = ss["enable_fsr"].as<bool>(); }
@@ -539,6 +542,7 @@ namespace Vlkrt
             file << "  max_shadow_recursion_depth: " << scene.MaxShadowRecursionDepth << "\n";
             file << "  path_sqrt_samples: " << scene.PathSqrtSamplesPerPixel << "\n";
             file << "  russian_roulette_depth: " << scene.RussianRouletteDepth << "\n";
+            file << "  enable_denoise_metrics: " << (scene.EnableDenoiseMetrics ? "true" : "false") << "\n";
             file << "  apply_jitter: " << (scene.ApplyJitter ? "true" : "false") << "\n";
             file << "  anisotropic_bsdf: " << (scene.AnisotropicBSDF ? "true" : "false") << "\n";
             file << "  enable_fsr: " << (scene.EnableFSR ? "true" : "false") << "\n";
