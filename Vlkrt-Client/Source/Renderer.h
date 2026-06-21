@@ -57,31 +57,35 @@ namespace Vlkrt
     /// </summary>
     struct GPUPBRMaterial
     {
-        glm::vec3 albedo;            // 0
-        int32_t textureIndex;        // 12
-        glm::vec3 emission;          // 16
-        float tiling;                // 28
-        glm::vec3 extinction;        // 32
-        uint32_t materialIndex;      // 44
-        float stepScale;             // 48
-        float sheen;                 // 52
-        float sheenTint;             // 56
-        float clearcoat;             // 60
-        float clearcoatGloss;        // 64
-        float roughness;             // 68
-        float subsurface;            // 72
-        float anisotropic;           // 76
-        float metallic;              // 80
-        float specularTint;          // 84
-        float specularTransmission;  // 88
-        float eta;                   // 92
-        float atDistance;            // 96
-        int32_t lightIndex;          // 100
-        float _pad1;                 // 104
-        float _pad2;                 // 108
-        // 112
+        glm::vec3 albedo;                       // 0
+        int32_t albedoTextureIndex;             // 12
+        glm::vec3 emission;                     // 16
+        float tiling;                           // 28
+        glm::vec3 extinction;                   // 32
+        uint32_t materialIndex;                 // 44
+        float stepScale;                        // 48
+        float sheen;                            // 52
+        float sheenTint;                        // 56
+        float clearcoat;                        // 60
+        float clearcoatGloss;                   // 64
+        float roughness;                        // 68
+        float subsurface;                       // 72
+        float anisotropic;                      // 76
+        float metallic;                         // 80
+        float specularTint;                     // 84
+        float specularTransmission;             // 88
+        float eta;                              // 92
+        float atDistance;                       // 96
+        int32_t lightIndex;                     // 100
+        int32_t normalTextureIndex;             // 104
+        int32_t metallicRoughnessTextureIndex;  // 108
+        int32_t emissiveTextureIndex;           // 112
+        int32_t occlusionTextureIndex;          // 116
+        float _pad1;                            // 120
+        float _pad2;                            // 124
+        // 128
     };
-    static_assert(sizeof(GPUPBRMaterial) == 112, "GPUPBRMaterial size mismatch");
+    static_assert(sizeof(GPUPBRMaterial) == 128, "GPUPBRMaterial size mismatch");
 
     /// <summary>
     /// AABB primitive transform pair.
@@ -176,15 +180,20 @@ namespace Vlkrt
         void OnResize(uint32_t width, uint32_t height);
         void Render(const Scene& scene, const Camera& camera);
 
-        void InvalidateScene() { m_SceneValid = false; }
+        void InvalidateScene()
+        {
+            // Content changed (materials/lights/transforms), but structure may be unchanged.
+            m_SceneDataDirty = true;
+        }
         void InvalidateSceneStructure()
         {
             m_SceneValid          = false;
+            m_SceneDataDirty      = true;
+            m_LastUpdatedScene    = nullptr;
             m_LastProceduralCount = UINT32_MAX;
         }
         void ResetAccumulation()
         {
-            m_SceneValid      = false;
             m_FrameIndex      = 0;
             m_AccumFirstFrame = true;
         }
@@ -193,10 +202,16 @@ namespace Vlkrt
         auto IsNRDOperational() const -> bool { return m_NRDDenoiser.IsOperational(); }
 
         void MarkDirtyMeshes(const std::vector<uint32_t>& meshIndices)
-        { m_DirtyMeshIndices.insert(m_DirtyMeshIndices.end(), meshIndices.begin(), meshIndices.end()); }
+        {
+            m_DirtyMeshIndices.insert(m_DirtyMeshIndices.end(), meshIndices.begin(), meshIndices.end());
+            m_SceneDataDirty = true;
+        }
 
         void MarkDirtyLights(const std::vector<uint32_t>& lightIndices)
-        { m_DirtyLightIndices.insert(m_DirtyLightIndices.end(), lightIndices.begin(), lightIndices.end()); }
+        {
+            m_DirtyLightIndices.insert(m_DirtyLightIndices.end(), lightIndices.begin(), lightIndices.end());
+            m_SceneDataDirty = true;
+        }
 
         auto GetFinalImage() const -> std::shared_ptr<Walnut::Image> { return m_FinalImage; }
         auto GetGuideNormalRoughness() const -> std::shared_ptr<Walnut::Image> { return m_GuideNormalRoughness; }
@@ -231,6 +246,7 @@ namespace Vlkrt
         void CreateDescriptorSets();
         void CreateSceneBuffers(const Scene& scene);
         void UpdateSceneData(const Scene& scene);
+        void UpdateLightBuffer(const Scene& scene);
         void UpdateSceneUBO(const Scene& scene, const Camera& camera, bool forceTemporalMode);
         auto CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties,
                 VkDeviceMemory& bufferMemory) const -> VkBuffer;
@@ -394,5 +410,11 @@ namespace Vlkrt
         std::vector<AABBTransform> m_PreviousFrameAABBTransforms;
 
         std::unordered_map<std::string, std::shared_ptr<Walnut::Image>> m_TextureCache;
+        
+        // Scene update tracking
+        const Scene* m_LastUpdatedScene{ nullptr };
+        bool m_SceneDataDirty{ true };
+        uint64_t m_LastSceneSignature{ 0 };
+        bool m_HasSceneSignature{ false };
     };
 }  // namespace Vlkrt

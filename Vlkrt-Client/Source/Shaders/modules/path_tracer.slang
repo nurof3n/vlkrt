@@ -484,25 +484,8 @@ void ClosestHitHelper(inout RayPayload payload,
         }
     }
 
-    // Atmospheric fog — early-out when fog is negligible (fogFactor < 0.001 for t < ~23m)
-    // This avoids exp() + two ComputeBackground() calls per hit in small scenes.
-    float t = hitDist;
-    float fogFactor = 1.0f - exp(-0.000002f * t * t * t);
-    if (fogFactor >= 0.001f) {
-        float4 bgColor = ComputeBackground(rayDir, payload.recursionDepth == 0u) * payload.throughput;
-        color = lerp(color, bgColor, fogFactor);
 
-        if (payload.recursionDepth == 0u) {
-            bool isLight = isTriangle && (mat.lightIndex >= 0);
-            float3 primaryEmission = isLight ? color.xyz : mat.emission;
-            payload.emission = primaryEmission;
-
-            float3 fogColor = bgColor.xyz;  // reuse — same ray dir, same throughput
-            payload.diffuse  = lerp(payload.diffuse,  fogColor,      fogFactor);
-            payload.specular = lerp(payload.specular, float3(0.0f),  fogFactor);
-            payload.emission = lerp(payload.emission, float3(0.0f),  fogFactor);
-        }
-    } else if (payload.recursionDepth == 0u) {
+    if (payload.recursionDepth == 0u) {
         bool isLight = isTriangle && (mat.lightIndex >= 0);
         payload.emission = isLight ? color.xyz : mat.emission;
     }

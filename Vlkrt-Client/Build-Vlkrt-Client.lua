@@ -24,6 +24,7 @@ project "Vlkrt-Client"
       "../Walnut/vendor/glm",
       "../Walnut/vendor/spdlog/include",
       "../Walnut/vendor/tinyobjloader",
+      "../vendor/tinygltf",
       "../Walnut/vendor/yaml-cpp/include",
 
       "../Walnut/Walnut/Source",

@@ -13,13 +13,18 @@
 #include <cmath>
 #include <cstring>
 #include <chrono>
+#include <filesystem>
 #include <glm/gtc/type_ptr.hpp>
 #include <stdexcept>
+
+#include <stb_image.h>
 
 namespace Vlkrt
 {
     namespace
     {
+        static constexpr uint32_t kMaxSceneTextures = 256;
+
         static auto BytesPerPixel(Walnut::ImageFormat format) -> uint64_t
         {
             switch (format) {
@@ -398,8 +403,8 @@ namespace Vlkrt
             m_LastProceduralCount = proceduralCount;
         }
 
-        // Recalculate current scene metrics if scene is invalidated
-        if (!m_SceneValid) {
+        // Recalculate scene metrics each frame (cheap) to robustly detect structural changes.
+        {
             size_t totalMeshCount = scene.StaticMeshes.size() + scene.DynamicMeshes.size();
             size_t totalVertices  = 0;
             size_t totalIndices   = 0;
@@ -465,7 +470,9 @@ namespace Vlkrt
             }
 
             if (m_VertexBuffer == VK_NULL_HANDLE) CreateSceneBuffers(scene);
-            UpdateSceneData(scene);
+
+            // Structural rebuild requires scene data upload and AS/descriptor refresh.
+            m_SceneDataDirty = true;
 
             m_LastMeshCount     = m_CachedTotalMeshCount;
             m_LastVertexCount   = m_CachedTotalVertices;
@@ -479,6 +486,75 @@ namespace Vlkrt
                 m_FrameIndex       = 0;
                 resetBySceneChange = true;
             }
+        }
+
+        auto hashCombine = [](uint64_t& seed, uint64_t value) {
+            seed ^= value + 0x9e3779b97f4a7c15ull + (seed << 6) + (seed >> 2);
+        };
+        auto quantize = [](float v) -> int32_t { return static_cast<int32_t>(std::round(v * 10000.0f)); };
+        auto hashVec3 = [&](uint64_t& seed, const glm::vec3& v) {
+            hashCombine(seed, static_cast<uint64_t>(quantize(v.x)));
+            hashCombine(seed, static_cast<uint64_t>(quantize(v.y)));
+            hashCombine(seed, static_cast<uint64_t>(quantize(v.z)));
+        };
+        auto hashMat4 = [&](uint64_t& seed, const glm::mat4& m) {
+            for (int c = 0; c < 4; ++c) {
+                for (int r = 0; r < 4; ++r) { hashCombine(seed, static_cast<uint64_t>(quantize(m[c][r]))); }
+            }
+        };
+
+        uint64_t sceneSignature = 1469598103934665603ull;
+        hashCombine(sceneSignature, static_cast<uint64_t>(scene.StaticMeshes.size()));
+        hashCombine(sceneSignature, static_cast<uint64_t>(scene.DynamicMeshes.size()));
+        hashCombine(sceneSignature, static_cast<uint64_t>(scene.ProceduralEntities.size()));
+        hashCombine(sceneSignature, static_cast<uint64_t>(scene.Materials.size()));
+        hashCombine(sceneSignature, static_cast<uint64_t>(scene.Lights.size()));
+
+        for (const auto& mesh : scene.StaticMeshes) {
+            hashMat4(sceneSignature, mesh.Transform);
+            hashCombine(sceneSignature, static_cast<uint64_t>(mesh.MaterialIndex));
+        }
+        for (const auto& mesh : scene.DynamicMeshes) {
+            hashMat4(sceneSignature, mesh.Transform);
+            hashCombine(sceneSignature, static_cast<uint64_t>(mesh.MaterialIndex));
+        }
+        for (const auto& pe : scene.ProceduralEntities) {
+            hashMat4(sceneSignature, pe.Transform);
+            hashCombine(sceneSignature, static_cast<uint64_t>(pe.MaterialIndex));
+            hashCombine(sceneSignature, static_cast<uint64_t>(pe.IsAnalytic));
+            hashCombine(sceneSignature, static_cast<uint64_t>(pe.PrimitiveType));
+        }
+        for (const auto& light : scene.Lights) {
+            hashVec3(sceneSignature, light.Position);
+            hashVec3(sceneSignature, light.Direction);
+            hashVec3(sceneSignature, light.Emission);
+            hashCombine(sceneSignature, static_cast<uint64_t>(quantize(light.Intensity)));
+            hashCombine(sceneSignature, static_cast<uint64_t>(quantize(light.Size)));
+            hashCombine(sceneSignature, static_cast<uint64_t>(light.Type));
+        }
+
+        // Keep scene-data update separate from structural rebuilds.
+        // This allows cheap accumulation resets without forcing full GPU scene rebuild work.
+        if (m_LastUpdatedScene == nullptr || m_LastUpdatedScene != &scene || m_SceneDataDirty) {
+            const bool lightOnlyDirty
+                    = m_SceneDataDirty && !needsRebuild && m_DirtyMeshIndices.empty() && !m_DirtyLightIndices.empty();
+
+            if (lightOnlyDirty) {
+                UpdateLightBuffer(scene);
+                m_LastSceneSignature = sceneSignature;
+                m_HasSceneSignature  = true;
+            }
+
+            const bool contentChanged = !m_HasSceneSignature || (sceneSignature != m_LastSceneSignature);
+            if (!lightOnlyDirty && (contentChanged || needsRebuild)) {
+                UpdateSceneData(scene);
+                m_LastSceneSignature = sceneSignature;
+                m_HasSceneSignature  = true;
+            }
+            m_LastUpdatedScene = &scene;
+            m_SceneDataDirty   = false;
+            m_DirtyMeshIndices.clear();
+            m_DirtyLightIndices.clear();
         }
 
         if (!m_AccelerationStructure->IsBuilt()) return;
@@ -1471,8 +1547,8 @@ namespace Vlkrt
         bindings[5] = { 5, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, kAllRTCompute, nullptr };
         // 6: lights
         bindings[6] = { 6, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, kAllRTCompute, nullptr };
-        // 7: textures (up to 16)
-        bindings[7] = { 7, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16, kAllRTCompute, nullptr };
+        // 7: textures
+        bindings[7] = { 7, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kMaxSceneTextures, kAllRTCompute, nullptr };
         // 8: AABB transforms
         bindings[8] = { 8, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, kAllRTCompute, nullptr };
         // 9: AABB materials
@@ -1519,7 +1595,7 @@ namespace Vlkrt
         poolSizes[1] = { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 12 };  // binding 1,10,12-16,19,20,21,22,24
         poolSizes[2] = { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
             10 };  // vtx,idx,mat,matIdx,lights,aabbT,aabbM,prevVtx,prevAabbT,qualityMetrics
-        poolSizes[3] = { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16 };
+        poolSizes[3] = { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kMaxSceneTextures };
         poolSizes[4] = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 };
 
         VkDescriptorPoolCreateInfo poolInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
@@ -1722,28 +1798,32 @@ namespace Vlkrt
                 aabbTransforms[i].bottomLevelASToLocalSpace = glm::inverse(pe.Transform);
 
                 if (pe.MaterialIndex >= 0 && pe.MaterialIndex < (int) scene.Materials.size()) {
-                    const auto& mat         = scene.Materials[pe.MaterialIndex];
-                    GPUPBRMaterial& gm      = aabbMaterials[i];
-                    gm.albedo               = mat.Albedo;
-                    gm.textureIndex         = -1;
-                    gm.emission             = mat.Emission;
-                    gm.tiling               = mat.Tiling;
-                    gm.extinction           = mat.Extinction;
-                    gm.materialIndex        = mat.MaterialIndex;
-                    gm.stepScale            = mat.StepScale;
-                    gm.sheen                = mat.Sheen;
-                    gm.sheenTint            = mat.SheenTint;
-                    gm.clearcoat            = mat.Clearcoat;
-                    gm.clearcoatGloss       = mat.ClearcoatGloss;
-                    gm.roughness            = mat.Roughness;
-                    gm.subsurface           = mat.Subsurface;
-                    gm.anisotropic          = mat.Anisotropic;
-                    gm.metallic             = mat.Metallic;
-                    gm.specularTint         = mat.SpecularTint;
-                    gm.specularTransmission = mat.SpecularTransmission;
-                    gm.eta                  = mat.Eta;
-                    gm.atDistance           = mat.AtDistance;
-                    gm.lightIndex           = mat.LightIndex;
+                    const auto& mat                  = scene.Materials[pe.MaterialIndex];
+                    GPUPBRMaterial& gm               = aabbMaterials[i];
+                    gm.albedo                        = mat.Albedo;
+                    gm.albedoTextureIndex            = -1;
+                    gm.emission                      = mat.Emission;
+                    gm.tiling                        = mat.Tiling;
+                    gm.extinction                    = mat.Extinction;
+                    gm.materialIndex                 = mat.MaterialIndex;
+                    gm.stepScale                     = mat.StepScale;
+                    gm.sheen                         = mat.Sheen;
+                    gm.sheenTint                     = mat.SheenTint;
+                    gm.clearcoat                     = mat.Clearcoat;
+                    gm.clearcoatGloss                = mat.ClearcoatGloss;
+                    gm.roughness                     = mat.Roughness;
+                    gm.subsurface                    = mat.Subsurface;
+                    gm.anisotropic                   = mat.Anisotropic;
+                    gm.metallic                      = mat.Metallic;
+                    gm.specularTint                  = mat.SpecularTint;
+                    gm.specularTransmission          = mat.SpecularTransmission;
+                    gm.eta                           = mat.Eta;
+                    gm.atDistance                    = mat.AtDistance;
+                    gm.lightIndex                    = mat.LightIndex;
+                    gm.normalTextureIndex            = -1;
+                    gm.metallicRoughnessTextureIndex = -1;
+                    gm.emissiveTextureIndex          = -1;
+                    gm.occlusionTextureIndex         = -1;
                     gm._pad1 = gm._pad2 = 0.0f;
                 }
             }
@@ -1820,45 +1900,77 @@ namespace Vlkrt
         // Collect all textures from the scene materials
         std::vector<std::shared_ptr<Walnut::Image>> allTextures;
         std::unordered_map<std::string, int> textureToIndex;
-        for (const auto& mat : scene.Materials) {
-            if (!mat.TextureFilename.empty() && textureToIndex.find(mat.TextureFilename) == textureToIndex.end()) {
-                auto tex = LoadOrGetTexture(mat.TextureFilename);
-                if (tex) {
-                    textureToIndex[mat.TextureFilename] = (int) allTextures.size();
-                    allTextures.push_back(tex);
-                }
+
+        auto registerTexture = [&](const std::string& texturePath) {
+            if (texturePath.empty()) return;
+            if (textureToIndex.find(texturePath) != textureToIndex.end()) return;
+            if (allTextures.size() >= kMaxSceneTextures) {
+                WL_WARN_TAG("Renderer", "Texture limit reached ({}). Skipping '{}'", kMaxSceneTextures, texturePath);
+                return;
             }
+
+            auto tex = LoadOrGetTexture(texturePath);
+            if (tex) {
+                textureToIndex[texturePath] = static_cast<int>(allTextures.size());
+                allTextures.push_back(tex);
+            }
+        };
+
+        for (const auto& mat : scene.Materials) {
+            registerTexture(mat.TextureAlbedoFilename);
+            registerTexture(mat.TextureFilename);
+            registerTexture(mat.TextureNormalFilename);
+            registerTexture(mat.TextureMetallicRoughnessFilename);
+            registerTexture(mat.TextureEmissiveFilename);
+            // Skip occlusion—not sampled in shader
         }
 
         // Update material buffer again with the correct texture indices
         if (!scene.Materials.empty()) {
             std::vector<GPUPBRMaterial> gpuMaterials(scene.Materials.size());
             for (size_t i = 0; i < scene.Materials.size(); i++) {
-                const auto& mat         = scene.Materials[i];
-                GPUPBRMaterial& gm      = gpuMaterials[i];
-                gm.albedo               = mat.Albedo;
-                gm.emission             = mat.Emission;
-                gm.tiling               = mat.Tiling;
-                gm.extinction           = mat.Extinction;
-                gm.materialIndex        = mat.MaterialIndex;
-                gm.stepScale            = mat.StepScale;
-                gm.sheen                = mat.Sheen;
-                gm.sheenTint            = mat.SheenTint;
-                gm.clearcoat            = mat.Clearcoat;
-                gm.clearcoatGloss       = mat.ClearcoatGloss;
-                gm.roughness            = mat.Roughness;
-                gm.subsurface           = mat.Subsurface;
-                gm.anisotropic          = mat.Anisotropic;
-                gm.metallic             = mat.Metallic;
-                gm.specularTint         = mat.SpecularTint;
-                gm.specularTransmission = mat.SpecularTransmission;
-                gm.eta                  = mat.Eta;
-                gm.atDistance           = mat.AtDistance;
-                gm.lightIndex           = mat.LightIndex;
+                const auto& mat                  = scene.Materials[i];
+                GPUPBRMaterial& gm               = gpuMaterials[i];
+                gm.albedo                        = mat.Albedo;
+                gm.emission                      = mat.Emission;
+                gm.tiling                        = mat.Tiling;
+                gm.extinction                    = mat.Extinction;
+                gm.materialIndex                 = mat.MaterialIndex;
+                gm.stepScale                     = mat.StepScale;
+                gm.sheen                         = mat.Sheen;
+                gm.sheenTint                     = mat.SheenTint;
+                gm.clearcoat                     = mat.Clearcoat;
+                gm.clearcoatGloss                = mat.ClearcoatGloss;
+                gm.roughness                     = mat.Roughness;
+                gm.subsurface                    = mat.Subsurface;
+                gm.anisotropic                   = mat.Anisotropic;
+                gm.metallic                      = mat.Metallic;
+                gm.specularTint                  = mat.SpecularTint;
+                gm.specularTransmission          = mat.SpecularTransmission;
+                gm.eta                           = mat.Eta;
+                gm.atDistance                    = mat.AtDistance;
+                gm.lightIndex                    = mat.LightIndex;
+                gm.albedoTextureIndex            = -1;
+                gm.normalTextureIndex            = -1;
+                gm.metallicRoughnessTextureIndex = -1;
+                gm.emissiveTextureIndex          = -1;
+                gm.occlusionTextureIndex         = -1;
                 gm._pad1 = gm._pad2 = 0.0f;
 
-                auto it         = textureToIndex.find(mat.TextureFilename);
-                gm.textureIndex = (it != textureToIndex.end()) ? it->second : -1;
+                const std::string& albedoPath
+                        = !mat.TextureAlbedoFilename.empty() ? mat.TextureAlbedoFilename : mat.TextureFilename;
+
+                auto lookupTextureIndex = [&](const std::string& path) -> int32_t {
+                    if (path.empty()) return -1;
+                    auto it = textureToIndex.find(path);
+                    return (it != textureToIndex.end()) ? it->second : -1;
+                };
+
+                gm.albedoTextureIndex            = lookupTextureIndex(albedoPath);
+                gm.normalTextureIndex            = lookupTextureIndex(mat.TextureNormalFilename);
+                gm.metallicRoughnessTextureIndex = lookupTextureIndex(mat.TextureMetallicRoughnessFilename);
+                gm.emissiveTextureIndex          = lookupTextureIndex(mat.TextureEmissiveFilename);
+                gm.occlusionTextureIndex         = lookupTextureIndex(mat.TextureOcclusionFilename);
             }
             void* data;
             vkMapMemory(m_Device, m_MaterialMemory, 0, sizeof(GPUPBRMaterial) * gpuMaterials.size(), 0, &data);
@@ -1866,8 +1978,8 @@ namespace Vlkrt
             vkUnmapMemory(m_Device, m_MaterialMemory);
         }
 
-        std::vector<VkDescriptorImageInfo> textureInfos(16);
-        for (size_t i = 0; i < 16; i++) {
+        std::vector<VkDescriptorImageInfo> textureInfos(kMaxSceneTextures);
+        for (size_t i = 0; i < kMaxSceneTextures; i++) {
             if (i < allTextures.size()) {
                 textureInfos[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
                 textureInfos[i].imageView   = allTextures[i]->GetVkImageView();
@@ -1943,7 +2055,7 @@ namespace Vlkrt
         writes[7].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[7].dstSet          = m_DescriptorSet;
         writes[7].dstBinding      = 7;
-        writes[7].descriptorCount = 16;
+        writes[7].descriptorCount = kMaxSceneTextures;
         writes[7].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         writes[7].pImageInfo      = textureInfos.data();
 
@@ -2026,6 +2138,26 @@ namespace Vlkrt
         vkUpdateDescriptorSets(m_Device, 6, extraWrites, 0, nullptr);
     }
 
+    void Renderer::UpdateLightBuffer(const Scene& scene)
+    {
+        if (scene.Lights.empty() || m_LightMemory == VK_NULL_HANDLE) return;
+
+        std::vector<GPULight> gpuLights(scene.Lights.size());
+        for (size_t i = 0; i < scene.Lights.size(); i++) {
+            gpuLights[i].position  = scene.Lights[i].Position;
+            gpuLights[i].intensity = scene.Lights[i].Intensity;
+            gpuLights[i].emission  = scene.Lights[i].Emission;
+            gpuLights[i].size      = scene.Lights[i].Size;
+            gpuLights[i].direction = scene.Lights[i].Direction;
+            gpuLights[i].type      = static_cast<uint32_t>(scene.Lights[i].Type);
+        }
+
+        void* data = nullptr;
+        vkMapMemory(m_Device, m_LightMemory, 0, sizeof(GPULight) * gpuLights.size(), 0, &data);
+        memcpy(data, gpuLights.data(), sizeof(GPULight) * gpuLights.size());
+        vkUnmapMemory(m_Device, m_LightMemory);
+    }
+
     auto Renderer::CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties,
             VkDeviceMemory& bufferMemory) const -> VkBuffer
     {
@@ -2088,28 +2220,96 @@ namespace Vlkrt
 
     auto Renderer::LoadOrGetTexture(const std::string& filename) -> std::shared_ptr<Walnut::Image>
     {
-        auto filepath = Vlkrt::TEXTURES_DIR + filename;
-
         // Check if texture already cached
         auto it = m_TextureCache.find(filename);
         if (it != m_TextureCache.end()) { return it->second; }
 
         // Try to load texture from disk
         std::shared_ptr<Walnut::Image> texture;
+        constexpr int TEXTURE_SCALE = 1;  // Full resolution textures
 
-        try {
-            auto newImg = std::make_shared<Walnut::Image>(filepath);
-            if (newImg->GetWidth() > 0) {
-                texture                  = newImg;
-                m_TextureCache[filename] = texture;
-                WL_INFO_TAG("Renderer", "Loaded texture: {}", filepath);
+        auto tryLoadPath = [&](const std::filesystem::path& path) -> bool {
+            try {
+                // Load image
+                int width, height, channels;
+                unsigned char* data = stbi_load(path.string().c_str(), &width, &height, &channels, 4);
+                if (!data || width <= 0 || height <= 0) {
+                    stbi_image_free(data);
+                    return false;
+                }
+
+                int scaledW           = width;
+                int scaledH           = height;
+                unsigned char* scaled = nullptr;
+
+                if (TEXTURE_SCALE > 1) {
+                    // Downscale by averaging blocks when explicitly enabled.
+                    scaledW = (width + TEXTURE_SCALE - 1) / TEXTURE_SCALE;
+                    scaledH = (height + TEXTURE_SCALE - 1) / TEXTURE_SCALE;
+                    scaled  = new unsigned char[scaledW * scaledH * 4];
+
+                    for (int y = 0; y < scaledH; y++) {
+                        for (int x = 0; x < scaledW; x++) {
+                            uint32_t r = 0, g = 0, b = 0, a = 0, count = 0;
+                            for (int dy = 0; dy < TEXTURE_SCALE; dy++) {
+                                for (int dx = 0; dx < TEXTURE_SCALE; dx++) {
+                                    int sx  = std::min(x * TEXTURE_SCALE + dx, width - 1);
+                                    int sy  = std::min(y * TEXTURE_SCALE + dy, height - 1);
+                                    int idx = (sy * width + sx) * 4;
+                                    r += data[idx + 0];
+                                    g += data[idx + 1];
+                                    b += data[idx + 2];
+                                    a += data[idx + 3];
+                                    count++;
+                                }
+                            }
+                            int outIdx         = (y * scaledW + x) * 4;
+                            scaled[outIdx + 0] = r / count;
+                            scaled[outIdx + 1] = g / count;
+                            scaled[outIdx + 2] = b / count;
+                            scaled[outIdx + 3] = a / count;
+                        }
+                    }
+                }
+                else {
+                    scaled = new unsigned char[scaledW * scaledH * 4];
+                    memcpy(scaled, data, static_cast<size_t>(scaledW) * static_cast<size_t>(scaledH) * 4);
+                }
+                stbi_image_free(data);
+
+                // Create image from scaled data (Image class will upload to GPU)
+                auto newImg = std::make_shared<Walnut::Image>(scaledW, scaledH, Walnut::ImageFormat::RGBA, scaled);
+                delete[] scaled;
+
+                if (newImg->GetWidth() > 0) {
+                    texture                  = newImg;
+                    m_TextureCache[filename] = texture;
+                    WL_INFO_TAG("Renderer", "Loaded texture: {} ({}x{})", path.string(), width, height);
+                    return true;
+                }
             }
-        }
-        catch (const std::exception& e) {
-            WL_WARN_TAG("Renderer", "Failed to load texture '{}': {}", filepath, e.what());
+            catch (const std::exception& e) {
+                WL_WARN_TAG("Renderer", "Failed to load texture '{}': {}", path.string(), e.what());
+            }
+            return false;
+        };
+
+        std::filesystem::path inputPath(filename);
+        std::vector<std::filesystem::path> candidates;
+        if (inputPath.is_absolute()) { candidates.push_back(inputPath); }
+        else {
+            candidates.push_back(inputPath);
+            candidates.emplace_back(std::filesystem::path(Vlkrt::TEXTURES_DIR) / inputPath);
+            candidates.emplace_back(std::filesystem::path(Vlkrt::MODELS_DIR) / inputPath);
         }
 
-        if (!texture) { WL_WARN_TAG("Renderer", "Failed to load texture '{}'.", filepath); }
+        for (const auto& candidate : candidates) {
+            std::error_code ec;
+            if (!candidate.is_absolute() && !std::filesystem::exists(candidate, ec)) continue;
+            if (tryLoadPath(candidate)) break;
+        }
+
+        if (!texture) { WL_WARN_TAG("Renderer", "Failed to load texture '{}'.", filename); }
 
         return texture;
     }

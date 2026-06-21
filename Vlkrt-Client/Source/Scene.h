@@ -89,7 +89,13 @@ namespace Vlkrt
         uint32_t MaterialIndex{ 0 };
         int32_t LightIndex{ -1 };
 
+        // Legacy alias for base color (albedo) map.
         std::string TextureFilename;
+        std::string TextureAlbedoFilename;
+        std::string TextureNormalFilename;
+        std::string TextureMetallicRoughnessFilename;
+        std::string TextureEmissiveFilename;
+        std::string TextureOcclusionFilename;
         float Tiling{ 1.0f };
     };
 

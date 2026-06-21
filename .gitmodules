@@ -11,3 +11,7 @@
 [submodule "vendor/nrd"]
 	path = vendor/nrd
 	url = https://github.com/NVIDIA-RTX/NRD
+[submodule "vendor/tinygltf"]
+	path = vendor/tinygltf
+	url = https://github.com/syoyo/tinygltf
+	branch = release

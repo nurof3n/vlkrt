@@ -62,8 +62,8 @@ namespace Vlkrt
             std::sort(list.begin(), list.end());
         };
 
-        scanDirectory(TEXTURES_DIR, m_AvailableTextures, { ".jpg", ".jpeg" });
-        scanDirectory(MODELS_DIR, m_AvailableModels, { ".obj" });
+        scanDirectory(TEXTURES_DIR, m_AvailableTextures, { ".jpg", ".jpeg", ".png", ".tga", ".hdr" });
+        scanDirectory(MODELS_DIR, m_AvailableModels, { ".obj", ".gltf", ".glb" });
         scanDirectory(SCENES_DIR, m_AvailableScenes, { ".yaml", ".yml" }, true);
         scanDirectory(SCRIPTS_DIR, m_AvailableScripts, { ".lua" });
     }
@@ -124,12 +124,23 @@ namespace Vlkrt
             m_Client.SendBuffer(stream.GetBuffer());
         }
 
+        // Only update network-driven dynamic scene content for the demo scene.
+        // Large static scenes (e.g. Sponza) should not rebuild RT scene data every network tick.
+        const bool enableNetworkSceneUpdates = (m_CurrentScene != "sponza");
+
         // Only update scene if something actually changed
         size_t currentPlayerCount = m_PlayerData.size();
-        if (m_PlayerPosition != m_LastPlayerPosition || currentPlayerCount != m_LastPlayerCount
-                || m_NetworkDataChanged) {
+        if (enableNetworkSceneUpdates
+                && (m_PlayerPosition != m_LastPlayerPosition || currentPlayerCount != m_LastPlayerCount
+                        || m_NetworkDataChanged)) {
             UpdateScene();
             m_Renderer.InvalidateScene();
+            m_LastPlayerPosition = m_PlayerPosition;
+            m_LastPlayerCount    = currentPlayerCount;
+            m_NetworkDataChanged = false;
+        }
+        else if (!enableNetworkSceneUpdates) {
+            // Consume network updates without forcing costly scene rebuilds.
             m_LastPlayerPosition = m_PlayerPosition;
             m_LastPlayerCount    = currentPlayerCount;
             m_NetworkDataChanged = false;
@@ -1008,21 +1019,46 @@ namespace Vlkrt
 
     void ClientLayer::FlattenHierarchyToScene(const SceneEntity& entity, const glm::mat4& parentWorld)
     {
+        auto nearlyEqual     = [](float a, float b, float eps = 1e-5f) { return std::abs(a - b) <= eps; };
+        auto vec3NearlyEqual = [&](const glm::vec3& a, const glm::vec3& b, float eps = 1e-5f) {
+            return nearlyEqual(a.x, b.x, eps) && nearlyEqual(a.y, b.y, eps) && nearlyEqual(a.z, b.z, eps);
+        };
+        auto mat4NearlyEqual = [&](const glm::mat4& a, const glm::mat4& b, float eps = 1e-5f) {
+            for (int c = 0; c < 4; ++c) {
+                for (int r = 0; r < 4; ++r) {
+                    if (!nearlyEqual(a[c][r], b[c][r], eps)) return false;
+                }
+            }
+            return true;
+        };
+
         // Compute world transform for this entity
         glm::mat4 worldTransform = entity.LocalTransform.GetWorldMatrix(parentWorld);
 
         // Process based on entity type
         if (entity.Type == EntityType::Mesh) {
-            // Find this entity in the mapping
-            auto it = m_HierarchyMapping.EntityToMeshIdx.find(const_cast<SceneEntity*>(&entity));
-            if (it != m_HierarchyMapping.EntityToMeshIdx.end()) {
-                uint32_t meshIdx = it->second;
-                if (meshIdx < m_Scene.StaticMeshes.size()) {
-                    auto& mesh = m_Scene.StaticMeshes[meshIdx];
-                    if (mesh.Transform != worldTransform || mesh.MaterialIndex != entity.MeshData.MaterialIndex) {
-                        mesh.Transform     = worldTransform;
-                        mesh.MaterialIndex = entity.MeshData.MaterialIndex;
-                        m_SceneDirty       = true;
+            // glTF entities are flattened into many static meshes at load time.
+            // Do not map a single hierarchy transform back to one flat mesh index,
+            // otherwise one imported sub-mesh gets an incorrect transform every frame.
+            std::filesystem::path meshPath(entity.MeshData.Filename);
+            std::string ext = meshPath.extension().string();
+            std::transform(ext.begin(), ext.end(), ext.begin(),
+                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            const bool isGltfAggregate = (ext == ".gltf" || ext == ".glb");
+            if (!isGltfAggregate) {
+                // Find this entity in the mapping
+                auto it = m_HierarchyMapping.EntityToMeshIdx.find(const_cast<SceneEntity*>(&entity));
+                if (it != m_HierarchyMapping.EntityToMeshIdx.end()) {
+                    uint32_t meshIdx = it->second;
+                    if (meshIdx < m_Scene.StaticMeshes.size()) {
+                        auto& mesh = m_Scene.StaticMeshes[meshIdx];
+                        if (!mat4NearlyEqual(mesh.Transform, worldTransform)
+                                || mesh.MaterialIndex != entity.MeshData.MaterialIndex) {
+                            mesh.Transform     = worldTransform;
+                            mesh.MaterialIndex = entity.MeshData.MaterialIndex;
+                            m_SceneDirty       = true;
+                            m_Renderer.MarkDirtyMeshes({ meshIdx });
+                        }
                     }
                 }
             }
@@ -1037,9 +1073,10 @@ namespace Vlkrt
                     glm::vec3 newPos = glm::vec3(worldTransform[3]);
                     glm::vec3 newDir = glm::normalize(glm::vec3(worldTransform * glm::vec4(0.0f, 0.0f, -1.0f, 0.0f)));
                     Light& light     = m_Scene.Lights[lightIdx];
-                    if (light.Emission != entity.LightData.Emission || light.Intensity != entity.LightData.Intensity
-                            || light.Type != entity.LightData.Type || light.Size != entity.LightData.Size
-                            || light.Position != newPos || light.Direction != newDir) {
+                    if (!vec3NearlyEqual(light.Emission, entity.LightData.Emission)
+                            || !nearlyEqual(light.Intensity, entity.LightData.Intensity)
+                            || light.Type != entity.LightData.Type || !nearlyEqual(light.Size, entity.LightData.Size)
+                            || !vec3NearlyEqual(light.Position, newPos) || !vec3NearlyEqual(light.Direction, newDir)) {
                         light.Emission  = entity.LightData.Emission;
                         light.Intensity = entity.LightData.Intensity;
                         light.Type      = entity.LightData.Type;
@@ -1047,6 +1084,7 @@ namespace Vlkrt
                         light.Position  = newPos;
                         light.Direction = newDir;
                         m_SceneDirty    = true;
+                        m_Renderer.MarkDirtyLights({ lightIdx });
                     }
                 }
             }
@@ -1059,7 +1097,8 @@ namespace Vlkrt
                     ProceduralEntity& pe  = m_Scene.ProceduralEntities[procIdx];
                     bool structureChanged = (pe.IsAnalytic != entity.ProceduralData.IsAnalytic)
                                             || (pe.PrimitiveType != entity.ProceduralData.PrimitiveType);
-                    if (pe.Transform != worldTransform || pe.MaterialIndex != entity.ProceduralData.MaterialIndex
+                    if (!mat4NearlyEqual(pe.Transform, worldTransform)
+                            || pe.MaterialIndex != entity.ProceduralData.MaterialIndex
                             || pe.IsAnalytic != entity.ProceduralData.IsAnalytic
                             || pe.PrimitiveType != entity.ProceduralData.PrimitiveType) {
                         pe.Transform     = worldTransform;
@@ -1067,6 +1106,7 @@ namespace Vlkrt
                         pe.IsAnalytic    = entity.ProceduralData.IsAnalytic;
                         pe.PrimitiveType = entity.ProceduralData.PrimitiveType;
                         m_SceneDirty     = true;
+                        m_Renderer.MarkDirtyMeshes({ procIdx });
                         if (structureChanged) m_Renderer.InvalidateSceneStructure();
                     }
                 }

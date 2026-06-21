@@ -1,0 +1,56 @@
+materials:
+- name: fallback_default
+  albedo: [ 0.8, 0.8, 0.8 ]
+  roughness: 0.6
+  metallic: 0
+  material_index: 0
+
+entities:
+- name: sponza_root
+  type: empty
+  transform:
+    position: [ 0, 0, 0 ]
+    rotation: [ 0, 0, 0, 1 ]
+    scale: [ 1, 1, 1 ]
+  children:
+  - name: sponza_main
+    type: mesh
+    transform:
+      position: [ 0, 0, 0 ]
+      rotation: [ 0, 0, 0, 1 ]
+      scale: [ 1, 1, 1 ]
+    mesh: sponza/NewSponza_Main_glTF_003.gltf
+    material: 0
+  - name: sponza_curtains
+    type: mesh
+    transform:
+      position: [ 0, 0, 0 ]
+      rotation: [ 0, 0, 0, 1 ]
+      scale: [ 1, 1, 1 ]
+    mesh: sponza/NewSponza_Curtains_glTF.gltf
+    material: 0
+  - name: sun
+    type: light
+    transform:
+      position: [ -21.7048588, 43.41434, -6.14988375 ]
+      rotation: [ -0.298702657, -0.680757, -0.361249864, 0.5628901 ]
+      scale: [ 1, 1, 1 ]
+    light_emission: [ 1.0, 0.95, 0.9 ]
+    light_intensity: 1.0
+    light_type: 1
+
+scene_settings:
+  background_color: [ 0.53, 0.8, 0.98 ]
+  scene_index: 10
+  max_recursion_depth: 3
+  max_shadow_recursion_depth: 3
+  path_sqrt_samples: 1
+  russian_roulette_depth: 1
+  enable_denoise_metrics: false
+  apply_jitter: true
+  anisotropic_bsdf: true
+  enable_fsr: true
+  fsr_quality_mode: 1
+  fsr_sharpness: 0.0
+  camera_position: [ -7.5, 6.0, 0.5 ]
+  camera_target: [ 0.0, 4.5, 0.0 ]

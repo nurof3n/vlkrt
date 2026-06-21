@@ -21,6 +21,8 @@ Many thanks to Cherno for providing such a great starting point and for his amaz
 - CMake 3.30+ (required by NRD dependency build)
 - Git with submodule support (`git submodule update --init --recursive`)
 
+To render the Sponza scene, you also need to download both the Sponza Base Scene and Colorful Curtains Add-on from [Intel](https://www.intel.com/content/www/us/en/developer/topic-technology/graphics-research/samples.html) and place the extracted gltf files and textures folder in [`resources/scenes/sponza/`](resources/scenes/sponza/).
+
 ### Building
 
 1. Clone the repository:

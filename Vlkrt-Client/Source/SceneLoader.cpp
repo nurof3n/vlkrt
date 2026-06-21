@@ -6,6 +6,9 @@
 
 #include <fstream>
 #include <yaml-cpp/yaml.h>
+#include <filesystem>
+#include <algorithm>
+#include <cctype>
 
 namespace Vlkrt
 {
@@ -85,6 +88,28 @@ namespace Vlkrt
                     if (matNode["material_index"]) { mat.MaterialIndex = matNode["material_index"].as<uint32_t>(); }
 
                     if (matNode["texture"]) { mat.TextureFilename = matNode["texture"].as<std::string>(); }
+                    if (matNode["texture_albedo"])
+                        mat.TextureAlbedoFilename = matNode["texture_albedo"].as<std::string>();
+                    if (matNode["base_color_texture"])
+                        mat.TextureAlbedoFilename = matNode["base_color_texture"].as<std::string>();
+                    if (matNode["texture_normal"])
+                        mat.TextureNormalFilename = matNode["texture_normal"].as<std::string>();
+                    if (matNode["normal_texture"])
+                        mat.TextureNormalFilename = matNode["normal_texture"].as<std::string>();
+                    if (matNode["texture_metallic_roughness"])
+                        mat.TextureMetallicRoughnessFilename = matNode["texture_metallic_roughness"].as<std::string>();
+                    if (matNode["metallic_roughness_texture"])
+                        mat.TextureMetallicRoughnessFilename = matNode["metallic_roughness_texture"].as<std::string>();
+                    if (matNode["texture_emissive"])
+                        mat.TextureEmissiveFilename = matNode["texture_emissive"].as<std::string>();
+                    if (matNode["emissive_texture"])
+                        mat.TextureEmissiveFilename = matNode["emissive_texture"].as<std::string>();
+                    if (matNode["texture_occlusion"])
+                        mat.TextureOcclusionFilename = matNode["texture_occlusion"].as<std::string>();
+                    if (matNode["occlusion_texture"])
+                        mat.TextureOcclusionFilename = matNode["occlusion_texture"].as<std::string>();
+
+                    if (mat.TextureAlbedoFilename.empty()) mat.TextureAlbedoFilename = mat.TextureFilename;
 
                     if (matNode["tiling"]) { mat.Tiling = matNode["tiling"].as<float>(); }
 
@@ -274,12 +299,31 @@ namespace Vlkrt
         if (entity.Type == EntityType::Mesh) {
             if (!entity.MeshData.Filename.empty()) {
                 try {
-                    Mesh mesh          = MeshLoader::LoadOBJ(entity.MeshData.Filename);
-                    mesh.Filename      = entity.MeshData.Filename;
-                    mesh.Name          = entity.Name;
-                    mesh.Transform     = worldTransform;
-                    mesh.MaterialIndex = entity.MeshData.MaterialIndex;
-                    outScene.StaticMeshes.push_back(mesh);
+                    std::filesystem::path meshPath(entity.MeshData.Filename);
+                    std::string ext = meshPath.extension().string();
+                    std::transform(ext.begin(), ext.end(), ext.begin(),
+                            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+                    if (ext == ".gltf" || ext == ".glb") {
+                        auto gltfScene          = MeshLoader::LoadGLTF(entity.MeshData.Filename, worldTransform);
+                        uint32_t materialOffset = static_cast<uint32_t>(outScene.Materials.size());
+                        for (auto& mat : gltfScene.Materials) { outScene.Materials.push_back(std::move(mat)); }
+
+                        for (auto& mesh : gltfScene.Meshes) {
+                            mesh.Filename = entity.MeshData.Filename;
+                            if (!entity.Name.empty()) mesh.Name = entity.Name + ":" + mesh.Name;
+                            mesh.MaterialIndex += materialOffset;
+                            outScene.StaticMeshes.push_back(std::move(mesh));
+                        }
+                    }
+                    else {
+                        Mesh mesh          = MeshLoader::LoadOBJ(entity.MeshData.Filename);
+                        mesh.Filename      = entity.MeshData.Filename;
+                        mesh.Name          = entity.Name;
+                        mesh.Transform     = worldTransform;
+                        mesh.MaterialIndex = entity.MeshData.MaterialIndex;
+                        outScene.StaticMeshes.push_back(mesh);
+                    }
                 }
                 catch (const std::exception& e) {
                     WL_ERROR_TAG("SceneLoader", "Error loading mesh: {} - {}", entity.MeshData.Filename, e.what());
@@ -521,10 +565,22 @@ namespace Vlkrt
                 if (em.x > 0 || em.y > 0 || em.z > 0)
                     file << "  emission: [ " << em.x << ", " << em.y << ", " << em.z << " ]\n";
 
-                if (!mat.TextureFilename.empty()) {
+                if (!mat.TextureAlbedoFilename.empty())
+                    file << "  texture_albedo: " << mat.TextureAlbedoFilename << "\n";
+                else if (!mat.TextureFilename.empty())
                     file << "  texture: " << mat.TextureFilename << "\n";
+                if (!mat.TextureNormalFilename.empty())
+                    file << "  texture_normal: " << mat.TextureNormalFilename << "\n";
+                if (!mat.TextureMetallicRoughnessFilename.empty())
+                    file << "  texture_metallic_roughness: " << mat.TextureMetallicRoughnessFilename << "\n";
+                if (!mat.TextureEmissiveFilename.empty())
+                    file << "  texture_emissive: " << mat.TextureEmissiveFilename << "\n";
+                if (!mat.TextureOcclusionFilename.empty())
+                    file << "  texture_occlusion: " << mat.TextureOcclusionFilename << "\n";
+                if (!mat.TextureAlbedoFilename.empty() || !mat.TextureFilename.empty()
+                        || !mat.TextureNormalFilename.empty() || !mat.TextureMetallicRoughnessFilename.empty()
+                        || !mat.TextureEmissiveFilename.empty() || !mat.TextureOcclusionFilename.empty())
                     file << "  tiling: " << mat.Tiling << "\n";
-                }
 
                 file << "  material_index: " << mat.MaterialIndex << "\n";
             }

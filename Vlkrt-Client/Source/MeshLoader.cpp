@@ -3,14 +3,95 @@
 
 #include "Walnut/Core/Log.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <glm/gtc/matrix_transform.hpp>
+#include <functional>
+#include <cstring>
+#include <vector>
 
 #include "tiny_obj_loader.h"
+
+#define TINYGLTF_IMPLEMENTATION
+#define TINYGLTF_NO_INCLUDE_STB_IMAGE
+#define TINYGLTF_NO_STB_IMAGE_WRITE
+#define TINYGLTF_NO_INCLUDE_STB_IMAGE_WRITE
+#include "stb_image.h"
+#include "tiny_gltf.h"
 
 
 namespace Vlkrt
 {
+    namespace
+    {
+        static auto ResolveModelPath(const std::string& filename) -> std::filesystem::path
+        {
+            std::filesystem::path path(filename);
+            if (path.is_absolute()) return path;
+
+            std::filesystem::path modelsPath = std::filesystem::path(Vlkrt::MODELS_DIR) / filename;
+            if (std::filesystem::exists(modelsPath)) return modelsPath;
+
+            std::filesystem::path scenesPath = std::filesystem::path(Vlkrt::SCENES_DIR) / filename;
+            if (std::filesystem::exists(scenesPath)) return scenesPath;
+
+            return path;
+        }
+
+        static auto ToRendererRelativeTexturePath(const std::filesystem::path& absoluteTexturePath) -> std::string
+        {
+            std::filesystem::path modelsRoot = std::filesystem::path(Vlkrt::MODELS_DIR);
+            std::error_code ec;
+            auto rel = std::filesystem::relative(absoluteTexturePath, modelsRoot, ec);
+            if (!ec && !rel.empty() && rel.string().rfind("..", 0) != 0) { return rel.generic_string(); }
+            return absoluteTexturePath.lexically_normal().generic_string();
+        }
+
+        static auto ReadAccessorUInt(const tinygltf::Model& model, const tinygltf::Accessor& accessor, size_t index)
+                -> uint32_t
+        {
+            const auto& view    = model.bufferViews[accessor.bufferView];
+            const auto& buffer  = model.buffers[view.buffer];
+            const size_t stride = accessor.ByteStride(view) ? accessor.ByteStride(view)
+                                                            : tinygltf::GetComponentSizeInBytes(accessor.componentType)
+                                                                      * tinygltf::GetNumComponentsInType(accessor.type);
+            const uint8_t* data = buffer.data.data() + view.byteOffset + accessor.byteOffset + index * stride;
+
+            switch (accessor.componentType) {
+                case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE: return *reinterpret_cast<const uint8_t*>(data);
+                case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT: return *reinterpret_cast<const uint16_t*>(data);
+                case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT: return *reinterpret_cast<const uint32_t*>(data);
+                default: return 0u;
+            }
+        }
+
+        static auto ReadAccessorVec2(const tinygltf::Model& model, const tinygltf::Accessor& accessor, size_t index)
+                -> glm::vec2
+        {
+            const auto& view    = model.bufferViews[accessor.bufferView];
+            const auto& buffer  = model.buffers[view.buffer];
+            const size_t stride = accessor.ByteStride(view)
+                                          ? accessor.ByteStride(view)
+                                          : sizeof(float) * tinygltf::GetNumComponentsInType(accessor.type);
+            const uint8_t* data = buffer.data.data() + view.byteOffset + accessor.byteOffset + index * stride;
+            const float* f      = reinterpret_cast<const float*>(data);
+            return glm::vec2(f[0], f[1]);
+        }
+
+        static auto ReadAccessorVec3(const tinygltf::Model& model, const tinygltf::Accessor& accessor, size_t index)
+                -> glm::vec3
+        {
+            const auto& view    = model.bufferViews[accessor.bufferView];
+            const auto& buffer  = model.buffers[view.buffer];
+            const size_t stride = accessor.ByteStride(view)
+                                          ? accessor.ByteStride(view)
+                                          : sizeof(float) * tinygltf::GetNumComponentsInType(accessor.type);
+            const uint8_t* data = buffer.data.data() + view.byteOffset + accessor.byteOffset + index * stride;
+            const float* f      = reinterpret_cast<const float*>(data);
+            return glm::vec3(f[0], f[1], f[2]);
+        }
+    }  // namespace
+
     auto MeshLoader::LoadOBJ(const std::string& filename, const glm::mat4& transform) -> Mesh
     {
         Mesh mesh;
@@ -22,8 +103,8 @@ namespace Vlkrt
 
         auto filepath = Vlkrt::MODELS_DIR + filename;
         bool success  = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, filepath.c_str(), Vlkrt::MODELS_DIR,
-                 true,  // convert quads to triangles
-                 true);
+                true,  // convert quads to triangles
+                true);
         if (!success) {
             WL_ERROR_TAG("MeshLoader", "Failed to load OBJ file '{}': {}", filepath, err);
             return mesh;
@@ -117,6 +198,194 @@ namespace Vlkrt
         WL_INFO_TAG("MeshLoader", "Loaded OBJ file '{}': {} vertices", filepath, mesh.Vertices.size());
 
         return mesh;
+    }
+
+    auto MeshLoader::LoadGLTF(const std::string& filename, const glm::mat4& transform) -> LoadedGLTFScene
+    {
+        LoadedGLTFScene result;
+
+        std::filesystem::path filepath = ResolveModelPath(filename);
+        if (!std::filesystem::exists(filepath)) {
+            WL_ERROR_TAG("MeshLoader", "glTF file not found: {}", filepath.string());
+            return result;
+        }
+
+        tinygltf::Model model;
+        tinygltf::TinyGLTF loader;
+        std::string warn, err;
+
+        bool loaded     = false;
+        std::string ext = filepath.extension().string();
+        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+        if (ext == ".glb")
+            loaded = loader.LoadBinaryFromFile(&model, &err, &warn, filepath.string());
+        else
+            loaded = loader.LoadASCIIFromFile(&model, &err, &warn, filepath.string());
+
+        if (!warn.empty()) { WL_WARN_TAG("MeshLoader", "glTF warnings for '{}': {}", filepath.string(), warn); }
+        if (!loaded) {
+            WL_ERROR_TAG("MeshLoader", "Failed to load glTF '{}': {}", filepath.string(), err);
+            return result;
+        }
+
+        auto texturePathFromIndex = [&](int textureIndex) -> std::string {
+            if (textureIndex < 0 || textureIndex >= (int) model.textures.size()) return {};
+            const auto& tex = model.textures[textureIndex];
+            if (tex.source < 0 || tex.source >= (int) model.images.size()) return {};
+
+            const auto& img = model.images[tex.source];
+            if (img.uri.empty()) {
+                WL_WARN_TAG("MeshLoader", "Embedded image '{}' is not exported to file path; skipping texture path",
+                        img.name);
+                return {};
+            }
+
+            std::filesystem::path imageAbsolute = filepath.parent_path() / img.uri;
+            return ToRendererRelativeTexturePath(imageAbsolute);
+        };
+
+        result.Materials.reserve(model.materials.empty() ? 1 : model.materials.size());
+        std::vector<bool> skippedMaterials(model.materials.size(), false);
+        if (model.materials.empty()) { result.Materials.push_back(Material{}); }
+        else {
+            for (size_t i = 0; i < model.materials.size(); ++i) {
+                const auto& gm = model.materials[i];
+
+                if (gm.alphaMode == "BLEND") {
+                    skippedMaterials[i] = true;
+                    WL_INFO_TAG("MeshLoader", "Skipping unsupported BLEND material '{}' in glTF '{}'", gm.name,
+                            filepath.string());
+                    result.Materials.push_back(Material{});
+                    continue;
+                }
+
+                Material mat{};
+                mat.Name = gm.name.empty() ? ("GLTF_Material_" + std::to_string(i)) : gm.name;
+
+                if (gm.pbrMetallicRoughness.baseColorFactor.size() == 4) {
+                    mat.Albedo = glm::vec3((float) gm.pbrMetallicRoughness.baseColorFactor[0],
+                            (float) gm.pbrMetallicRoughness.baseColorFactor[1],
+                            (float) gm.pbrMetallicRoughness.baseColorFactor[2]);
+                }
+                mat.Metallic  = (float) gm.pbrMetallicRoughness.metallicFactor;
+                mat.Roughness = (float) gm.pbrMetallicRoughness.roughnessFactor;
+
+                if (gm.emissiveFactor.size() == 3) {
+                    mat.Emission = glm::vec3(
+                            (float) gm.emissiveFactor[0], (float) gm.emissiveFactor[1], (float) gm.emissiveFactor[2]);
+                }
+
+                mat.TextureAlbedoFilename = texturePathFromIndex(gm.pbrMetallicRoughness.baseColorTexture.index);
+                mat.TextureFilename       = mat.TextureAlbedoFilename;
+                mat.TextureNormalFilename = texturePathFromIndex(gm.normalTexture.index);
+                mat.TextureMetallicRoughnessFilename
+                        = texturePathFromIndex(gm.pbrMetallicRoughness.metallicRoughnessTexture.index);
+                mat.TextureEmissiveFilename = texturePathFromIndex(gm.emissiveTexture.index);
+                // Skip occlusion texture to save VRAM (not sampled in shader)
+                mat.TextureOcclusionFilename = "";
+
+                result.Materials.push_back(mat);
+            }
+        }
+
+        auto nodeTransform = [](const tinygltf::Node& node) -> glm::mat4 {
+            if (node.matrix.size() == 16) {
+                glm::mat4 m(1.0f);
+                for (int i = 0; i < 16; ++i) { m[i / 4][i % 4] = (float) node.matrix[i]; }
+                return m;
+            }
+
+            glm::vec3 translation(0.0f);
+            glm::quat rotation(1.0f, 0.0f, 0.0f, 0.0f);
+            glm::vec3 scale(1.0f);
+            if (node.translation.size() == 3) {
+                translation = glm::vec3(
+                        (float) node.translation[0], (float) node.translation[1], (float) node.translation[2]);
+            }
+            if (node.rotation.size() == 4) {
+                rotation = glm::quat((float) node.rotation[3], (float) node.rotation[0], (float) node.rotation[1],
+                        (float) node.rotation[2]);
+            }
+            if (node.scale.size() == 3) {
+                scale = glm::vec3((float) node.scale[0], (float) node.scale[1], (float) node.scale[2]);
+            }
+            return glm::translate(glm::mat4(1.0f), translation) * glm::mat4_cast(rotation)
+                   * glm::scale(glm::mat4(1.0f), scale);
+        };
+
+        std::function<void(int, const glm::mat4&)> loadNode;
+        loadNode = [&](int nodeIndex, const glm::mat4& parent) {
+            const tinygltf::Node& node = model.nodes[nodeIndex];
+            glm::mat4 world            = parent * nodeTransform(node);
+
+            if (node.mesh >= 0 && node.mesh < (int) model.meshes.size()) {
+                const auto& gltfMesh = model.meshes[node.mesh];
+
+                for (size_t primIdx = 0; primIdx < gltfMesh.primitives.size(); ++primIdx) {
+                    const auto& primitive = gltfMesh.primitives[primIdx];
+                    if (primitive.mode != TINYGLTF_MODE_TRIANGLES) continue;
+                    if (primitive.attributes.find("POSITION") == primitive.attributes.end()) continue;
+                    if (primitive.material >= 0 && primitive.material < (int) skippedMaterials.size()
+                            && skippedMaterials[(size_t) primitive.material]) {
+                        continue;
+                    }
+
+                    Mesh mesh{};
+                    mesh.Name          = gltfMesh.name.empty() ? ("Mesh_" + std::to_string(node.mesh)) : gltfMesh.name;
+                    mesh.Filename      = filename;
+                    mesh.Transform     = transform * world;
+                    mesh.MaterialIndex = (primitive.material >= 0) ? (uint32_t) primitive.material : 0u;
+
+                    const tinygltf::Accessor& posAccessor    = model.accessors[primitive.attributes.at("POSITION")];
+                    const tinygltf::Accessor* normalAccessor = nullptr;
+                    const tinygltf::Accessor* uvAccessor     = nullptr;
+                    if (auto it = primitive.attributes.find("NORMAL"); it != primitive.attributes.end()) {
+                        normalAccessor = &model.accessors[it->second];
+                    }
+                    if (auto it = primitive.attributes.find("TEXCOORD_0"); it != primitive.attributes.end()) {
+                        uvAccessor = &model.accessors[it->second];
+                    }
+
+                    mesh.Vertices.reserve(posAccessor.count);
+                    for (size_t vi = 0; vi < posAccessor.count; ++vi) {
+                        Vertex v{};
+                        v.Position = ReadAccessorVec3(model, posAccessor, vi);
+                        v.Normal   = normalAccessor ? ReadAccessorVec3(model, *normalAccessor, vi)
+                                                    : glm::vec3(0.0f, 1.0f, 0.0f);
+                        v.TexCoord = uvAccessor ? ReadAccessorVec2(model, *uvAccessor, vi) : glm::vec2(0.0f);
+                        mesh.Vertices.push_back(v);
+                    }
+
+                    if (primitive.indices >= 0) {
+                        const tinygltf::Accessor& idxAccessor = model.accessors[primitive.indices];
+                        mesh.Indices.reserve(idxAccessor.count);
+                        for (size_t ii = 0; ii < idxAccessor.count; ++ii) {
+                            mesh.Indices.push_back(ReadAccessorUInt(model, idxAccessor, ii));
+                        }
+                    }
+                    else {
+                        mesh.Indices.reserve(mesh.Vertices.size());
+                        for (uint32_t i = 0; i < (uint32_t) mesh.Vertices.size(); ++i) { mesh.Indices.push_back(i); }
+                    }
+
+                    result.Meshes.push_back(std::move(mesh));
+                }
+            }
+
+            for (int child : node.children) { loadNode(child, world); }
+        };
+
+        int sceneIndex = model.defaultScene >= 0 ? model.defaultScene : 0;
+        if (sceneIndex < (int) model.scenes.size()) {
+            for (int rootNode : model.scenes[sceneIndex].nodes) { loadNode(rootNode, glm::mat4(1.0f)); }
+        }
+        else {
+            for (size_t i = 0; i < model.nodes.size(); ++i) { loadNode((int) i, glm::mat4(1.0f)); }
+        }
+
+        WL_INFO_TAG("MeshLoader", "Loaded glTF '{}' with {} meshes and {} materials", filepath.string(),
+                result.Meshes.size(), result.Materials.size());
+        return result;
     }
 
     auto MeshLoader::GenerateCube(float size, const glm::mat4& transform) -> Mesh

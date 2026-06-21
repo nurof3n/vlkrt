@@ -187,10 +187,10 @@ struct GPULight {
     uint   type;       // offset 44
 };
 
-/// GPU PBR material — 112 bytes, std430-compatible
+/// GPU PBR material — 128 bytes, std430-compatible
 struct GPUPBRMaterial {
     float3 albedo;               // offset   0
-    int    textureIndex;         // offset  12  (-1 = no texture)
+    int    albedoTextureIndex;   // offset  12  (-1 = no texture)
     float3 emission;             // offset  16
     float  tiling;               // offset  28
     float3 extinction;           // offset  32
@@ -209,8 +209,12 @@ struct GPUPBRMaterial {
     float  eta;                  // offset  92
     float  atDistance;           // offset  96
     int    lightIndex;           // offset 100  (>=0 if mesh is emitter)
-    float  _pad1;                // offset 104
-    float  _pad2;                // offset 108
+    int    normalTextureIndex;   // offset 104
+    int    metallicRoughnessTextureIndex; // offset 108
+    int    emissiveTextureIndex; // offset 112
+    int    occlusionTextureIndex;// offset 116
+    float  _pad1;                // offset 120
+    float  _pad2;                // offset 124
 };
 
 /// AABB transform pair — 128 bytes, std430-compatible
@@ -264,7 +268,7 @@ struct SceneUBO {
 [[vk::binding(4,  0)]] StructuredBuffer<GPUPBRMaterial>       g_materials;
 [[vk::binding(5,  0)]] StructuredBuffer<uint>                 g_matIdx;
 [[vk::binding(6,  0)]] StructuredBuffer<GPULight>             g_lights;
-[[vk::binding(7,  0)]] Sampler2D                              g_textures[16];
+[[vk::binding(7,  0)]] Sampler2D                              g_textures[256];
 [[vk::binding(8,  0)]] StructuredBuffer<AABBTransform>        g_aabbTransforms;
 [[vk::binding(9,  0)]] StructuredBuffer<GPUPBRMaterial>       g_aabbMaterials;
 [[vk::binding(10, 0)]] [[vk::image_format("rgba32f")]]

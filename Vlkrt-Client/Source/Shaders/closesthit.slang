@@ -27,14 +27,55 @@ void ClosestHitMain([[vk::location(0)]] inout RayPayload payload,
     // Transform to world space (rotation/scale submatrix of ObjectToWorld3x4)
     normal = normalize(mul(float3x3(ObjectToWorld3x4()), normal));
 
-    // Optional texture sample
-    if (mat.textureIndex >= 0) {
-        float2 uv0 = g_vtx[tri.x].texCoord;
-        float2 uv1 = g_vtx[tri.y].texCoord;
-        float2 uv2 = g_vtx[tri.z].texCoord;
-        float2 uv  = uv0 + bary.x * (uv1 - uv0) + bary.y * (uv2 - uv0);
-        uv *= mat.tiling;
-        mat.albedo = g_textures[NonUniformResourceIndex(mat.textureIndex)].SampleLevel(uv, 0.0f).rgb;
+    float2 uv0 = g_vtx[tri.x].texCoord;
+    float2 uv1 = g_vtx[tri.y].texCoord;
+    float2 uv2 = g_vtx[tri.z].texCoord;
+    float2 uv  = uv0 + bary.x * (uv1 - uv0) + bary.y * (uv2 - uv0);
+    uv *= mat.tiling;
+
+    if (mat.albedoTextureIndex >= 0) {
+        mat.albedo = g_textures[NonUniformResourceIndex(mat.albedoTextureIndex)].SampleLevel(uv, 0.0f).rgb;
+    }
+
+    if (mat.metallicRoughnessTextureIndex >= 0) {
+        float3 mr = g_textures[NonUniformResourceIndex(mat.metallicRoughnessTextureIndex)].SampleLevel(uv, 0.0f).rgb;
+        mat.roughness = clamp(mat.roughness * mr.g, 0.001f, 1.0f);
+        mat.metallic  = clamp(mat.metallic * mr.b, 0.0f, 1.0f);
+    }
+
+    if (mat.emissiveTextureIndex >= 0) {
+        float3 em = g_textures[NonUniformResourceIndex(mat.emissiveTextureIndex)].SampleLevel(uv, 0.0f).rgb;
+        mat.emission *= em;
+    }
+
+    if (mat.normalTextureIndex >= 0) {
+        float3 p0 = g_vtx[tri.x].position;
+        float3 p1 = g_vtx[tri.y].position;
+        float3 p2 = g_vtx[tri.z].position;
+        float2 duv1 = uv1 - uv0;
+        float2 duv2 = uv2 - uv0;
+        float3 dp1 = p1 - p0;
+        float3 dp2 = p2 - p0;
+
+        float denom = duv1.x * duv2.y - duv1.y * duv2.x;
+        float3 tangentModel = float3(1.0f, 0.0f, 0.0f);
+        float3 bitangentModel = float3(0.0f, 1.0f, 0.0f);
+        if (abs(denom) > 1e-8f) {
+            float inv = 1.0f / denom;
+            tangentModel = normalize((dp1 * duv2.y - dp2 * duv1.y) * inv);
+            bitangentModel = normalize((dp2 * duv1.x - dp1 * duv2.x) * inv);
+        }
+
+        float3 T = normalize(mul(float3x3(ObjectToWorld3x4()), tangentModel));
+        float3 B = normalize(mul(float3x3(ObjectToWorld3x4()), bitangentModel));
+        float3 N = normalize(normal);
+
+        T = normalize(T - N * dot(T, N));
+        B = normalize(cross(N, T));
+
+        float3 mapN = g_textures[NonUniformResourceIndex(mat.normalTextureIndex)].SampleLevel(uv, 0.0f).xyz;
+        mapN = normalize(mapN * 2.0f - 1.0f);
+        normal = normalize(T * mapN.x + B * mapN.y + N * mapN.z);
     }
 
     float3 hitPos = WorldRayOrigin() + RayTCurrent() * WorldRayDirection();
