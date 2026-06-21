@@ -45,13 +45,11 @@ void RayGenMain() {
             Ray ray = GenerateCameraRay(DispatchRaysIndex().xy, offset);
 
             RayPayload payload;
-            payload.color          = float4(0.0f);
-            payload.worldPosition  = float4(0.0f);
-            payload.throughput     = float4(1.0f);
-            payload.absorption     = float4(0.0f);
-            payload.firstHitNormalRoughness = float4(0.0f, 1.0f, 0.0f, 0.5f);
-            payload.firstHitMaterialParams = float4(0.0f, 0.0f, 0.0f, 0.0f);
-            payload.firstHitWorldPosPrev = float4(0.0f, 0.0f, 0.0f, 1.0f);
+            payload.color          = float3(0.0f);
+            payload.worldPosition  = float3(0.0f);
+            payload.hitDistance    = 0.0f;
+            payload.throughput     = float3(1.0f);
+            payload.absorption     = float3(0.0f);
             payload.rngState       = seed;
             payload.recursionDepth = 0u;
             payload.inside         = 0u;
@@ -62,7 +60,9 @@ void RayGenMain() {
             payload.diffuseHitDist = 0.0f;
             payload.specularHitDist = 0.0f;
             payload.emission       = float3(0.0f);
-            payload.firstHitMetallic = 0.0f;
+            payload.firstHitWorldPosPrev = float3(0.0f);
+            payload.firstHitPackedNormalData = PackFirstHitNormalData(float3(0.0f, 1.0f, 0.0f), 0.5f, 0.0f);
+            payload.firstHitPackedMaterialData = PackFirstHitMaterialData(float3(0.0f), 0.0f, 0.0f);
 
             RayDesc rayDesc;
             rayDesc.Origin    = ray.origin;
@@ -73,19 +73,16 @@ void RayGenMain() {
             TraceRay(g_tlas, RAY_FLAG_NONE, 0xFF, 0, 2, 0, rayDesc, payload);
             payload.color = RadianceClamp(payload.color);
 
-            if (payload.worldPosition.w > 0.0f) {
-                float3 n = payload.firstHitNormalRoughness.xyz;
-                if (dot(n, n) > 1e-6f) {
-                    n = normalize(n);
-                } else {
-                    n = float3(0.0f, 1.0f, 0.0f);
-                }
-
-                float roughness = clamp(payload.firstHitNormalRoughness.w, 0.0f, 1.0f);
-                float depth = ComputeViewDepth(payload.worldPosition.xyz);
-
-                float3 albedo = payload.firstHitMaterialParams.xyz;
-                float materialClass = payload.firstHitWorldPosPrev.w;
+            if (payload.hitDistance > 0.0f) {
+                float3 n;
+                float roughness;
+                float metallic;
+                float3 albedo;
+                float specularWeight;
+                float materialClass;
+                UnpackFirstHitNormalData(payload.firstHitPackedNormalData, n, roughness, metallic);
+                UnpackFirstHitMaterialData(payload.firstHitPackedMaterialData, albedo, specularWeight, materialClass);
+                float depth = ComputeViewDepth(payload.worldPosition);
 
                 guideNormal += n;
                 guideRoughness += roughness;
@@ -93,10 +90,10 @@ void RayGenMain() {
                 guideAlbedo += albedo;
                 guideDiffuse += payload.diffuse;
                 guideSpecular += payload.specular;
-                guideMotion += ComputeMotionVector(payload.worldPosition.xyz, payload.firstHitWorldPosPrev.xyz);
-                guideMetallic += clamp(payload.firstHitMetallic, 0.0f, 1.0f);
+                guideMotion += ComputeMotionVector(payload.worldPosition, payload.firstHitWorldPosPrev);
+                guideMetallic += clamp(metallic, 0.0f, 1.0f);
                 guideEmission += payload.emission;
-                float4 clipPos = mul(g_scene.worldToClip, float4(payload.worldPosition.xyz, 1.0f));
+                float4 clipPos = mul(g_scene.worldToClip, float4(payload.worldPosition, 1.0f));
                 float ndcDepth = (clipPos.w > 0.0f) ? (clipPos.z / clipPos.w) : 1.0f;
                 guideNdcDepth += ndcDepth;
                 
@@ -116,7 +113,7 @@ void RayGenMain() {
             }
 
             const float gammaPow = 1.0f / 2.2f;
-            finalColor += pow(ACES(payload.color.xyz), float3(gammaPow));
+            finalColor += pow(ACES(payload.color), float3(gammaPow));
         }
     }
 

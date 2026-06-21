@@ -246,6 +246,7 @@ namespace Vlkrt
         void CreateDescriptorSets();
         void CreateSceneBuffers(const Scene& scene);
         void UpdateSceneData(const Scene& scene);
+        void SyncPreviousFrameGeometryBuffers();
         void UpdateLightBuffer(const Scene& scene);
         void UpdateSceneUBO(const Scene& scene, const Camera& camera, bool forceTemporalMode);
         auto CreateBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties,

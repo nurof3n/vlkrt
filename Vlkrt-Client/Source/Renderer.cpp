@@ -535,6 +535,7 @@ namespace Vlkrt
 
         // Keep scene-data update separate from structural rebuilds.
         // This allows cheap accumulation resets without forcing full GPU scene rebuild work.
+        bool sceneDataUploadedThisFrame = false;
         if (m_LastUpdatedScene == nullptr || m_LastUpdatedScene != &scene || m_SceneDataDirty) {
             const bool lightOnlyDirty
                     = m_SceneDataDirty && !needsRebuild && m_DirtyMeshIndices.empty() && !m_DirtyLightIndices.empty();
@@ -548,14 +549,19 @@ namespace Vlkrt
             const bool contentChanged = !m_HasSceneSignature || (sceneSignature != m_LastSceneSignature);
             if (!lightOnlyDirty && (contentChanged || needsRebuild)) {
                 UpdateSceneData(scene);
-                m_LastSceneSignature = sceneSignature;
-                m_HasSceneSignature  = true;
+                sceneDataUploadedThisFrame = true;
+                m_LastSceneSignature       = sceneSignature;
+                m_HasSceneSignature        = true;
             }
             m_LastUpdatedScene = &scene;
             m_SceneDataDirty   = false;
             m_DirtyMeshIndices.clear();
             m_DirtyLightIndices.clear();
         }
+
+        // Keep previous-frame geometry buffers in sync even when no scene upload occurs.
+        // Without this, motion vectors can keep reporting stale movement after an object stops.
+        if (!sceneDataUploadedThisFrame) { SyncPreviousFrameGeometryBuffers(); }
 
         if (!m_AccelerationStructure->IsBuilt()) return;
 
@@ -1361,10 +1367,10 @@ namespace Vlkrt
             stages[IDX_RINT_SDF]
                     = makeStage(VK_SHADER_STAGE_INTERSECTION_BIT_KHR, m_IntersectSDFShader, entryNames[IDX_RINT_SDF]);
 
-            // RayPayload struct: 7×float4 (112B) + 3×uint+2×float (20B) + NRD fields ~48B = 180B total
+            // RayPayload budget after packing first-hit NRD data and removing unused float4 lanes.
             VkRayTracingPipelineInterfaceCreateInfoKHR interfaceConfig
                     = { VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_INTERFACE_CREATE_INFO_KHR };
-            interfaceConfig.maxPipelineRayPayloadSize      = 180;
+            interfaceConfig.maxPipelineRayPayloadSize      = 144;
             interfaceConfig.maxPipelineRayHitAttributeSize = 32;
 
             VkRayTracingPipelineCreateInfoKHR pci = { VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR };
@@ -2136,6 +2142,25 @@ namespace Vlkrt
         extraWrites[5].pBufferInfo     = &prevAabbTransformInfo;
 
         vkUpdateDescriptorSets(m_Device, 6, extraWrites, 0, nullptr);
+    }
+
+    void Renderer::SyncPreviousFrameGeometryBuffers()
+    {
+        if (m_PrevVertexMemory != VK_NULL_HANDLE && !m_PreviousFrameVertices.empty()) {
+            void* data = nullptr;
+            vkMapMemory(m_Device, m_PrevVertexMemory, 0, sizeof(GPUVertex) * m_PreviousFrameVertices.size(), 0, &data);
+            memcpy(data, m_PreviousFrameVertices.data(), sizeof(GPUVertex) * m_PreviousFrameVertices.size());
+            vkUnmapMemory(m_Device, m_PrevVertexMemory);
+        }
+
+        if (m_PrevAABBTransformMemory != VK_NULL_HANDLE && !m_PreviousFrameAABBTransforms.empty()) {
+            void* aabbData = nullptr;
+            vkMapMemory(m_Device, m_PrevAABBTransformMemory, 0,
+                    sizeof(AABBTransform) * m_PreviousFrameAABBTransforms.size(), 0, &aabbData);
+            memcpy(aabbData, m_PreviousFrameAABBTransforms.data(),
+                    sizeof(AABBTransform) * m_PreviousFrameAABBTransforms.size());
+            vkUnmapMemory(m_Device, m_PrevAABBTransformMemory);
+        }
     }
 
     void Renderer::UpdateLightBuffer(const Scene& scene)

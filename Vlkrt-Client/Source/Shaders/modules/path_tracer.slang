@@ -194,8 +194,8 @@ float3 DoPathTracing(inout RayPayload payload,
     mat.roughness = max(0.001f, mat.roughness);
 
     float  eta        = (payload.inside != 0u) ? mat.eta : 1.0f / mat.eta;
-    float3 absorption = (payload.inside != 0u) ? payload.absorption.xyz : float3(0.0f);
-    float3 throughput = payload.throughput.xyz * exp(-absorption * hitDist);
+    float3 absorption = (payload.inside != 0u) ? payload.absorption : float3(0.0f);
+    float3 throughput = payload.throughput * exp(-absorption * hitDist);
     float3 wo         = -rayDir;
     bool   aniso      = g_scene.anisotropicBSDF != 0u;
 
@@ -324,10 +324,11 @@ float3 DoPathTracing(inout RayPayload payload,
         // firstHitWorldPosPrev) are depth-0-only — explicitly zero them so they don't
         // pollute the GPU stack at every recursion level.
         RayPayload childPayload;
-        childPayload.color              = float4(0.0f);
-        childPayload.worldPosition      = float4(0.0f);
-        childPayload.throughput         = float4(newThroughput, 1.0f);
-        childPayload.absorption         = float4(newAbsorption, 1.0f);
+        childPayload.color              = float3(0.0f);
+        childPayload.worldPosition      = float3(0.0f);
+        childPayload.hitDistance        = 0.0f;
+        childPayload.throughput         = newThroughput;
+        childPayload.absorption         = newAbsorption;
         childPayload.rngState           = payload.rngState;
         childPayload.recursionDepth     = payload.recursionDepth + 1u;
         childPayload.inside             = refraction ? (payload.inside ^ 1u) : payload.inside;
@@ -339,11 +340,9 @@ float3 DoPathTracing(inout RayPayload payload,
         childPayload.diffuseHitDist     = 0.0f;
         childPayload.specularHitDist    = 0.0f;
         childPayload.emission           = float3(0.0f);
-        childPayload.firstHitMetallic   = 0.0f;
-        // NRD G-buffer fields: zero out — only meaningful at depth 0
-        childPayload.firstHitNormalRoughness = float4(0.0f);
-        childPayload.firstHitMaterialParams  = float4(0.0f);
-        childPayload.firstHitWorldPosPrev    = float4(0.0f);
+        childPayload.firstHitWorldPosPrev    = float3(0.0f);
+        childPayload.firstHitPackedNormalData = PackFirstHitNormalData(float3(0.0f, 1.0f, 0.0f), 0.5f, 0.0f);
+        childPayload.firstHitPackedMaterialData = PackFirstHitMaterialData(float3(0.0f), 0.0f, 0.0f);
 
         RayDesc bounceRay;
         bounceRay.Origin    = hitPos;
@@ -354,7 +353,7 @@ float3 DoPathTracing(inout RayPayload payload,
         TraceRay(g_tlas, RAY_FLAG_NONE, 0xFF, 0, 2, 0, bounceRay, childPayload);
         childPayload.color = RadianceClamp(childPayload.color);
         
-        float3 bounceColor = childPayload.color.xyz;
+        float3 bounceColor = childPayload.color;
         color += bounceColor;
 
         if (payload.recursionDepth == 0u) {
@@ -433,16 +432,16 @@ void ClosestHitHelper(inout RayPayload payload,
     mat.roughness = max(0.001f, mat.roughness);
 
     float hitDist = RayTCurrent();
-    payload.worldPosition = float4(hitPos, hitDist);
+    payload.worldPosition = hitPos;
+    payload.hitDistance = hitDist;
 
     if (payload.recursionDepth == 1u) {
         payload.firstBounceHitDist = hitDist;
     }
 
     if (payload.recursionDepth == 0u) {
-        payload.firstHitNormalRoughness = float4(normalize(normal), mat.roughness);
-
         float metallic = clamp(mat.metallic, 0.0f, 1.0f);
+        payload.firstHitPackedNormalData = PackFirstHitNormalData(normalize(normal), mat.roughness, metallic);
         float specTrans = clamp(mat.specularTransmission, 0.0f, 1.0f);
         float clearcoat = clamp(mat.clearcoat, 0.0f, 1.0f);
         float albedoLum = GetLuminance(mat.albedo);
@@ -455,10 +454,9 @@ void ClosestHitHelper(inout RayPayload payload,
         diffuseWeight /= weightSum;
         specularWeight /= weightSum;
 
-        payload.firstHitMaterialParams = float4(mat.albedo, specularWeight);
         float materialClass = float(mat.materialIndex & 3u);
-        payload.firstHitWorldPosPrev = float4(prevHitPos, materialClass);
-        payload.firstHitMetallic = metallic;
+        payload.firstHitPackedMaterialData = PackFirstHitMaterialData(mat.albedo, specularWeight, materialClass);
+        payload.firstHitWorldPosPrev = prevHitPos;
     }
 
     float3 rayDir  = WorldRayDirection();
@@ -473,7 +471,7 @@ void ClosestHitHelper(inout RayPayload payload,
                 if (payload.recursionDepth > 1u) {
                     LightSample ls;
                     MakeLightSampleSquare(g_lights[li], hitPos, rayDir, hitDist, ls);
-                    color.xyz *= payload.throughput.xyz *
+                    color.xyz *= payload.throughput *
                                  PowerHeuristic(payload.bsdfPdf, 1.0f, ls.pdf, 1.0f);
                 }
             } else {
@@ -490,5 +488,5 @@ void ClosestHitHelper(inout RayPayload payload,
         payload.emission = isLight ? color.xyz : mat.emission;
     }
 
-    payload.color = color;
+    payload.color = color.xyz;
 }

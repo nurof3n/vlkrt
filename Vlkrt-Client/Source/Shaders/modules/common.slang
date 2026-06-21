@@ -49,73 +49,66 @@ struct Ray {
 };
 
 // ------------------------------------------------------------------ //
-// Payload packing helpers (encodes NRD fields for tight storage)
+// Payload packing helpers (encodes first-hit NRD fields for tight storage)
 // ------------------------------------------------------------------ //
-uint PackNormalRoughnessMetallic(float3 normal, float roughness, float metallic) {
-    // Octahedral normal: encode to 2 bytes (int16 for x, int16 for y)
-    float l = length(normal);
-    float3 n = (l > 0.0f) ? (normal / l) : float3(0.0f, 1.0f, 0.0f);
-    
-    float absX = abs(n.x), absY = abs(n.y), absZ = abs(n.z);
-    float x, y;
-    if (absZ >= absX && absZ >= absY) {
-        x = n.x / max(absX + absY + absZ, 1e-6f);
-        y = n.y / max(absX + absY + absZ, 1e-6f);
-    } else if (absY >= absX) {
-        x = n.x / max(absX + absY, 1e-6f);
-        y = (n.z >= 0.0f) ? (1.0f - abs(n.x) / max(absX + absY, 1e-6f)) : (-1.0f + abs(n.x) / max(absX + absY, 1e-6f));
-    } else {
-        x = (n.y >= 0.0f) ? (1.0f - abs(n.z) / max(absX + absZ, 1e-6f)) : (-1.0f + abs(n.z) / max(absX + absZ, 1e-6f));
-        y = n.z / max(absX + absZ, 1e-6f);
+float2 OctEncodeNormal(float3 normal) {
+    float3 n = normalize(normal);
+    n /= max(abs(n.x) + abs(n.y) + abs(n.z), 1e-6f);
+
+    float2 encoded = n.xy;
+    if (n.z < 0.0f) {
+        float2 signNotZero = float2(encoded.x >= 0.0f ? 1.0f : -1.0f, encoded.y >= 0.0f ? 1.0f : -1.0f);
+        encoded = (1.0f - abs(encoded.yx)) * signNotZero;
     }
-    
-    uint nx = uint((x * 0.5f + 0.5f) * 255.0f) & 0xFF;
-    uint ny = uint((y * 0.5f + 0.5f) * 255.0f) & 0xFF;
-    uint ru = uint(saturate(roughness) * 255.0f) & 0xFF;
-    uint me = uint(saturate(metallic) * 255.0f) & 0xFF;
-    
-    return (me << 24) | (ru << 16) | (ny << 8) | nx;
+
+    return encoded;
 }
 
-float3 UnpackNormal(uint packed) {
-    uint nx = (packed & 0xFF);
-    uint ny = ((packed >> 8) & 0xFF);
-    float x = (float(nx) / 255.0f) * 2.0f - 1.0f;
-    float y = (float(ny) / 255.0f) * 2.0f - 1.0f;
-    float z = sqrt(max(1.0f - x*x - y*y, 0.0f));
-    return normalize(float3(x, y, z));
+float3 OctDecodeNormal(float2 encoded) {
+    float3 n = float3(encoded.x, encoded.y, 1.0f - abs(encoded.x) - abs(encoded.y));
+    if (n.z < 0.0f) {
+        float2 signNotZero = float2(n.x >= 0.0f ? 1.0f : -1.0f, n.y >= 0.0f ? 1.0f : -1.0f);
+        n.xy = (1.0f - abs(n.yx)) * signNotZero;
+    }
+
+    return normalize(n);
 }
 
-float UnpackRoughness(uint packed) {
-    return float((packed >> 16) & 0xFF) / 255.0f;
+uint PackFirstHitNormalData(float3 normal, float roughness, float metallic) {
+    float2 oct = OctEncodeNormal(normal);
+    uint nx = uint(round(saturate(oct.x * 0.5f + 0.5f) * 255.0f)) & 0xFFu;
+    uint ny = uint(round(saturate(oct.y * 0.5f + 0.5f) * 255.0f)) & 0xFFu;
+    uint ru = uint(round(saturate(roughness) * 255.0f)) & 0xFFu;
+    uint me = uint(round(saturate(metallic) * 255.0f)) & 0xFFu;
+    return nx | (ny << 8) | (ru << 16) | (me << 24);
 }
 
-float UnpackMetallic(uint packed) {
-    return float((packed >> 24) & 0xFF) / 255.0f;
+void UnpackFirstHitNormalData(uint packed, out float3 normal, out float roughness, out float metallic) {
+    float2 oct;
+    oct.x = (float(packed & 0xFFu) / 255.0f) * 2.0f - 1.0f;
+    oct.y = (float((packed >> 8) & 0xFFu) / 255.0f) * 2.0f - 1.0f;
+    roughness = float((packed >> 16) & 0xFFu) / 255.0f;
+    metallic = float((packed >> 24) & 0xFFu) / 255.0f;
+    normal = OctDecodeNormal(oct);
 }
 
-uint PackAlbedoSpecular(float3 albedo, float specularWeight) {
-    // RGB565 for albedo + half for specular weight
-    uint r = uint(saturate(albedo.r) * 31.0f) & 0x1F;
-    uint g = uint(saturate(albedo.g) * 63.0f) & 0x3F;
-    uint b = uint(saturate(albedo.b) * 31.0f) & 0x1F;
+uint PackFirstHitMaterialData(float3 albedo, float specularWeight, float materialClass) {
+    uint r = uint(round(saturate(albedo.r) * 31.0f)) & 0x1Fu;
+    uint g = uint(round(saturate(albedo.g) * 63.0f)) & 0x3Fu;
+    uint b = uint(round(saturate(albedo.b) * 31.0f)) & 0x1Fu;
     uint rgb565 = (r << 11) | (g << 5) | b;
-    
-    uint specU = uint(min(float(asint(specularWeight)), 65535.0f)) & 0xFFFF;
-    return (specU << 16) | rgb565;
+    uint specU = uint(round(saturate(specularWeight) * 255.0f)) & 0xFFu;
+    uint cls = uint(clamp(materialClass, 0.0f, 3.0f) + 0.5f) & 0x3u;
+    return rgb565 | (specU << 16) | (cls << 24);
 }
 
-float3 UnpackAlbedo(uint packed) {
-    uint rgb565 = packed & 0xFFFF;
-    float r = float((rgb565 >> 11) & 0x1F) / 31.0f;
-    float g = float((rgb565 >> 5) & 0x3F) / 63.0f;
-    float b = float(rgb565 & 0x1F) / 31.0f;
-    return float3(r, g, b);
-}
-
-float UnpackSpecularWeight(uint packed) {
-    uint specU = (packed >> 16) & 0xFFFF;
-    return float(specU) / 65535.0f;
+void UnpackFirstHitMaterialData(uint packed, out float3 albedo, out float specularWeight, out float materialClass) {
+    uint rgb565 = packed & 0xFFFFu;
+    albedo.r = float((rgb565 >> 11) & 0x1Fu) / 31.0f;
+    albedo.g = float((rgb565 >> 5) & 0x3Fu) / 63.0f;
+    albedo.b = float(rgb565 & 0x1Fu) / 31.0f;
+    specularWeight = float((packed >> 16) & 0xFFu) / 255.0f;
+    materialClass = float((packed >> 24) & 0x3u);
 }
 
 /// Push constants: hot scene parameters accessed frequently in ray tracing loops.
@@ -128,37 +121,27 @@ struct PushConstants {
 };
 
 /// Main path-tracing payload (location 0).
-/// Total size: 180 bytes (keep maxPipelineRayPayloadSize in sync in Renderer.cpp).
-///
-/// Fields are grouped:
-///   [0..63]  Multi-bounce core fields — carried at every recursion depth.
-///   [64..111] NRD first-hit guide fields — only written at recursionDepth==0,
-///             only read in raygen shaders. Future: could move to a separate payload
-///             type for secondary bounces to reduce GPU continuation stack.
+/// Budgeted at 144 bytes in Renderer.cpp to leave a little layout slack.
 struct RayPayload {
-    // ---- Core fields (every bounce) ----
-    float4 color;          ///< accumulated radiance
-    float4 worldPosition;  ///< hit world-pos; w=hit distance, w=0 on miss
-    float4 throughput;     ///< path throughput
-    float4 absorption;     ///< accumulated Beer-Lambert absorption
-    uint   rngState;       ///< PCG RNG state
+    // Packed into float3+scalar lanes to keep the continuation stack smaller.
+    float3 color;                 ///< accumulated radiance
+    uint   rngState;              ///< PCG RNG state
+    float3 worldPosition;         ///< hit world position
+    float  hitDistance;           ///< 0 on miss
+    float3 throughput;            ///< path throughput
     uint   recursionDepth;
-    uint   inside;         ///< non-zero when inside a refractive medium
-    float  bsdfPdf;        ///< PDF of the last BSDF sample (MIS)
+    float3 absorption;            ///< accumulated Beer-Lambert absorption
+    uint   inside;                ///< non-zero when inside a refractive medium
+    float3 diffuse;               ///< depth-0 NRD diffuse guide
+    float  bsdfPdf;               ///< PDF of the last BSDF sample (MIS)
+    float3 specular;              ///< depth-0 NRD specular guide
     float  firstBounceHitDist;
-
-    // ---- NRD separate guide channels (depth-0 only) ----
-    float3 diffuse;
-    float3 specular;
+    float3 emission;              ///< depth-0 emissive guide
     float  diffuseHitDist;
+    float3 firstHitWorldPosPrev;  ///< depth-0 previous-frame world pos
     float  specularHitDist;
-    float3 emission;
-    float  firstHitMetallic;
-
-    // ---- NRD first-hit G-buffer data (depth-0 only) ----
-    float4 firstHitNormalRoughness; ///< xyz = first-hit normal, w = first-hit roughness
-    float4 firstHitMaterialParams;  ///< xyz = albedo, w = specularWeight
-    float4 firstHitWorldPosPrev;    ///< xyz = first-hit previous-frame world pos, w = materialClass
+    uint   firstHitPackedNormalData;   ///< oct normal + roughness + metallic
+    uint   firstHitPackedMaterialData; ///< RGB565 albedo + specular weight + material class
 };
 
 /// Shadow ray payload (location 1). 4 bytes.
@@ -317,9 +300,9 @@ float3 ACES(float3 x) {
     return (x * (a * x + b)) / (x * (c * x + d) + e);
 }
 
-float4 RadianceClamp(float4 color) {
-    float lum = GetLuminance(color.xyz);
-    if (lum > 250.0f) color.xyz *= 250.0f / lum;
+float3 RadianceClamp(float3 color) {
+    float lum = GetLuminance(color);
+    if (lum > 250.0f) color *= 250.0f / lum;
     return color;
 }
 

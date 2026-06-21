@@ -9,8 +9,9 @@ import common;
 // Radiance miss: set background colour × path throughput
 [shader("miss")]
 void MissMain([[vk::location(0)]] inout RayPayload payload) {
-    payload.worldPosition = float4(0.0f);
-    payload.color         = ComputeBackground(WorldRayDirection(), payload.recursionDepth == 0u) * payload.throughput;
+    payload.worldPosition = float3(0.0f);
+    payload.hitDistance   = 0.0f;
+    payload.color         = ComputeBackground(WorldRayDirection(), payload.recursionDepth == 0u).xyz * payload.throughput;
     if (payload.recursionDepth == 1u) {
         payload.firstBounceHitDist = 1e6f;
     }

@@ -33,13 +33,11 @@ void RayGenTemporalMain() {
     Ray ray = GenerateCameraRay(DispatchRaysIndex().xy, offset);
 
     RayPayload payload;
-    payload.color          = float4(0.0f);
-    payload.worldPosition  = float4(0.0f);
-    payload.throughput     = float4(1.0f);
-    payload.absorption     = float4(0.0f);
-    payload.firstHitNormalRoughness = float4(0.0f, 1.0f, 0.0f, 0.5f);
-    payload.firstHitMaterialParams = float4(0.0f, 0.0f, 0.0f, 0.0f);
-    payload.firstHitWorldPosPrev = float4(0.0f, 0.0f, 0.0f, 1.0f);
+    payload.color          = float3(0.0f);
+    payload.worldPosition  = float3(0.0f);
+    payload.hitDistance    = 0.0f;
+    payload.throughput     = float3(1.0f);
+    payload.absorption     = float3(0.0f);
     payload.rngState       = seed;
     payload.recursionDepth = 0u;
     payload.inside         = 0u;
@@ -50,7 +48,9 @@ void RayGenTemporalMain() {
     payload.diffuseHitDist = 0.0f;
     payload.specularHitDist = 0.0f;
     payload.emission       = float3(0.0f);
-    payload.firstHitMetallic = 0.0f;
+    payload.firstHitWorldPosPrev = float3(0.0f);
+    payload.firstHitPackedNormalData = PackFirstHitNormalData(float3(0.0f, 1.0f, 0.0f), 0.5f, 0.0f);
+    payload.firstHitPackedMaterialData = PackFirstHitMaterialData(float3(0.0f), 0.0f, 0.0f);
 
     RayDesc rayDesc;
     rayDesc.Origin    = ray.origin;
@@ -62,7 +62,7 @@ void RayGenTemporalMain() {
     payload.color = RadianceClamp(payload.color);
 
     const float gammaPow  = 1.0f / 2.2f;
-    float3      frameColor = pow(ACES(payload.color.xyz), float3(gammaPow));
+    float3      frameColor = pow(ACES(payload.color), float3(gammaPow));
 
     // Blend with accumulated history
     float lerpFactor = float(g_scene.pathFrameCacheIndex - 1u)
@@ -74,21 +74,17 @@ void RayGenTemporalMain() {
     g_outputImage[int2(DispatchRaysIndex().xy)] = float4(result, 1.0f);
 
     int2 pixelCoord = int2(DispatchRaysIndex().xy);
-    if (payload.worldPosition.w > 0.0f) {
-        float3 n = payload.firstHitNormalRoughness.xyz;
-        if (dot(n, n) > 1e-6f) {
-            n = normalize(n);
-        } else {
-            n = float3(0.0f, 1.0f, 0.0f);
-        }
-
-        float roughness = clamp(payload.firstHitNormalRoughness.w, 0.0f, 1.0f);
-        float depth = ComputeViewDepth(payload.worldPosition.xyz);
-        float2 motion = ComputeMotionVector(payload.worldPosition.xyz, payload.firstHitWorldPosPrev.xyz);
-
-        float3 albedo = payload.firstHitMaterialParams.xyz;
-        float materialID = clamp(floor(payload.firstHitWorldPosPrev.w + 0.5f), 0.0f, 3.0f);
-        float metallic = clamp(payload.firstHitMetallic, 0.0f, 1.0f);
+    if (payload.hitDistance > 0.0f) {
+        float3 n;
+        float roughness;
+        float metallic;
+        float3 albedo;
+        float specularWeight;
+        float materialID;
+        UnpackFirstHitNormalData(payload.firstHitPackedNormalData, n, roughness, metallic);
+        UnpackFirstHitMaterialData(payload.firstHitPackedMaterialData, albedo, specularWeight, materialID);
+        float depth = ComputeViewDepth(payload.worldPosition);
+        float2 motion = ComputeMotionVector(payload.worldPosition, payload.firstHitWorldPosPrev);
 
         float diffHitDist = (payload.diffuseHitDist > 0.0f) ? max(payload.diffuseHitDist, 0.001f) : 0.0f;
         float specHitDist = (payload.specularHitDist > 0.0f) ? max(payload.specularHitDist, 0.001f) : 0.0f;
@@ -102,7 +98,7 @@ void RayGenTemporalMain() {
         float3 demodulatedDiffuse = clamp(payload.diffuse / diffFactor, 0.0f, 20.0f);
         float3 demodulatedSpecular = clamp(payload.specular / specFactor, 0.0f, 250.0f);
 
-        float4 clipPos = mul(g_scene.worldToClip, float4(payload.worldPosition.xyz, 1.0f));
+        float4 clipPos = mul(g_scene.worldToClip, float4(payload.worldPosition, 1.0f));
         float ndcDepth = (clipPos.w > 0.0f) ? (clipPos.z / clipPos.w) : 1.0f;
 
         g_guideNormalRoughness[pixelCoord] = PackNormalAndRoughness(n, roughness, materialID);
