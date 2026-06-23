@@ -36,7 +36,7 @@ void ComposeDenoisedMain(uint3 dispatchThreadID : SV_DispatchThreadID)
     float3 normal;
     float roughness;
     NRD_DecodeNormalRoughness101010(packed.xyz, normal, roughness);
-    float metallic = g_guideMotionVectors[pixelCoord].z;
+    float metallic = g_guideMotionVectors[pixelCoord].w;
 
     Ray rayCenter = GenerateCameraRayCompute(pixelCoord, float2(0.5f, 0.5f), float2(width, height));
     float3 V = -rayCenter.direction;

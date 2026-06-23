@@ -15,6 +15,7 @@ void RayGenMain() {
     float3 guideNormal = float3(0.0f);
     float  guideRoughness = 0.0f;
     float  guideDepth = 0.0f;
+    float  guideDepthDelta = 0.0f;  // 2.5D: viewZprev - viewZ
     float  guideNdcDepth = 0.0f;
     float3 guideDiffuse = float3(0.0f);
     float3 guideSpecular = float3(0.0f);
@@ -83,10 +84,13 @@ void RayGenMain() {
                 UnpackFirstHitNormalData(payload.firstHitPackedNormalData, n, roughness, metallic);
                 UnpackFirstHitMaterialData(payload.firstHitPackedMaterialData, albedo, specularWeight, materialClass);
                 float depth = ComputeViewDepth(payload.worldPosition);
+                float prevDepth = ComputeViewDepth(payload.firstHitWorldPosPrev);
+                float depthDelta = prevDepth - depth;
 
                 guideNormal += n;
                 guideRoughness += roughness;
                 guideDepth += depth;
+                guideDepthDelta += depthDelta;
                 guideAlbedo += albedo;
                 guideDiffuse += payload.diffuse;
                 guideSpecular += payload.specular;
@@ -125,6 +129,7 @@ void RayGenMain() {
         float3 avgNormal = normalize(guideNormal * invHitCount);
         float avgRoughness = guideRoughness * invHitCount;
         float avgDepth = guideDepth * invHitCount;
+        float avgDepthDelta = guideDepthDelta * invHitCount;
         
         float avgDiffuseHitDist = (guideDiffuseHitCount > 0.0f) ? max(guideDiffuseHitDist / guideDiffuseHitCount, 0.001f) : 0.0f;
         float avgSpecularHitDist = (guideSpecularHitCount > 0.0f) ? max(guideSpecularHitDist, 0.001f) : 0.0f;
@@ -150,7 +155,7 @@ void RayGenMain() {
 
         g_guideNormalRoughness[pixelCoord] = PackNormalAndRoughness(avgNormal, avgRoughness, materialID);
         g_guideViewZ[pixelCoord] = float4(avgDepth, avgAlbedo);  // RGBA16F
-        g_guideMotionVectors[pixelCoord] = float4(avgMotion, avgMetallic, 1.0f);  // RGBA16F
+        g_guideMotionVectors[pixelCoord] = float4(avgMotion, avgDepthDelta, avgMetallic);  // RGBA16F: 2.5D (XY=motion, Z=depthDelta, W=metallic)
         g_guideDiffRadianceHitDist[pixelCoord]
             = RELAX_FrontEnd_PackRadianceAndHitDist(demodulatedDiffuse, avgDiffuseHitDist, false);
         g_guideSpecRadianceHitDist[pixelCoord]

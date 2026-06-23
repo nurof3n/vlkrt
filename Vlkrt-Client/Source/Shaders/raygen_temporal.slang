@@ -85,6 +85,8 @@ void RayGenTemporalMain() {
         UnpackFirstHitMaterialData(payload.firstHitPackedMaterialData, albedo, specularWeight, materialID);
         float depth = ComputeViewDepth(payload.worldPosition);
         float2 motion = ComputeMotionVector(payload.worldPosition, payload.firstHitWorldPosPrev);
+        float prevDepth = ComputeViewDepth(payload.firstHitWorldPosPrev);
+        float depthDelta = prevDepth - depth;  // 2.5D: viewZprev - viewZ
 
         float diffHitDist = (payload.diffuseHitDist > 0.0f) ? max(payload.diffuseHitDist, 0.001f) : 0.0f;
         float specHitDist = (payload.specularHitDist > 0.0f) ? max(payload.specularHitDist, 0.001f) : 0.0f;
@@ -103,7 +105,7 @@ void RayGenTemporalMain() {
 
         g_guideNormalRoughness[pixelCoord] = PackNormalAndRoughness(n, roughness, materialID);
         g_guideViewZ[pixelCoord] = float4(depth, albedo);  // RGBA16F
-        g_guideMotionVectors[pixelCoord] = float4(motion, metallic, 1.0f);  // RGBA16F
+        g_guideMotionVectors[pixelCoord] = float4(motion, depthDelta, metallic);  // RGBA16F: 2.5D (XY=motion, Z=depthDelta, W=metallic)
         g_guideDiffRadianceHitDist[pixelCoord]
             = RELAX_FrontEnd_PackRadianceAndHitDist(demodulatedDiffuse, diffHitDist, false);
         g_guideSpecRadianceHitDist[pixelCoord]
