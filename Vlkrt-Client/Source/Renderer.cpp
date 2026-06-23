@@ -531,6 +531,23 @@ namespace Vlkrt
         hashCombine(sceneSignature, static_cast<uint64_t>(scene.Materials.size()));
         hashCombine(sceneSignature, static_cast<uint64_t>(scene.Lights.size()));
 
+        // Hash material properties to detect when materials change (not just count)
+        for (const auto& mat : scene.Materials) {
+            hashVec3(sceneSignature, mat.Albedo);
+            hashVec3(sceneSignature, mat.Emission);
+            hashCombine(sceneSignature, static_cast<uint64_t>(quantize(mat.Roughness)));
+            hashCombine(sceneSignature, static_cast<uint64_t>(quantize(mat.Metallic)));
+            hashCombine(sceneSignature, static_cast<uint64_t>(quantize(mat.Subsurface)));
+            hashCombine(sceneSignature, static_cast<uint64_t>(quantize(mat.Anisotropic)));
+            hashCombine(sceneSignature, static_cast<uint64_t>(quantize(mat.SpecularTint)));
+            hashCombine(sceneSignature, static_cast<uint64_t>(quantize(mat.SpecularTransmission)));
+            hashCombine(sceneSignature, static_cast<uint64_t>(quantize(mat.ClearcoatGloss)));
+            hashCombine(sceneSignature, static_cast<uint64_t>(quantize(mat.Clearcoat)));
+            hashCombine(sceneSignature, static_cast<uint64_t>(quantize(mat.Sheen)));
+            hashCombine(sceneSignature, static_cast<uint64_t>(quantize(mat.SheenTint)));
+            hashCombine(sceneSignature, static_cast<uint64_t>(quantize(mat.Eta)));
+        }
+
         for (const auto& mesh : scene.StaticMeshes) {
             hashMat4(sceneSignature, mesh.Transform);
             hashCombine(sceneSignature, static_cast<uint64_t>(mesh.MaterialIndex));
