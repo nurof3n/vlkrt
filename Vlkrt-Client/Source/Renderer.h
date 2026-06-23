@@ -137,12 +137,14 @@ namespace Vlkrt
     {
         float SceneSetupMs{ 0.0f };
         float UBOUploadMs{ 0.0f };
-        float RayTraceRecordMs{ 0.0f };
-        float NRDRecordMs{ 0.0f };
+        float RayTraceGpuMs{ 0.0f };  ///< GPU execution time measured via Vulkan timestamps
+        float NRDGpuMs{ 0.0f };       ///< GPU execution time measured via Vulkan timestamps
+        float FSRGpuMs{ 0.0f };       ///< GPU execution time measured via Vulkan timestamps
         float CommandSubmitMs{ 0.0f };
         float FrameTotalMs{ 0.0f };
         bool NRDEnabled{ false };
         bool NRDOperational{ false };
+        bool FSREnabled{ false };
         uint32_t Width{ 0 };
         uint32_t Height{ 0 };
         float EstimatedGraphicsMemoryMB{ 0.0f };
@@ -411,11 +413,15 @@ namespace Vlkrt
         std::vector<AABBTransform> m_PreviousFrameAABBTransforms;
 
         std::unordered_map<std::string, std::shared_ptr<Walnut::Image>> m_TextureCache;
-        
+
         // Scene update tracking
         const Scene* m_LastUpdatedScene{ nullptr };
         bool m_SceneDataDirty{ true };
         uint64_t m_LastSceneSignature{ 0 };
         bool m_HasSceneSignature{ false };
+
+        // GPU timestamp query pool (6 slots: RT begin/end, NRD begin/end, FSR begin/end)
+        VkQueryPool m_TimestampQueryPool{ VK_NULL_HANDLE };
+        float m_TimestampPeriodNs{ 1.0f };  ///< nanoseconds per GPU timestamp tick
     };
 }  // namespace Vlkrt

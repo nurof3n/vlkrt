@@ -223,8 +223,9 @@ namespace Vlkrt
             ImGui::Text("Frame Total: %.3f ms", passStats.FrameTotalMs);
             ImGui::Text("Scene Setup: %.3f ms", passStats.SceneSetupMs);
             ImGui::Text("UBO Upload: %.3f ms", passStats.UBOUploadMs);
-            ImGui::Text("RT Record: %.3f ms", passStats.RayTraceRecordMs);
-            ImGui::Text("NRD Record: %.3f ms", passStats.NRDRecordMs);
+            ImGui::Text("RT (GPU): %.3f ms", passStats.RayTraceGpuMs);
+            if (passStats.NRDEnabled) { ImGui::Text("NRD (GPU): %.3f ms", passStats.NRDGpuMs); }
+            if (passStats.FSREnabled) { ImGui::Text("FSR (GPU): %.3f ms", passStats.FSRGpuMs); }
             ImGui::Text("Cmd Submit+Wait: %.3f ms", passStats.CommandSubmitMs);
 
             const auto& denoiseMetrics = m_Renderer.GetDenoiseComparisonMetrics();

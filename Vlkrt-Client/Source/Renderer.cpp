@@ -56,12 +56,25 @@ namespace Vlkrt
         m_FSRUpscaler = std::make_unique<FSRUpscaler>();
         m_FSRUpscaler->Initialize(m_Device, Walnut::Application::GetPhysicalDevice(),
                 Walnut::Application::GetGraphicsQueue(), Walnut::Application::GetGraphicsQueueFamily());
+
+        // Get GPU timestamp period and create query pool for RT/NRD/FSR timing
+        VkPhysicalDeviceProperties physProps{};
+        vkGetPhysicalDeviceProperties(Walnut::Application::GetPhysicalDevice(), &physProps);
+        m_TimestampPeriodNs = physProps.limits.timestampPeriod;
+
+        VkQueryPoolCreateInfo qpci{ VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
+        qpci.queryType  = VK_QUERY_TYPE_TIMESTAMP;
+        qpci.queryCount = 6;  // slots: RT begin/end (0,1), NRD begin/end (2,3), FSR begin/end (4,5)
+        if (vkCreateQueryPool(m_Device, &qpci, nullptr, &m_TimestampQueryPool) != VK_SUCCESS)
+            m_TimestampQueryPool = VK_NULL_HANDLE;
     }
 
     Renderer::~Renderer()
     {
         m_NRDDenoiser.Shutdown();
         if (m_FSRUpscaler) m_FSRUpscaler->Shutdown();
+
+        if (m_TimestampQueryPool != VK_NULL_HANDLE) vkDestroyQueryPool(m_Device, m_TimestampQueryPool, nullptr);
 
         if (m_SBTBuffer != VK_NULL_HANDLE) {
             vkDestroyBuffer(m_Device, m_SBTBuffer, nullptr);
@@ -272,10 +285,18 @@ namespace Vlkrt
             }
 
             // OUT buffer descriptors (bindings 19-20)
+            // Only reference NRD outputs if they're valid; otherwise use dummy/safe descriptors
             VkDescriptorImageInfo outInfos[2]{};
-            outInfos[0].imageView   = m_NRDDenoiser.GetOutDiffRadianceHitDist()->GetVkImageView();
+            auto outDiff = m_NRDDenoiser.GetOutDiffRadianceHitDist();
+            auto outSpec = m_NRDDenoiser.GetOutSpecRadianceHitDist();
+
+            // Fallback to guide buffers if NRD outputs don't exist
+            if (!outDiff) outDiff = m_GuideDiffRadianceHitDist;
+            if (!outSpec) outSpec = m_GuideSpecRadianceHitDist;
+
+            outInfos[0].imageView   = outDiff->GetVkImageView();
             outInfos[0].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-            outInfos[1].imageView   = m_NRDDenoiser.GetOutSpecRadianceHitDist()->GetVkImageView();
+            outInfos[1].imageView   = outSpec->GetVkImageView();
             outInfos[1].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
             writes[7].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -596,6 +617,9 @@ namespace Vlkrt
 
         VkCommandBuffer cmd = Walnut::Application::GetCommandBuffer(true);
 
+        // Reset all 6 timestamp slots at the top of the command buffer
+        if (m_TimestampQueryPool != VK_NULL_HANDLE) vkCmdResetQueryPool(cmd, m_TimestampQueryPool, 0, 6);
+
         const bool collectDenoiseMetrics = scene.EnableNRDDenoiser && scene.EnableDenoiseMetrics
                                            && !m_ReferenceCaptureInProgress && m_QualityMetricsBuffer != VK_NULL_HANDLE;
         if (collectDenoiseMetrics) {
@@ -742,8 +766,12 @@ namespace Vlkrt
                 0, sizeof(pc), &pc);
 
         const auto rtRecordStart = Clock::now();
+        if (m_TimestampQueryPool != VK_NULL_HANDLE)
+            vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, m_TimestampQueryPool, 0);
         pvkCmdTraceRaysKHR(cmd, &activeRaygen, &m_MissRegion, &m_HitRegion, &m_CallableRegion, m_FinalImage->GetWidth(),
                 m_FinalImage->GetHeight(), 1);
+        if (m_TimestampQueryPool != VK_NULL_HANDLE)
+            vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_TimestampQueryPool, 1);
         const auto rtRecordEnd = Clock::now();
 
         const bool enableNRDThisFrame = scene.EnableNRDDenoiser && !forceTemporalReferenceCapture;
@@ -799,6 +827,8 @@ namespace Vlkrt
             denoiseParams.HasValidMatrices                   = true;
 
             const auto nrdRecordStart = Clock::now();
+            if (m_TimestampQueryPool != VK_NULL_HANDLE)
+                vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, m_TimestampQueryPool, 2);
             m_NRDDenoiser.Dispatch(cmd, m_FinalImage, denoiseParams);
 
             if (m_ComposeDenoisedPipeline != VK_NULL_HANDLE) {
@@ -832,7 +862,16 @@ namespace Vlkrt
             }
 
             const auto nrdRecordEnd = Clock::now();
-            nrdRecordMs             = msBetween(nrdRecordStart, nrdRecordEnd);
+            if (m_TimestampQueryPool != VK_NULL_HANDLE)
+                vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_TimestampQueryPool, 3);
+            nrdRecordMs = msBetween(nrdRecordStart, nrdRecordEnd);
+        }
+        else {
+            // NRD disabled: write dummy timestamps to slots 2-3 so query pool has valid values
+            if (m_TimestampQueryPool != VK_NULL_HANDLE) {
+                vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, m_TimestampQueryPool, 2);
+                vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, m_TimestampQueryPool, 3);
+            }
         }
 
         // Transition final image back to SHADER_READ_ONLY for ImGui rendering
@@ -852,7 +891,8 @@ namespace Vlkrt
             barrier.subresourceRange.layerCount     = 1;
             vkCmdPipelineBarrier(cmd,
                     VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+                    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0,
+                    nullptr, 1, &barrier);
         }
 
         const bool captureReferenceThisFrame
@@ -947,7 +987,11 @@ namespace Vlkrt
         }
 
         // FSR upscale pass
+        float fsrRecordMs = 0.0f;
         if (m_FSREnabled && m_FSRUpscaler && m_FinalImageUpscaled) {
+            const auto fsrStart = Clock::now();
+            if (m_TimestampQueryPool != VK_NULL_HANDLE)
+                vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, m_TimestampQueryPool, 4);
             {
                 VkImageMemoryBarrier barrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
                 barrier.image                = m_FinalImageUpscaled->GetVkImage();
@@ -969,6 +1013,10 @@ namespace Vlkrt
             m_FSRUpscaler->Dispatch(cmd, m_FinalImage, m_GuideDepth, m_GuideMotionVectors, m_FinalImageUpscaled,
                     m_LastCameraJitter, m_LastPassStats.FrameTotalMs, m_FirstFrame, camera.GetNearClip(),
                     camera.GetFarClip(), glm::radians(camera.GetFOV()));
+            if (m_TimestampQueryPool != VK_NULL_HANDLE)
+                vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_TimestampQueryPool, 5);
+            const auto fsrEnd = Clock::now();
+            fsrRecordMs       = msBetween(fsrStart, fsrEnd);
 
             {
                 VkImageMemoryBarrier barrier            = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
@@ -986,6 +1034,13 @@ namespace Vlkrt
                 barrier.subresourceRange.layerCount     = 1;
                 vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
                         0, 0, nullptr, 0, nullptr, 1, &barrier);
+            }
+        }
+        else {
+            // FSR disabled: write dummy timestamps to slots 4-5 so query pool has valid values
+            if (m_TimestampQueryPool != VK_NULL_HANDLE) {
+                vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, m_TimestampQueryPool, 4);
+                vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, m_TimestampQueryPool, 5);
             }
         }
 
@@ -1027,6 +1082,28 @@ namespace Vlkrt
         const auto submitStart = Clock::now();
         Walnut::Application::FlushCommandBuffer(cmd);
         const auto submitEnd = Clock::now();
+
+        // Read back GPU timestamps - don't block waiting for results, just skip if not ready yet
+        // Only compute deltas for passes that actually wrote their timestamp pair this frame.
+        if (m_TimestampQueryPool != VK_NULL_HANDLE) {
+            uint64_t ts[6]                = {};
+            const bool fsrActiveThisFrame = m_FSREnabled && m_FSRUpscaler && m_FinalImageUpscaled;
+
+            // Always read RT slots (0,1); conditionally read NRD (2,3) and FSR (4,5)
+            const uint32_t slotsToRead = fsrActiveThisFrame ? 6u : (enableNRDThisFrame ? 4u : 2u);
+            VkResult queryResult       = vkGetQueryPoolResults(m_Device, m_TimestampQueryPool, 0, slotsToRead,
+                    slotsToRead * sizeof(uint64_t), ts, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT);
+
+            // Only process if results are ready (not blocking)
+            if (queryResult == VK_SUCCESS) {
+                const double nsToMs           = static_cast<double>(m_TimestampPeriodNs) * 1e-6;
+                m_LastPassStats.RayTraceGpuMs = static_cast<float>((ts[1] - ts[0]) * nsToMs);
+                m_LastPassStats.NRDGpuMs = enableNRDThisFrame ? static_cast<float>((ts[3] - ts[2]) * nsToMs) : 0.0f;
+                m_LastPassStats.FSRGpuMs = fsrActiveThisFrame ? static_cast<float>((ts[5] - ts[4]) * nsToMs) : 0.0f;
+            }
+            // If VK_NOT_READY, just skip updating metrics this frame - they'll update next frame when results are
+            // available
+        }
 
         if (collectDenoiseMetrics && m_QualityMetricsMemory != VK_NULL_HANDLE) {
             uint32_t* metricsData = nullptr;
@@ -1099,17 +1176,17 @@ namespace Vlkrt
         m_LastCameraView       = camera.GetView();
 
 
-        const auto frameEnd              = Clock::now();
-        m_LastPassStats.SceneSetupMs     = msBetween(setupStart, setupEnd);
-        m_LastPassStats.UBOUploadMs      = msBetween(uboStart, uboEnd);
-        m_LastPassStats.RayTraceRecordMs = msBetween(rtRecordStart, rtRecordEnd);
-        m_LastPassStats.NRDRecordMs      = nrdRecordMs;
-        m_LastPassStats.CommandSubmitMs  = msBetween(submitStart, submitEnd);
-        m_LastPassStats.FrameTotalMs     = msBetween(frameStart, frameEnd);
-        m_LastPassStats.NRDEnabled       = scene.EnableNRDDenoiser;
-        m_LastPassStats.NRDOperational   = m_NRDDenoiser.IsOperational();
-        m_LastPassStats.Width            = m_FinalImage->GetWidth();
-        m_LastPassStats.Height           = m_FinalImage->GetHeight();
+        const auto frameEnd          = Clock::now();
+        m_LastPassStats.SceneSetupMs = msBetween(setupStart, setupEnd);
+        m_LastPassStats.UBOUploadMs  = msBetween(uboStart, uboEnd);
+        // RayTraceGpuMs / NRDGpuMs / FSRGpuMs are filled from GPU timestamp readback above
+        m_LastPassStats.CommandSubmitMs = msBetween(submitStart, submitEnd);
+        m_LastPassStats.FrameTotalMs    = msBetween(frameStart, frameEnd);
+        m_LastPassStats.NRDEnabled      = scene.EnableNRDDenoiser;
+        m_LastPassStats.NRDOperational  = m_NRDDenoiser.IsOperational();
+        m_LastPassStats.FSREnabled      = m_FSREnabled;
+        m_LastPassStats.Width           = m_FinalImage->GetWidth();
+        m_LastPassStats.Height          = m_FinalImage->GetHeight();
 
         uint64_t estimatedBytes = 0;
         estimatedBytes += static_cast<uint64_t>(m_VertexBufferSize);
